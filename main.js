@@ -583,11 +583,19 @@ window.addEventListener('mousemove', (e) => {
   targetCarX = normX * 5.6;
 });
 
-window.addEventListener('touchmove', (e) => {
+function handleTouchSteer(e) {
+  if (e.target.closest('button, a, input, textarea, select, .modal-panel')) return;
   if (e.touches.length > 0) {
+    document.body.classList.add('is-steering');
     const normX = (e.touches[0].clientX / window.innerWidth) * 2 - 1;
-    targetCarX = normX * 5.6;
+    targetCarX = THREE.MathUtils.clamp(normX * 6.4, -5.8, 5.8);
   }
+}
+
+window.addEventListener('touchstart', handleTouchSteer, { passive: true });
+window.addEventListener('touchmove', handleTouchSteer, { passive: true });
+window.addEventListener('touchend', () => {
+  document.body.classList.remove('is-steering');
 }, { passive: true });
 
 window.addEventListener('keydown', (e) => {
@@ -617,6 +625,10 @@ const visCtx = visCanvas.getContext('2d');
 const btnCinema = document.getElementById('btn-cinema');
 const cinemaLabel = document.getElementById('cinema-label');
 const heroWrapper = document.getElementById('hero-wrapper');
+const heroCard = document.getElementById('hero-card');
+const btnCardCollapse = document.getElementById('btn-card-collapse');
+const collapseIcon = document.getElementById('collapse-icon');
+const heroTitleBar = document.getElementById('hero-title-bar');
 
 const btnTurbo = document.getElementById('btn-turbo');
 const btnCamera = document.getElementById('btn-camera');
@@ -645,11 +657,11 @@ audioEngine.onStatusChange = (statusText, isPlaying) => {
   audioSourcePill.textContent = statusText;
   if (isPlaying) {
     audioIcon.textContent = '⏸';
-    audioLabel.textContent = 'AUDIO ONLINE';
+    audioLabel.textContent = 'PLAYING';
     btnAudioToggle.classList.add('active');
   } else {
     audioIcon.textContent = '▶';
-    audioLabel.textContent = 'ENGAGE AUDIO';
+    audioLabel.textContent = 'AUDIO';
     btnAudioToggle.classList.remove('active');
   }
 };
@@ -657,6 +669,14 @@ audioEngine.onStatusChange = (statusText, isPlaying) => {
 btnAudioToggle.addEventListener('click', () => {
   audioEngine.toggle();
 });
+
+function toggleCardCollapse() {
+  const collapsed = heroCard.classList.toggle('collapsed');
+  collapseIcon.textContent = collapsed ? '+' : '−';
+}
+
+btnCardCollapse.addEventListener('click', toggleCardCollapse);
+heroTitleBar.addEventListener('click', toggleCardCollapse);
 
 btnCinema.addEventListener('click', () => {
   const hidden = heroWrapper.classList.toggle('hud-hidden');
@@ -667,8 +687,8 @@ btnTurbo.addEventListener('click', () => {
   overdriveLocked = !overdriveLocked;
   btnTurbo.classList.toggle('active', overdriveLocked);
   btnTurbo.querySelector('span').textContent = overdriveLocked
-    ? '⚡ OVERDRIVE: ON'
-    : '⚡ OVERDRIVE: OFF';
+    ? '⚡ BOOST: ON'
+    : '⚡ BOOST';
 });
 
 btnCamera.addEventListener('click', () => {
@@ -726,7 +746,7 @@ btnGenerateLyria.addEventListener('click', async () => {
 // Draw Top-Bar Audio Spectrum Visualizer
 function renderAudioVisualizer(metrics) {
   visCtx.clearRect(0, 0, visCanvas.width, visCanvas.height);
-  const bars = 16;
+  const bars = 12;
   const barW = 4;
   const gap = 2;
 
@@ -735,7 +755,7 @@ function renderAudioVisualizer(metrics) {
       ? metrics.spectrum[i * 2] / 255
       : 0.12 + Math.sin(performance.now() * 0.004 + i * 0.5) * 0.06;
     const barH = Math.max(3, val * (visCanvas.height - 4));
-    const x = i * (barW + gap) + 2;
+    const x = i * (barW + gap) + 3;
     const y = visCanvas.height - barH - 2;
 
     visCtx.fillStyle = i % 2 === 0 ? '#00f3ff' : '#ff007f';
@@ -837,9 +857,11 @@ function animate() {
     cap.mesh.scale.y = 1 + bandEnergy * 4.0;
   }
 
-  // Smooth Camera Follow & FOV Warp on Overdrive
+  // Smooth Camera Follow & Adaptive Framing for Folded/Unfolded Screens
   const camPreset = CAMERA_MODES[currentCameraIdx];
-  const targetFov = isBoosting ? 72 : 60;
+  const isNarrowOrSquare = camera.aspect < 1.15;
+  const aspectFactor = isNarrowOrSquare ? Math.max(0, (1.15 - camera.aspect) * 14) : 0;
+  const targetFov = (isBoosting ? 72 : 60) + aspectFactor;
   if (Math.abs(camera.fov - targetFov) > 0.05) {
     camera.fov = THREE.MathUtils.lerp(camera.fov, targetFov, dt * 5);
     camera.updateProjectionMatrix();
@@ -847,7 +869,7 @@ function animate() {
 
   const desiredCamX = carGroup.position.x * 0.55 + camPreset.offset.x;
   const desiredCamY = camPreset.offset.y + Math.sin(elapsed * 2.2) * 0.06;
-  const desiredCamZ = camPreset.offset.z;
+  const desiredCamZ = camPreset.offset.z + (isNarrowOrSquare ? (1.15 - camera.aspect) * 2.6 : 0);
 
   camera.position.x = THREE.MathUtils.lerp(camera.position.x, desiredCamX, dt * 5);
   camera.position.y = THREE.MathUtils.lerp(camera.position.y, desiredCamY, dt * 5);
