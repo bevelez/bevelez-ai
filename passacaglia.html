@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VI. Passacaglia — Suite No. 7 in G Minor, HWV 432/6</title>
+  <meta name="description" content="A visual story of a life in 3D Spatio-Temporal Fourier curves set to Handel's Passacaglia in G Minor, HWV 432/6." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-deep: #020716;
+      --bg-mid: #051433;
+      --ivory: #e8f4ff;
+      --muted: rgba(216, 234, 255, 0.58);
+      --faint: rgba(130, 195, 255, 0.16);
+      --cyan: #5bc4ff;
+      --gold: #eab658;
+      --coral: #e57c58;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-deep);
+      color: var(--ivory);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      touch-action: none;
+    }
+
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      cursor: grab;
+    }
+
+    #canvas-container:active {
+      cursor: grabbing;
+    }
+
+    /* Subtle radial cosmos vignette matching the inspiration frames */
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background: radial-gradient(ellipse at 50% 44%, transparent 38%, rgba(1, 4, 14, 0.78) 100%);
+    }
+
+    /* Subtle floating invitation before first audio interaction */
+    .whisper-prompt {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      transition: opacity 0.8s ease;
+    }
+
+    .whisper-prompt.fade-out {
+      opacity: 0;
+    }
+
+    .whisper-text {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 1.42rem;
+      font-style: italic;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: var(--ivory);
+      background: rgba(3, 10, 26, 0.72);
+      padding: 12px 28px;
+      border-radius: 999px;
+      border: 1px solid rgba(91, 196, 255, 0.28);
+      box-shadow: 0 0 32px rgba(91, 196, 255, 0.14);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+
+    /* Minimalist Overlay */
+    .ui {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24px 34px 20px;
+    }
+
+    .top-bar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .piece-header {
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .composer {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.63rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: clamp(1.45rem, 2.2vw, 2.0rem);
+      font-weight: 400;
+      font-style: italic;
+      letter-spacing: -0.01em;
+      color: var(--ivory);
+      line-height: 1.05;
+    }
+
+    .top-actions {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .nav-link {
+      appearance: none;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.76rem;
+      letter-spacing: 0.03em;
+      text-decoration: none;
+      cursor: pointer;
+      padding: 4px 0;
+      border-bottom: 1px solid transparent;
+      transition: color 0.2s ease, border-color 0.2s ease;
+    }
+
+    .nav-link:hover {
+      color: var(--ivory);
+      border-bottom-color: var(--faint);
+    }
+
+    /* Bottom Mathematical Readout + Story Timeline */
+    .bottom-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      max-width: 1160px;
+      margin: 0 auto;
+    }
+
+    /* Story Caption */
+    .story-stage {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 2px;
+      pointer-events: none;
+    }
+
+    .chapter-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    .chapter-caption {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: clamp(1.15rem, 1.75vw, 1.48rem);
+      font-style: italic;
+      font-weight: 400;
+      color: var(--ivory);
+      letter-spacing: 0.01em;
+      max-width: 720px;
+      line-height: 1.25;
+    }
+
+    /* Chapter Scrubber Strip */
+    .chapter-strip {
+      pointer-events: auto;
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 6px;
+      width: 100%;
+      margin-top: 4px;
+    }
+
+    .chapter-node {
+      appearance: none;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-align: left;
+      padding: 4px 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      color: var(--muted);
+      transition: color 0.25s ease;
+    }
+
+    .chapter-node:hover,
+    .chapter-node.active {
+      color: var(--ivory);
+    }
+
+    .chapter-bar-bg {
+      width: 100%;
+      height: 2px;
+      background: rgba(130, 195, 255, 0.16);
+      position: relative;
+      overflow: hidden;
+      border-radius: 2px;
+    }
+
+    .chapter-bar-fill {
+      position: absolute;
+      inset: 0;
+      width: 0%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      transition: width 0.08s linear;
+    }
+
+    .chapter-node-meta {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 4px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.05em;
+    }
+
+    .chapter-roman {
+      color: var(--gold);
+      opacity: 0.8;
+    }
+
+    .chapter-node.active .chapter-roman {
+      opacity: 1;
+    }
+
+    .chapter-short {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.66rem;
+      font-weight: 400;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Bottom Controls Row */
+    .controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 16px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(130, 195, 255, 0.10);
+    }
+
+    .transport-group {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .pill-btn {
+      appearance: none;
+      background: rgba(91, 196, 255, 0.06);
+      border: 1px solid var(--faint);
+      color: var(--ivory);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 400;
+      letter-spacing: 0.03em;
+      padding: 6px 15px;
+      border-radius: 999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .pill-btn:hover {
+      background: rgba(91, 196, 255, 0.14);
+      border-color: rgba(91, 196, 255, 0.38);
+    }
+
+    .pill-btn.active {
+      border-color: var(--cyan);
+      color: var(--ivory);
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .pill-btn.active .status-dot {
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    .time-readout {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.66rem;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .fourier-controls {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .harmonic-slider-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .harmonic-slider {
+      appearance: none;
+      width: 96px;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(91, 196, 255, 0.24);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .harmonic-slider::-webkit-slider-thumb {
+      appearance: none;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      cursor: pointer;
+    }
+
+    .subtle-toggle {
+      appearance: none;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: inherit;
+      letter-spacing: inherit;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: color 0.2s ease;
+    }
+
+    .subtle-toggle:hover,
+    .subtle-toggle.active {
+      color: var(--ivory);
+    }
+
+    @media (max-width: 860px) {
+      .ui {
+        padding: 16px 18px;
+      }
+      .chapter-strip {
+        grid-template-columns: repeat(4, 1fr);
+      }
+      .math-formula, .fourier-controls {
+        display: none;
+      }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="canvas-container" aria-label="3D Spatio-Temporal Fourier Epicycle Narrative"></div>
+  <div class="vignette"></div>
+
+  <div class="whisper-prompt" id="whisper-prompt">
+    <div class="whisper-text">Click anywhere to begin the Passacaglia</div>
+  </div>
+
+  <div class="ui">
+    <header class="top-bar">
+      <div class="piece-header">
+        <span class="composer">G. F. Handel — Suite No. 7 in G Minor, HWV 432/6</span>
+        <h1 class="title">VI. Passacaglia</h1>
+      </div>
+
+      <nav class="top-actions">
+        <a href="./vault.html" class="nav-link">Archive</a>
+      </nav>
+    </header>
+
+    <footer class="bottom-area">
+      <div class="story-stage">
+        <div class="chapter-tag" id="chapter-tag">Movement I · 0:00 – 0:18</div>
+        <div class="chapter-caption" id="chapter-caption">
+          A couple waltzing slowly in the dark.
+        </div>
+      </div>
+
+      <div class="chapter-strip" id="chapter-strip" role="tablist" aria-label="Story Chapters"></div>
+
+      <div class="controls-row">
+        <div class="transport-group">
+          <button id="btn-play" class="pill-btn" type="button">
+            <span class="status-dot"></span>
+            <span id="play-label">Begin Story</span>
+          </button>
+          <button id="btn-restart" class="pill-btn" type="button">From 00:00</button>
+          <span class="time-readout" id="time-readout">00:00 / 02:24</span>
+        </div>
+
+        <div class="fourier-controls">
+          <div class="harmonic-slider-wrap">
+            <span>HARMONICS N = <strong id="harmonics-val" style="color: var(--ivory); font-weight: 500; display: inline-block; min-width: 32px; text-align: right;">2048</strong></span>
+            <input id="slider-n" class="harmonic-slider" type="range" min="12" max="2048" step="1" value="2048" />
+          </div>
+          <span>·</span>
+          <button id="btn-epicycles" class="subtle-toggle active" type="button">Epicycles: On</button>
+          <span>·</span>
+          <button id="btn-fourier-lens" class="subtle-toggle" type="button">Fourier Lens: Off</button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="./passacaglia-scenes.js?v=15"></script>
+  <script type="module" src="./passacaglia.js?v=15"></script>
+</body>
+</html>

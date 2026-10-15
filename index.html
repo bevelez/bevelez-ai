@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./style.css?v=5" />
 
   <script type="importmap">
     {
@@ -38,15 +38,17 @@
       </div>
 
       <div class="audio-cluster">
-        <button id="btn-secret-vault" class="secret-shard-btn" type="button" aria-label="Enter Secret Cassette Vault" title="0xVAULT //INSERT_TAPE">
-          <svg class="shard-svg" viewBox="0 0 24 16" width="18" height="13" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1" y="1" width="22" height="14" rx="2" stroke="currentColor" stroke-width="1.5"/>
-            <path d="M5 15L7 11H17L19 15" stroke="currentColor" stroke-width="1.2"/>
-            <circle cx="8" cy="7" r="2.2" stroke="currentColor" stroke-width="1.3"/>
-            <circle cx="16" cy="7" r="2.2" stroke="currentColor" stroke-width="1.3"/>
-            <line x1="10.2" y1="7" x2="13.8" y2="7" stroke="currentColor" stroke-width="1"/>
+        <a href="./vault.html" id="btn-secret-vault" class="secret-shard-btn" aria-label="Enter 3D Cassette Tape Vault" title="Open 3D Cassette Tape Archive">
+          <svg class="shard-svg" viewBox="0 0 28 19" width="24" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1" y="1" width="26" height="17" rx="3" fill="rgba(255, 42, 133, 0.25)" stroke="#ff2a85" stroke-width="1.6"/>
+            <rect x="3.5" y="3" width="21" height="9.5" rx="1.5" fill="rgba(0, 243, 255, 0.16)" stroke="#00f3ff" stroke-width="1.1"/>
+            <path d="M6 18L8.2 14H19.8L22 18" fill="rgba(255, 42, 133, 0.35)" stroke="#ff2a85" stroke-width="1.3"/>
+            <circle cx="9.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
+            <circle cx="18.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
+            <line x1="11.9" y1="7.8" x2="16.1" y2="7.8" stroke="#00f3ff" stroke-width="1.2"/>
           </svg>
-        </button>
+          <span class="shard-label">TAPES</span>
+        </a>
         <canvas id="audio-visualizer" width="76" height="24" title="Real-time Audio Spectrum"></canvas>
         <button id="btn-audio-toggle" class="cyber-btn cyber-btn-primary" type="button">
           <span class="btn-icon" id="audio-icon">▶</span>
@@ -193,6 +195,6 @@
     </div>
   </div>
 
-  <script type="module" src="./main.js"></script>
+  <script type="module" src="./main.js?v=5"></script>
 </body>
 </html>

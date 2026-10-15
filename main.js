@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { CyberAudioEngine } from './audio.js';
+import { CyberAudioEngine } from './audio.js?v=5';
 
 // ============================================================================
 // 1. INITIALIZE SCENE, CAMERA, RENDERER & BLOOM POST-PROCESSING
@@ -699,13 +699,14 @@ btnCamera.addEventListener('click', () => {
 // Secret Easter Egg Cyber-Cassette Vault Transition
 const btnSecretVault = document.getElementById('btn-secret-vault');
 if (btnSecretVault) {
-  btnSecretVault.addEventListener('click', () => {
+  btnSecretVault.addEventListener('click', (e) => {
+    if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
     overdriveLocked = true;
-    displayedMph = 999;
     speedValueEl.textContent = '999';
     document.body.classList.add('warping-to-vault');
 
-    // Quick futuristic cassette-insert synth chime
+    // Quick cassette-insert chime
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       const ctx = audioEngine.ctx || new AudioCtx();
@@ -714,13 +715,13 @@ if (btnSecretVault) {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.065);
-        gain.gain.setValueAtTime(0.14, now + idx * 0.065);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.065 + 0.32);
+        osc.frequency.setValueAtTime(freq, now + idx * 0.055);
+        gain.gain.setValueAtTime(0.12, now + idx * 0.055);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.055 + 0.28);
         osc.connect(gain);
         gain.connect(ctx.destination);
-        osc.start(now + idx * 0.065);
-        osc.stop(now + idx * 0.065 + 0.34);
+        osc.start(now + idx * 0.055);
+        osc.stop(now + idx * 0.055 + 0.3);
       });
     } catch {
       // Ignore audio errors if blocked
@@ -728,7 +729,7 @@ if (btnSecretVault) {
 
     setTimeout(() => {
       window.location.href = './vault.html';
-    }, 580);
+    }, 340);
   });
 }
 

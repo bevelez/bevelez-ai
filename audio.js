@@ -25,20 +25,6 @@ export class CyberAudioEngine {
     this.hasPrebakedLyria = false;
 
     this.onStatusChange = null;
-    this.checkPrebakedLyriaTrack();
-  }
-
-  async checkPrebakedLyriaTrack() {
-    try {
-      const res = await fetch('./assets/lyria-cyberpunk.mp3', { method: 'HEAD' });
-      if (res.ok && res.headers.get('content-type')?.includes('audio')) {
-        this.hasPrebakedLyria = true;
-        this.audioEl.src = './assets/lyria-cyberpunk.mp3';
-        this.notify('LYRIA 3.5 TRACK READY');
-      }
-    } catch {
-      // No prebaked MP3 yet; WebAudio synth will play by default
-    }
   }
 
   notify(label) {

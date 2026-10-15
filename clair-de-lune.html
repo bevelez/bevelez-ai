@@ -3,134 +3,257 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CLAIR DE LUNE // NOCTURNE 2099 — Dark Synth Interactive Demo</title>
-  <meta name="description" content="Interactive dark synth reimagining of Debussy's Clair de Lune in Three.js and Web Audio." />
+  <title>Clair de Lune — Claude Debussy</title>
+  <meta name="description" content="An interactive study of Claude Debussy's Clair de Lune for dark felt grand piano." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
   <style>
-    .nocturne-hud-card {
-      pointer-events: auto;
-      background: rgba(6, 4, 18, 0.72);
-      border: 1px solid rgba(0, 243, 255, 0.28);
-      border-radius: 10px;
-      padding: 12px 16px;
-      max-width: 390px;
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
-      transition: opacity 0.3s ease;
+    :root {
+      --bg: #08080a;
+      --ivory: #ede9e0;
+      --muted: rgba(237, 233, 224, 0.48);
+      --faint: rgba(237, 233, 224, 0.14);
+      --brass: #c8ad78;
     }
 
-    body.is-steering .nocturne-hud-card {
-      opacity: 0.3;
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
     }
 
-    .nocturne-title {
-      font-family: var(--font-display);
-      font-size: 1.05rem;
-      font-weight: 900;
-      letter-spacing: 0.06em;
-      color: #fff;
-      margin-bottom: 4px;
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg);
+      color: var(--ivory);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      touch-action: none;
     }
 
-    .nocturne-sub {
-      font-size: 0.76rem;
-      line-height: 1.38;
-      color: var(--text-muted);
-      margin-bottom: 10px;
-    }
-
-    .synth-meters {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .meter-box {
-      background: rgba(0, 243, 255, 0.06);
-      border: 1px solid rgba(0, 243, 255, 0.2);
-      border-radius: 5px;
-      padding: 5px 8px;
-    }
-
-    .meter-label {
-      font-family: var(--font-mono);
-      font-size: 0.58rem;
-      color: var(--neon-cyan);
-      letter-spacing: 0.1em;
-      display: block;
-    }
-
-    .meter-val {
-      font-family: var(--font-display);
-      font-size: 0.82rem;
-      color: #fff;
-      font-weight: 700;
-    }
-
-    .note-readout-pill {
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      color: var(--neon-magenta);
-      letter-spacing: 0.08em;
-      font-weight: 700;
-    }
-
-    /* Start Overlay Prompt so first tap unlocks Web Audio cleanly */
-    .start-veil {
+    #canvas-container {
       position: fixed;
       inset: 0;
-      z-index: 15;
-      background: radial-gradient(circle at 50% 45%, rgba(8, 4, 24, 0.55), rgba(3, 1, 10, 0.88));
-      backdrop-filter: blur(6px);
+      z-index: 1;
+      cursor: pointer;
+    }
+
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 54%, transparent 45%, rgba(4, 4, 6, 0.86) 100%);
+    }
+
+    /* Subtle floating invitation before first interaction (no modal box) */
+    .whisper-prompt {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
       display: flex;
+       flex-direction: column;
       align-items: center;
       justify-content: center;
-      padding: 20px;
-      transition: opacity 0.45s ease;
-    }
-
-    .start-veil.hidden-veil {
-      opacity: 0;
       pointer-events: none;
+      transition: opacity 0.8s ease;
     }
 
-    .start-box {
-      text-align: center;
-      max-width: 440px;
-      background: rgba(9, 6, 26, 0.88);
-      border: 1px solid var(--neon-cyan);
-      border-radius: 12px;
-      padding: 26px 24px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.85), 0 0 35px rgba(0, 243, 255, 0.22);
+    .whisper-prompt.fade-out {
+      opacity: 0;
     }
 
-    .start-box h2 {
-      font-family: var(--font-display);
-      font-size: 1.35rem;
-      margin: 10px 0 8px;
-      color: #fff;
+    .whisper-text {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 1.45rem;
+      font-style: italic;
+      font-weight: 400;
+      letter-spacing: 0.02em;
+      color: var(--ivory);
+      background: rgba(8, 8, 10, 0.55);
+      padding: 10px 24px;
+      border-radius: 999px;
+      border: 1px solid var(--faint);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
     }
 
-    .start-box p {
-      font-size: 0.84rem;
-      line-height: 1.48;
-      color: var(--text-muted);
-      margin-bottom: 18px;
+    /* Minimalist Architectural Overlay */
+    .ui {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 28px 36px;
     }
 
-    @media (max-width: 640px) {
-      .nocturne-hud-card {
-        max-width: 100%;
-        padding: 9px 12px;
+    .top-bar {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .piece-header {
+      pointer-events: auto;
+    }
+
+    .piece-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 1.75rem;
+      font-weight: 500;
+      font-style: italic;
+      color: var(--ivory);
+      line-height: 1.05;
+    }
+
+    .piece-sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-top: 5px;
+    }
+
+    .top-nav {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .nav-link {
+      appearance: none;
+      border: none;
+      background: none;
+      color: var(--muted);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 400;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+      color: var(--ivory);
+    }
+
+    /* Minimal Bottom Bar */
+    .bottom-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      border-top: 1px solid var(--faint);
+      padding-top: 16px;
+    }
+
+    .left-status {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .play-btn {
+      appearance: none;
+      border: none;
+      background: none;
+      color: var(--ivory);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--brass);
+      transition: opacity 0.25s ease;
+    }
+
+    .harmonic-label {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 1.05rem;
+      font-style: italic;
+      color: var(--muted);
+    }
+
+    /* Hairline Acoustic Controls */
+    .acoustics-group {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .control-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .hairline-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 72px;
+      height: 1px;
+      background: rgba(237, 233, 224, 0.28);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .hairline-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--ivory);
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+
+    .hairline-slider::-webkit-slider-thumb:hover {
+      transform: scale(1.25);
+    }
+
+    @media (max-width: 768px) {
+      .ui {
+        padding: 18px 20px;
       }
-      .nocturne-sub {
-        font-size: 0.7rem;
-        margin-bottom: 6px;
+      .bottom-bar {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .acoustics-group {
+        width: 100%;
+        justify-content: space-between;
+        gap: 12px;
       }
     }
   </style>
@@ -145,99 +268,59 @@
   </script>
 </head>
 <body>
-  <div id="canvas-container" aria-hidden="true"></div>
-  <div class="crt-overlay" aria-hidden="true"></div>
+  <div id="canvas-container" aria-label="3D Dark Grand Piano"></div>
+  <div class="vignette" aria-hidden="true"></div>
 
-  <!-- Initial Tap-to-Begin Overlay -->
-  <div class="start-veil" id="start-veil">
-    <div class="start-box">
-      <span class="cyber-badge">TAPE_01 // DEBUSSY × DARK SYNTH</span>
-      <h2>CLAIR DE LUNE // 2099</h2>
-      <p>
-        An interactive dark-synth nocturne. Move or drag vertically to open the <strong>CS-80 analog filter &amp; shimmer</strong>, brush across the <strong>9 laser-harp monoliths</strong> to pluck harmonies in D♭ major, or switch to <strong>Conduct Mode</strong> to play each chord of <em>Clair de Lune</em> at your own pace.
-      </p>
-      <button id="btn-start-experience" class="cyber-btn cyber-btn-primary" type="button">
-        <span>▶ ENGAGE NOCTURNE</span>
-      </button>
-    </div>
+  <div class="whisper-prompt" id="whisper-prompt">
+    <div class="whisper-text">Touch any key to begin</div>
   </div>
 
-  <div class="ui-layer">
-    <!-- Top Bar -->
+  <div class="ui">
     <header class="top-bar">
-      <div class="brand-cluster">
-        <span class="status-dot"></span>
-        <span class="brand-domain">TAPE_01</span>
-        <span class="brand-divider">//</span>
-        <span class="brand-status">CLAIR_DE_LUNE.SYNTH</span>
+      <div class="piece-header">
+        <h1 class="piece-title">Clair de Lune</h1>
+        <div class="piece-sub">Claude Debussy · Suite bergamasque, L. 75</div>
       </div>
 
-      <div class="audio-cluster">
-        <button id="btn-play-pause" class="cyber-btn cyber-btn-primary" type="button">
-          <span id="play-icon">⏸</span>
-          <span id="play-label">FLOWING</span>
+      <nav class="top-nav">
+        <button id="btn-mode" class="nav-link" type="button" title="Switch between automatic performance and playing each chord by touch">
+          Mode: Auto
         </button>
-        <button id="btn-mode-toggle" class="cyber-btn cyber-btn-accent" type="button" title="Switch between Auto-Flow and Tap-to-Conduct Mode">
-          <span id="mode-label">MODE: AUTO-FLOW</span>
+        <button id="btn-camera" class="nav-link" type="button">
+          Perspective
         </button>
-        <a href="./vault.html" class="cyber-btn cyber-btn-ghost">
-          <span>⏏ EJECT TO VAULT</span>
-        </a>
-      </div>
+        <a href="./vault.html" class="nav-link">Archive</a>
+      </nav>
     </header>
 
-    <!-- Compact Top-Left Sculpting Telemetry Card -->
-    <main class="hero-wrapper" id="nocturne-card-wrapper">
-      <section class="nocturne-hud-card" id="nocturne-card">
-        <div class="badge-row">
-          <span class="cyber-badge">D♭ MAJOR // 9/8 RUBATO</span>
-          <span class="note-readout-pill" id="chord-readout">CHORD: D♭maj9</span>
-          <button id="btn-minimize-nocturne" class="card-collapse-btn" type="button" aria-label="Minimize Card">
-            <span id="nocturne-collapse-icon">−</span>
-          </button>
-        </div>
-
-        <h1 class="nocturne-title" id="nocturne-title-bar">CLAIR DE LUNE // NOCTURNE</h1>
-
-        <div class="card-collapsible-body">
-          <p class="nocturne-sub" id="interaction-hint">
-            <strong>Drag Y (Up/Down):</strong> Filter &amp; Shimmer • <strong>Brush Pillars:</strong> Pluck Synth Harp • <strong>Tap Water:</strong> Trigger Next Chord
-          </p>
-
-          <div class="synth-meters">
-            <div class="meter-box">
-              <span class="meter-label">CS-80 FILTER CUTOFF</span>
-              <span class="meter-val" id="filter-readout">1,420 Hz</span>
-            </div>
-            <div class="meter-box">
-              <span class="meter-label">ANALOG DETUNE / SPACE</span>
-              <span class="meter-val" id="shimmer-readout">64%</span>
-            </div>
-          </div>
-        </div>
-      </section>
-    </main>
-
-    <!-- Bottom Bar -->
     <footer class="bottom-bar">
-      <div class="telemetry-group">
-        <div class="speed-readout">
-          <span class="speed-value" id="step-counter">01 / 32</span>
-          <span class="speed-unit">SCORE</span>
-        </div>
+      <div class="left-status">
+        <button id="btn-play" class="play-btn" type="button">
+          <span class="status-dot" id="status-dot"></span>
+          <span id="play-label">Playing</span>
+        </button>
+        <span class="harmonic-label" id="harmonic-label">Andante très expressif — D♭ major</span>
       </div>
 
-      <div class="controls-group">
-        <button id="btn-trigger-note" class="cyber-btn cyber-btn-small" type="button">
-          <span>✦ PULSE NEXT CHORD</span>
-        </button>
-        <button id="btn-drone-hold" class="cyber-btn cyber-btn-small" type="button">
-          <span id="drone-label">∞ FREEZE DRONE: OFF</span>
-        </button>
+      <div class="acoustics-group">
+        <label class="control-item">
+          <span>Felt</span>
+          <input id="slider-felt" class="hairline-slider" type="range" min="15" max="95" value="76" />
+        </label>
+
+        <label class="control-item">
+          <span>Space</span>
+          <input id="slider-reverb" class="hairline-slider" type="range" min="15" max="95" value="70" />
+        </label>
+
+        <label class="control-item">
+          <span>Tempo</span>
+          <input id="slider-tempo" class="hairline-slider" type="range" min="65" max="135" value="100" />
+        </label>
       </div>
     </footer>
   </div>
 
-  <script type="module" src="./clair-de-lune.js"></script>
+  <script type="module" src="./clair-de-lune.js?v=6"></script>
 </body>
 </html>

@@ -1,963 +1,659 @@
 import * as THREE from 'three';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ============================================================================
-// 1. AUTHENTIC DEBUSSY "CLAIR DE LUNE" SCORE (IN D♭ MAJOR, 9/8 RUBATO)
+// 1. CLAUDE DEBUSSY — CLAIR DE LUNE (L. 75, III — D♭ MAJOR, 9/8)
 // ============================================================================
-// Each step represents a harmonic/melodic phrase of Clair de Lune:
-// - bass: deep sub-bass MIDI root (or null to sustain previous)
-// - chord: warm analog pad dyad/triad MIDI notes
-// - melody: array of { midi, delay, dur, vel } for expressive rubato triplets & lead
-// - label: chord symbol displayed in the HUD
-// - wait: time (seconds) before next step in Auto-Flow mode
 const CLAIR_DE_LUNE_SCORE = [
-  // Measure 1: Iconic quiet opening in Db Major
-  {
-    label: 'D♭maj7 (sus)',
-    bass: 37, // Db2
-    chord: [61, 65, 68], // Db4, F4, Ab4
-    melody: [{ midi: 68, delay: 0, dur: 1.6, vel: 0.6 }],
-    wait: 1.15
-  },
-  {
-    label: 'D♭maj7',
-    bass: null,
-    chord: [61, 65],
-    melody: [
-      { midi: 77, delay: 0.0, dur: 2.2, vel: 0.92 }, // High F5
-      { midi: 73, delay: 0.95, dur: 2.0, vel: 0.85 } // Db5
-    ],
-    wait: 2.25
-  },
-  // Measure 2: Gbmaj7 suspension & triplet ornament (Bb4 - C5 - Db5 - Bb4)
-  {
-    label: 'G♭maj9 / D♭',
-    bass: 37,
-    chord: [54, 63, 66], // Gb3, Eb4, Gb4
-    melody: [
-      { midi: 70, delay: 0.0, dur: 0.48, vel: 0.78 }, // Bb4
-      { midi: 72, delay: 0.38, dur: 0.48, vel: 0.82 }, // C5
-      { midi: 73, delay: 0.76, dur: 0.65, vel: 0.88 }, // Db5
-      { midi: 70, delay: 1.22, dur: 2.1, vel: 0.76 }  // Bb4
-    ],
-    wait: 2.75
-  },
-  // Measure 3: Ebm7 / Ab7 expressive triplet (Ab4 - Bb4 - Ab4 - Db5 - Bb4 - Ab4)
-  {
-    label: 'E♭m9 / D♭',
-    bass: 39, // Eb2
-    chord: [54, 61, 65], // Gb3, Db4, F4
-    melody: [
-      { midi: 68, delay: 0.0, dur: 0.45, vel: 0.75 }, // Ab4
-      { midi: 70, delay: 0.36, dur: 0.45, vel: 0.8 },  // Bb4
-      { midi: 68, delay: 0.72, dur: 0.55, vel: 0.78 }, // Ab4
-      { midi: 73, delay: 1.15, dur: 0.55, vel: 0.9 },  // Db5
-      { midi: 70, delay: 1.55, dur: 0.55, vel: 0.78 }, // Bb4
-      { midi: 68, delay: 1.95, dur: 1.6, vel: 0.72 }  // Ab4
-    ],
-    wait: 2.65
-  },
-  // Measure 4: Resolution to Gb4 -> F4
-  {
-    label: 'A♭13sus4',
-    bass: 44, // Ab2
-    chord: [56, 63, 66], // Ab3, Eb4, Gb4
-    melody: [
-      { midi: 66, delay: 0.0, dur: 1.4, vel: 0.78 }, // Gb4
-      { midi: 68, delay: 0.7, dur: 0.9, vel: 0.72 }, // Ab4
-      { midi: 66, delay: 1.25, dur: 1.2, vel: 0.7 }  // Gb4
-    ],
-    wait: 2.15
-  },
-  {
-    label: 'D♭maj9',
-    bass: 37, // Db2
-    chord: [49, 56, 61, 65], // Db3, Ab3, Db4, F4
-    melody: [
-      { midi: 65, delay: 0.0, dur: 2.4, vel: 0.85 } // F4
-    ],
-    wait: 2.1
-  },
-  // Measure 5-6: Second lower statement (F4 - Db4 -> Bb3 - C4 - Db4 - F4 - Db4)
-  {
-    label: 'D♭6/9',
-    bass: 37,
-    chord: [53, 56, 61],
-    melody: [
-      { midi: 65, delay: 0.0, dur: 1.2, vel: 0.8 },  // F4
-      { midi: 61, delay: 0.85, dur: 1.5, vel: 0.76 } // Db4
-    ],
-    wait: 1.9
-  },
-  {
-    label: 'B♭m9',
-    bass: 34, // Bb1
-    chord: [53, 58, 61], // F3, Bb3, Db4
-    melody: [
-      { midi: 58, delay: 0.0, dur: 0.42, vel: 0.75 }, // Bb3
-      { midi: 60, delay: 0.35, dur: 0.42, vel: 0.78 }, // C4
-      { midi: 61, delay: 0.70, dur: 0.65, vel: 0.85 }, // Db4
-      { midi: 65, delay: 1.20, dur: 0.85, vel: 0.9 },  // F4
-      { midi: 61, delay: 1.85, dur: 1.5, vel: 0.78 }  // Db4
-    ],
-    wait: 2.65
-  },
-  // Measure 7: Eb7 / Abmaj9 rising phrase (C4 - Db4 - Eb4 - Ab4 - F4)
-  {
-    label: 'E♭m11',
-    bass: 39, // Eb2
-    chord: [51, 58, 63], // Eb3, Bb3, Eb4
-    melody: [
-      { midi: 60, delay: 0.0, dur: 0.42, vel: 0.76 }, // C4
-      { midi: 61, delay: 0.35, dur: 0.42, vel: 0.8 },  // Db4
-      { midi: 63, delay: 0.70, dur: 0.65, vel: 0.86 }, // Eb4
-      { midi: 68, delay: 1.22, dur: 0.95, vel: 0.94 }, // Ab4
-      { midi: 65, delay: 1.90, dur: 1.5, vel: 0.82 }  // F4
-    ],
-    wait: 2.65
-  },
-  // Measure 8: Descending sigh (Eb4 - Db4 - C4 - Bb3)
-  {
-    label: 'A♭7sus4',
-    bass: 32, // Ab1
-    chord: [56, 61, 63],
-    melody: [
-      { midi: 63, delay: 0.0, dur: 0.5, vel: 0.8 },  // Eb4
-      { midi: 61, delay: 0.42, dur: 0.5, vel: 0.76 }, // Db4
-      { midi: 60, delay: 0.84, dur: 0.6, vel: 0.74 }, // C4
-      { midi: 63, delay: 1.35, dur: 0.7, vel: 0.8 },  // Eb4
-      { midi: 61, delay: 1.85, dur: 1.6, vel: 0.75 }  // Db4
-    ],
-    wait: 2.6
-  },
-  // Measure 9-12: Deep Blade Runner Sub-Octave Crescendo & Rolling Arpeggios
-  {
-    label: 'D♭maj9 (SUB)',
-    bass: 25, // Deep Db1 sub-bass!
-    chord: [49, 56, 61, 65],
-    melody: [
-      { midi: 56, delay: 0.0, dur: 0.35, vel: 0.65 },
-      { midi: 61, delay: 0.28, dur: 0.35, vel: 0.7 },
-      { midi: 65, delay: 0.56, dur: 0.35, vel: 0.78 },
-      { midi: 68, delay: 0.84, dur: 1.8, vel: 0.92 }, // Ab4
-      { midi: 73, delay: 1.5, dur: 2.2, vel: 0.96 }   // Db5
-    ],
-    wait: 2.6
-  },
-  {
-    label: 'G♭maj7#11',
-    bass: 30, // Gb1
-    chord: [54, 58, 61, 65],
-    melody: [
-      { midi: 70, delay: 0.0, dur: 0.4, vel: 0.85 },  // Bb4
-      { midi: 73, delay: 0.35, dur: 0.4, vel: 0.88 }, // Db5
-      { midi: 75, delay: 0.70, dur: 0.55, vel: 0.92 }, // Eb5
-      { midi: 77, delay: 1.15, dur: 1.9, vel: 0.98 }, // F5
-      { midi: 73, delay: 1.85, dur: 1.6, vel: 0.86 }  // Db5
-    ],
-    wait: 2.65
-  },
-  {
-    label: 'Fm11',
-    bass: 29, // F1
-    chord: [53, 56, 60, 65],
-    melody: [
-      { midi: 72, delay: 0.0, dur: 0.45, vel: 0.84 }, // C5
-      { midi: 73, delay: 0.38, dur: 0.45, vel: 0.86 }, // Db5
-      { midi: 75, delay: 0.76, dur: 0.85, vel: 0.94 }, // Eb5
-      { midi: 68, delay: 1.45, dur: 1.8, vel: 0.82 }  // Ab4
-    ],
-    wait: 2.4
-  },
-  {
-    label: 'E♭m9',
-    bass: 27, // Eb1
-    chord: [51, 54, 58, 65],
-    melody: [
-      { midi: 66, delay: 0.0, dur: 0.45, vel: 0.8 },  // Gb4
-      { midi: 68, delay: 0.38, dur: 0.45, vel: 0.84 }, // Ab4
-      { midi: 70, delay: 0.76, dur: 0.95, vel: 0.9 },  // Bb4
-      { midi: 65, delay: 1.5, dur: 1.8, vel: 0.8 }    // F4
-    ],
-    wait: 2.35
-  },
-  {
-    label: 'A♭13 (NOCTURNE)',
-    bass: 32, // Ab1
-    chord: [56, 61, 63, 66],
-    melody: [
-      { midi: 63, delay: 0.0, dur: 0.5, vel: 0.78 },  // Eb4
-      { midi: 65, delay: 0.45, dur: 0.5, vel: 0.82 }, // F4
-      { midi: 66, delay: 0.90, dur: 0.7, vel: 0.85 }, // Gb4
-      { midi: 63, delay: 1.5, dur: 1.6, vel: 0.76 }   // Eb4
-    ],
-    wait: 2.35
-  },
-  {
-    label: 'D♭maj9 (RESOLVE)',
-    bass: 25, // Db1
-    chord: [49, 56, 60, 65],
-    melody: [
-      { midi: 61, delay: 0.0, dur: 0.4, vel: 0.8 },   // Db4
-      { midi: 65, delay: 0.35, dur: 0.4, vel: 0.82 }, // F4
-      { midi: 68, delay: 0.70, dur: 0.4, vel: 0.86 }, // Ab4
-      { midi: 72, delay: 1.05, dur: 0.5, vel: 0.9 },  // C5
-      { midi: 73, delay: 1.45, dur: 2.8, vel: 0.95 }  // Db5
-    ],
-    wait: 3.1
-  }
+  { label: 'Measure 1 — Andante très expressif (D♭ major)', notes: [{ n: 'Db3', v: 0.34, d: 3.6, delay: 0 }, { n: 'Ab3', v: 0.36, d: 3.6, delay: 28 }, { n: 'F4', v: 0.40, d: 3.6, delay: 55 }, { n: 'F5', v: 0.54, d: 2.5, delay: 190 }, { n: 'Ab5', v: 0.60, d: 2.5, delay: 205 }], wait: 1.6 },
+  { label: 'Measure 1 — D♭5 · F5', notes: [{ n: 'Db5', v: 0.48, d: 2.6, delay: 0 }, { n: 'F5', v: 0.52, d: 2.6, delay: 14 }], wait: 1.5 },
+
+  { label: 'Measure 2 — G♭maj7', notes: [{ n: 'Gb2', v: 0.36, d: 3.2, delay: 0 }, { n: 'Db3', v: 0.36, d: 3.2, delay: 25 }, { n: 'Bb3', v: 0.40, d: 3.2, delay: 50 }, { n: 'Eb5', v: 0.52, d: 0.9, delay: 75 }, { n: 'Gb5', v: 0.56, d: 0.9, delay: 88 }], wait: 0.64 },
+  { label: 'Measure 2 — F5 · A♭5', notes: [{ n: 'F5', v: 0.54, d: 0.9, delay: 0 }, { n: 'Ab5', v: 0.58, d: 0.9, delay: 12 }], wait: 0.64 },
+  { label: 'Measure 2 — D♭5 · F5', notes: [{ n: 'Db5', v: 0.46, d: 2.8, delay: 0 }, { n: 'F5', v: 0.50, d: 2.8, delay: 14 }], wait: 1.65 },
+
+  { label: 'Measure 3 — A♭7 / F', notes: [{ n: 'F2', v: 0.35, d: 3.0, delay: 0 }, { n: 'C3', v: 0.37, d: 3.0, delay: 25 }, { n: 'Ab3', v: 0.40, d: 3.0, delay: 45 }, { n: 'C5', v: 0.50, d: 0.9, delay: 70 }, { n: 'Eb5', v: 0.54, d: 0.9, delay: 82 }], wait: 0.64 },
+  { label: 'Measure 3 — D♭5 · F5', notes: [{ n: 'Db5', v: 0.52, d: 0.9, delay: 0 }, { n: 'F5', v: 0.56, d: 0.9, delay: 12 }], wait: 0.64 },
+  { label: 'Measure 3 — C5 · E♭5', notes: [{ n: 'C5', v: 0.46, d: 2.6, delay: 0 }, { n: 'Eb5', v: 0.50, d: 2.6, delay: 12 }, { n: 'Gb4', v: 0.40, d: 2.4, delay: 30 }], wait: 1.55 },
+
+  { label: 'Measure 4 — E♭m9', notes: [{ n: 'Eb2', v: 0.36, d: 3.2, delay: 0 }, { n: 'Bb2', v: 0.38, d: 3.2, delay: 25 }, { n: 'Gb3', v: 0.40, d: 3.2, delay: 50 }, { n: 'Bb4', v: 0.50, d: 0.9, delay: 75 }, { n: 'Db5', v: 0.54, d: 0.9, delay: 88 }], wait: 0.64 },
+  { label: 'Measure 4 — C5 · E♭5', notes: [{ n: 'C5', v: 0.51, d: 0.9, delay: 0 }, { n: 'Eb5', v: 0.55, d: 0.9, delay: 12 }], wait: 0.64 },
+  { label: 'Measure 4 — A♭13', notes: [{ n: 'Ab2', v: 0.38, d: 2.6, delay: 0 }, { n: 'Gb3', v: 0.40, d: 2.6, delay: 25 }, { n: 'Bb4', v: 0.46, d: 2.4, delay: 50 }, { n: 'Db5', v: 0.50, d: 2.4, delay: 62 }], wait: 1.48 },
+
+  { label: 'Measure 5 — D♭maj9', notes: [{ n: 'Db2', v: 0.38, d: 3.5, delay: 0 }, { n: 'Ab2', v: 0.40, d: 3.5, delay: 30 }, { n: 'F3', v: 0.42, d: 3.5, delay: 60 }, { n: 'F4', v: 0.48, d: 1.2, delay: 90 }, { n: 'Ab4', v: 0.54, d: 1.2, delay: 105 }], wait: 0.72 },
+  { label: 'Measure 5 — G♭4 · B♭4', notes: [{ n: 'Gb4', v: 0.50, d: 0.9, delay: 0 }, { n: 'Bb4', v: 0.54, d: 0.9, delay: 14 }], wait: 0.58 },
+  { label: 'Measure 5 — F4 · A♭4', notes: [{ n: 'F4', v: 0.46, d: 2.4, delay: 0 }, { n: 'Ab4', v: 0.50, d: 2.4, delay: 14 }], wait: 1.35 },
+
+  { label: 'Measure 6 — G♭maj7', notes: [{ n: 'Gb2', v: 0.36, d: 3.0, delay: 0 }, { n: 'Db3', v: 0.38, d: 3.0, delay: 28 }, { n: 'Eb4', v: 0.48, d: 0.9, delay: 55 }, { n: 'Gb4', v: 0.52, d: 0.9, delay: 68 }], wait: 0.62 },
+  { label: 'Measure 6 — F4 · A♭4', notes: [{ n: 'F4', v: 0.50, d: 0.9, delay: 0 }, { n: 'Ab4', v: 0.53, d: 0.9, delay: 12 }], wait: 0.62 },
+  { label: 'Measure 6 — A♭7sus', notes: [{ n: 'Ab2', v: 0.38, d: 2.8, delay: 0 }, { n: 'Eb3', v: 0.40, d: 2.8, delay: 25 }, { n: 'Eb4', v: 0.44, d: 2.5, delay: 50 }, { n: 'Gb4', v: 0.48, d: 2.5, delay: 65 }], wait: 1.55 },
+
+  { label: 'Measure 7 — E♭m7 / A♭', notes: [{ n: 'Ab2', v: 0.35, d: 3.2, delay: 0 }, { n: 'Gb3', v: 0.38, d: 3.2, delay: 25 }, { n: 'Db4', v: 0.46, d: 1.0, delay: 55 }, { n: 'F4', v: 0.50, d: 1.0, delay: 68 }], wait: 0.65 },
+  { label: 'Measure 7 — E♭4 · G♭4', notes: [{ n: 'Eb4', v: 0.48, d: 0.9, delay: 0 }, { n: 'Gb4', v: 0.52, d: 0.9, delay: 12 }], wait: 0.62 },
+  { label: 'Measure 8 — B♭m7', notes: [{ n: 'Bb2', v: 0.40, d: 3.2, delay: 0 }, { n: 'F3', v: 0.42, d: 3.2, delay: 30 }, { n: 'Db4', v: 0.50, d: 2.8, delay: 60 }, { n: 'F4', v: 0.54, d: 2.8, delay: 75 }], wait: 1.65 },
+
+  { label: 'Measure 9 — Tempo rubato (D♭ major)', notes: [{ n: 'Db2', v: 0.44, d: 4.0, delay: 0 }, { n: 'Ab2', v: 0.46, d: 4.0, delay: 35 }, { n: 'Db3', v: 0.48, d: 3.8, delay: 70 }, { n: 'F3', v: 0.50, d: 3.8, delay: 105 }, { n: 'Ab4', v: 0.56, d: 3.2, delay: 145 }, { n: 'F5', v: 0.64, d: 3.2, delay: 185 }, { n: 'Ab5', v: 0.68, d: 3.2, delay: 215 }], wait: 1.75 },
+  { label: 'Measure 10 — G♭6 / D♭', notes: [{ n: 'Db2', v: 0.40, d: 3.5, delay: 0 }, { n: 'Bb2', v: 0.44, d: 3.5, delay: 35 }, { n: 'Gb3', v: 0.48, d: 3.5, delay: 70 }, { n: 'Eb4', v: 0.52, d: 3.0, delay: 105 }, { n: 'Db5', v: 0.62, d: 3.0, delay: 145 }, { n: 'F5', v: 0.66, d: 3.0, delay: 175 }], wait: 1.55 },
+
+  { label: 'Un poco mosso — D♭ major arpeggio', notes: [{ n: 'Db2', v: 0.46, d: 3.8, delay: 0 }, { n: 'Ab2', v: 0.40, d: 2.2, delay: 140 }, { n: 'Db3', v: 0.42, d: 2.2, delay: 280 }, { n: 'F3', v: 0.44, d: 2.2, delay: 420 }, { n: 'Ab3', v: 0.46, d: 2.2, delay: 560 }, { n: 'F4', v: 0.62, d: 2.6, delay: 280 }, { n: 'Ab4', v: 0.58, d: 1.8, delay: 700 }], wait: 1.15 },
+  { label: 'Un poco mosso — G♭ / D♭', notes: [{ n: 'Db2', v: 0.44, d: 3.8, delay: 0 }, { n: 'Bb2', v: 0.40, d: 2.2, delay: 140 }, { n: 'Db3', v: 0.42, d: 2.2, delay: 280 }, { n: 'Gb3', v: 0.44, d: 2.2, delay: 420 }, { n: 'Bb3', v: 0.46, d: 2.2, delay: 560 }, { n: 'Bb4', v: 0.64, d: 2.0, delay: 140 }, { n: 'Ab4', v: 0.58, d: 1.8, delay: 560 }], wait: 1.15 },
+  { label: 'Un poco mosso — E♭m9', notes: [{ n: 'Eb2', v: 0.46, d: 3.8, delay: 0 }, { n: 'Bb2', v: 0.40, d: 2.2, delay: 140 }, { n: 'Gb3', v: 0.42, d: 2.2, delay: 280 }, { n: 'Bb3', v: 0.44, d: 2.2, delay: 420 }, { n: 'Db5', v: 0.66, d: 2.2, delay: 140 }, { n: 'Bb4', v: 0.60, d: 1.8, delay: 560 }], wait: 1.15 },
+  { label: 'Un poco mosso — A♭9', notes: [{ n: 'Ab2', v: 0.46, d: 4.0, delay: 0 }, { n: 'Eb3', v: 0.40, d: 2.4, delay: 140 }, { n: 'Gb3', v: 0.42, d: 2.4, delay: 280 }, { n: 'C4', v: 0.44, d: 2.4, delay: 420 }, { n: 'Gb4', v: 0.62, d: 2.2, delay: 140 }, { n: 'F4', v: 0.56, d: 2.2, delay: 560 }, { n: 'Eb4', v: 0.52, d: 2.4, delay: 840 }], wait: 1.45 }
 ];
 
-// 9 Laser Harp Monolith Scale Notes (D♭ Major / B♭ Minor Pentatonic + Maj7)
-const HARP_MONOLITH_NOTES = [
-  { midi: 61, name: 'D♭4', color: 0x00f3ff },
-  { midi: 63, name: 'E♭4', color: 0x5a7dff },
-  { midi: 65, name: 'F4',  color: 0xff007f },
-  { midi: 66, name: 'G♭4', color: 0x9d4edd },
-  { midi: 68, name: 'A♭4', color: 0x00f3ff },
-  { midi: 70, name: 'B♭4', color: 0xff007f },
-  { midi: 72, name: 'C5',  color: 0x5a7dff },
-  { midi: 73, name: 'D♭5', color: 0x00f3ff },
-  { midi: 77, name: 'F5',  color: 0xff55aa }
-];
+const NOTE_OFFSETS = {
+  C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4,
+  F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11
+};
+
+function noteToMidi(noteStr) {
+  const match = noteStr.match(/^([A-G][b#]?)(\d)$/);
+  if (!match) return 60;
+  const [, pitch, oct] = match;
+  return (parseInt(oct, 10) + 1) * 12 + NOTE_OFFSETS[pitch];
+}
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
 
 // ============================================================================
-// 2. DARK SYNTH WEB AUDIO ENGINE (CS-80 BRASS/PAD + SHIMMER + CATHEDRAL REVERB)
+// 2. DARK FELT GRAND PIANO ENGINE
 // ============================================================================
-class ClairDeLuneSynth {
+class DarkFeltPianoEngine {
   constructor() {
     this.ctx = null;
-    this.masterFilter = null;
     this.masterGain = null;
-    this.reverbNode = null;
-    this.delayNode = null;
-    this.analyser = null;
-    this.freqData = new Uint8Array(64);
+    this.dryGain = null;
+    this.reverbGain = null;
+    this.pianoWave = null;
+    this.hammerNoiseBuffer = null;
 
-    // Live interactive expression parameters (0..1)
-    this.filterNorm = 0.52;   // Controlled by Y-axis
-    this.detuneNorm = 0.5;    // Controlled by X-axis
-    this.droneActive = false;
-    this.droneOscs = [];
+    this.feltDarkness = 0.76;
+    this.reverbAmount = 0.70;
   }
 
   init() {
-    if (this.ctx) return;
+    if (this.ctx) {
+      if (this.ctx.state === 'suspended') this.ctx.resume();
+      return;
+    }
+
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AudioCtx();
 
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.8;
+    this.masterGain.gain.value = 0.85;
 
-    // Master interactive CS-80 Low-Pass Filter
-    this.masterFilter = this.ctx.createBiquadFilter();
-    this.masterFilter.type = 'lowpass';
-    this.masterFilter.frequency.value = 1420;
-    this.masterFilter.Q.value = 2.4;
+    this.soundboardWarmth = this.ctx.createBiquadFilter();
+    this.soundboardWarmth.type = 'peaking';
+    this.soundboardWarmth.frequency.value = 200;
+    this.soundboardWarmth.Q.value = 0.85;
+    this.soundboardWarmth.gain.value = 3.8;
 
-    this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 128;
-    this.analyser.smoothingTimeConstant = 0.85;
-    this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.dryGain = this.ctx.createGain();
+    this.dryGain.gain.value = 0.68;
 
-    // Deep 3.8s Dark Cathedral Reverb
-    this.reverbNode = this.createDarkReverb(3.8, 2.1);
-    const reverbGain = this.ctx.createGain();
-    reverbGain.gain.value = 0.52;
+    this.reverbGain = this.ctx.createGain();
+    this.reverbGain.gain.value = this.reverbAmount * 0.75;
 
-    // Stereo Tape Delay
-    this.delayNode = this.ctx.createDelay(2.0);
-    this.delayNode.delayTime.value = 0.42;
-    const delayFb = this.ctx.createGain();
-    delayFb.gain.value = 0.34;
-    const delayFilter = this.ctx.createBiquadFilter();
-    delayFilter.type = 'lowpass';
-    delayFilter.frequency.value = 1800;
+    this.convolver = this.createDarkHallReverb(4.0, 2.4);
+    const reverbDamping = this.ctx.createBiquadFilter();
+    reverbDamping.type = 'lowpass';
+    reverbDamping.frequency.value = 1250;
 
-    this.delayNode.connect(delayFilter);
-    delayFilter.connect(delayFb);
-    delayFb.connect(this.delayNode);
-    delayFilter.connect(this.masterGain);
+    this.soundboardWarmth.connect(this.dryGain);
+    this.soundboardWarmth.connect(reverbDamping);
+    reverbDamping.connect(this.convolver);
+    this.convolver.connect(this.reverbGain);
 
-    this.masterFilter.connect(this.masterGain);
-    this.masterFilter.connect(this.reverbNode);
-    this.masterFilter.connect(this.delayNode);
-    this.reverbNode.connect(reverbGain);
-    reverbGain.connect(this.masterGain);
+    this.dryGain.connect(this.masterGain);
+    this.reverbGain.connect(this.masterGain);
+    this.masterGain.connect(this.ctx.destination);
 
-    this.masterGain.connect(this.analyser);
-    this.analyser.connect(this.ctx.destination);
+    // Acoustic grand piano string overtone series (1/7th hammer strike point)
+    const real = new Float32Array([0, 0.0, 0.11, 0.04, 0.018, 0.008, 0.004, 0.0, 0.001]);
+    const imag = new Float32Array([0, 1.0, 0.42, 0.18, 0.08, 0.035, 0.012, 0.0, 0.004]);
+    this.pianoWave = this.ctx.createPeriodicWave(real, imag, { disableNormalization: false });
+
+    // Soft felt hammer thud transient
+    const bufLen = Math.floor(this.ctx.sampleRate * 0.026);
+    this.hammerNoiseBuffer = this.ctx.createBuffer(1, bufLen, this.ctx.sampleRate);
+    const data = this.hammerNoiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) {
+      const env = Math.sin((i / bufLen) * Math.PI) * Math.pow(1 - i / bufLen, 2.0);
+      data[i] = (Math.random() * 2 - 1) * env;
+    }
   }
 
-  createDarkReverb(duration, decay) {
+  createDarkHallReverb(duration, decay) {
     const rate = this.ctx.sampleRate;
-    const length = rate * duration;
-    const impulse = this.ctx.createBuffer(2, length, rate);
+    const len = Math.floor(rate * duration);
+    const buf = this.ctx.createBuffer(2, len, rate);
     for (let ch = 0; ch < 2; ch++) {
-      const data = impulse.getChannelData(ch);
-      for (let i = 0; i < length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+      const d = buf.getChannelData(ch);
+      let lp = 0;
+      for (let i = 0; i < len; i++) {
+        const white = Math.random() * 2 - 1;
+        lp = lp * 0.8 + white * 0.2;
+        d[i] = lp * Math.pow(1 - i / len, decay);
       }
     }
     const conv = this.ctx.createConvolver();
-    conv.buffer = impulse;
+    conv.buffer = buf;
     return conv;
   }
 
-  midiToFreq(midi) {
-    return 440 * Math.pow(2, (midi - 69) / 12);
+  setFeltDarkness(val01) {
+    this.feltDarkness = THREE.MathUtils.clamp(val01, 0.05, 0.95);
   }
 
-  setExpression(normX, normY) {
-    this.detuneNorm = THREE.MathUtils.clamp(normX, 0, 1);
-    this.filterNorm = THREE.MathUtils.clamp(normY, 0, 1);
-
-    if (this.ctx && this.masterFilter) {
-      // Exponential mapping from 260 Hz (dark underwater) to 4600 Hz (soaring CS-80 brass)
-      const cutoff = 260 * Math.pow(17.5, this.filterNorm);
-      this.masterFilter.frequency.setTargetAtTime(cutoff, this.ctx.currentTime, 0.06);
-      return Math.round(cutoff);
+  setReverbAmount(val01) {
+    this.reverbAmount = THREE.MathUtils.clamp(val01, 0.05, 0.95);
+    if (this.reverbGain && this.ctx) {
+      this.reverbGain.gain.setTargetAtTime(this.reverbAmount * 0.85, this.ctx.currentTime, 0.05);
     }
-    return 1420;
   }
 
-  playStep(step, onNoteTriggered) {
+  playNote(midi, velocity = 0.55, durationSec = 2.8) {
     this.init();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
     const now = this.ctx.currentTime;
+    const freq = midiToFreq(midi);
 
-    // 1. Deep Sub-Bass Drone Root
-    if (step.bass !== null) {
-      this.triggerSubBass(this.midiToFreq(step.bass), now, 3.0);
-    }
+    const registerScale = THREE.MathUtils.clamp(1.65 - (midi - 36) / 52, 0.55, 1.8);
+    const totalDecay = Math.max(1.9, durationSec * 1.5 * registerScale);
 
-    // 2. Warm Analog Pad Dyad/Chord
-    if (Array.isArray(step.chord)) {
-      this.triggerWarmPad(step.chord, now, 2.7);
-    }
+    const voiceGain = this.ctx.createGain();
+    const peakGain = 0.18 * Math.pow(velocity, 1.15);
+    const sustainLevel = peakGain * 0.33;
 
-    // 3. Expressive CS-80 Melody & Ornaments
-    if (Array.isArray(step.melody)) {
-      step.melody.forEach((m) => {
-        this.triggerCS80Lead(this.midiToFreq(m.midi), now + m.delay, m.dur, m.vel);
-        if (typeof onNoteTriggered === 'function') {
-          setTimeout(() => onNoteTriggered(m.midi), m.delay * 1000);
-        }
-      });
-    }
-  }
+    voiceGain.gain.setValueAtTime(0.0001, now);
+    voiceGain.gain.linearRampToValueAtTime(peakGain, now + 0.007);
+    voiceGain.gain.exponentialRampToValueAtTime(sustainLevel, now + 0.38);
+    voiceGain.gain.exponentialRampToValueAtTime(0.0001, now + totalDecay);
 
-  triggerSubBass(freq, time, duration) {
-    const sub = this.ctx.createOscillator();
-    const saw = this.ctx.createOscillator();
-    sub.type = 'sine';
-    saw.type = 'sawtooth';
-    sub.frequency.setValueAtTime(freq, time);
-    saw.frequency.setValueAtTime(freq, time);
+    const brightnessFactor = 1.0 - this.feltDarkness * 0.78;
+    const strikeCutoff = Math.min(4400, freq * (2.4 + brightnessFactor * 6.0) * (0.65 + velocity * 0.7));
+    const sustainCutoff = Math.max(170, freq * (1.2 + brightnessFactor * 1.6));
 
-    const subFilter = this.ctx.createBiquadFilter();
-    subFilter.type = 'lowpass';
-    subFilter.frequency.setValueAtTime(240, time);
-    subFilter.frequency.exponentialRampToValueAtTime(68, time + duration);
+    const stringFilter = this.ctx.createBiquadFilter();
+    stringFilter.type = 'lowpass';
+    stringFilter.Q.value = 0.65;
+    stringFilter.frequency.setValueAtTime(strikeCutoff, now);
+    stringFilter.frequency.exponentialRampToValueAtTime(sustainCutoff, now + 0.68);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.001, time);
-    gain.gain.linearRampToValueAtTime(0.28, time + 0.08);
-    gain.gain.exponentialRampToValueAtTime(0.0008, time + duration);
-
-    sub.connect(subFilter);
-    saw.connect(subFilter);
-    subFilter.connect(gain);
-    gain.connect(this.masterGain);
-
-    sub.start(time);
-    saw.start(time);
-    sub.stop(time + duration + 0.05);
-    saw.stop(time + duration + 0.05);
-  }
-
-  triggerWarmPad(midiNotes, time, duration) {
-    const padGain = this.ctx.createGain();
-    padGain.gain.setValueAtTime(0.001, time);
-    padGain.gain.linearRampToValueAtTime(0.065, time + 0.35);
-    padGain.gain.exponentialRampToValueAtTime(0.0008, time + duration);
-
-    padGain.connect(this.masterFilter);
-
-    const spread = 6 + this.detuneNorm * 14;
-    midiNotes.forEach((midi) => {
-      const freq = this.midiToFreq(midi);
-      [-spread, spread].forEach((det) => {
-        const osc = this.ctx.createOscillator();
-        osc.type = det < 0 ? 'sawtooth' : 'triangle';
-        osc.frequency.setValueAtTime(freq, time);
-        osc.detune.setValueAtTime(det, time);
-        osc.connect(padGain);
-        osc.start(time);
-        osc.stop(time + duration + 0.05);
-      });
-    });
-  }
-
-  triggerCS80Lead(freq, time, duration, vel = 0.85) {
-    const leadGain = this.ctx.createGain();
-    const peak = 0.14 * vel;
-    leadGain.gain.setValueAtTime(0.001, time);
-    leadGain.gain.linearRampToValueAtTime(peak, time + 0.045);
-    leadGain.gain.exponentialRampToValueAtTime(0.0008, time + duration);
-
-    const voiceFilter = this.ctx.createBiquadFilter();
-    voiceFilter.type = 'lowpass';
-    const envTop = 900 + this.filterNorm * 3800;
-    voiceFilter.frequency.setValueAtTime(envTop * 0.4, time);
-    voiceFilter.frequency.linearRampToValueAtTime(envTop, time + 0.12);
-    voiceFilter.frequency.exponentialRampToValueAtTime(360, time + duration);
-    voiceFilter.Q.value = 2.8;
-
-    leadGain.connect(voiceFilter);
-    voiceFilter.connect(this.masterFilter);
-
-    const detuneCents = 5 + this.detuneNorm * 12;
     const osc1 = this.ctx.createOscillator();
     const osc2 = this.ctx.createOscillator();
-    osc1.type = 'sawtooth';
-    osc2.type = 'triangle';
-    osc1.frequency.setValueAtTime(freq, time);
-    osc2.frequency.setValueAtTime(freq, time);
-    osc1.detune.setValueAtTime(-detuneCents, time);
-    osc2.detune.setValueAtTime(detuneCents, time);
+    osc1.setPeriodicWave(this.pianoWave);
+    osc2.setPeriodicWave(this.pianoWave);
 
-    osc1.connect(leadGain);
-    osc2.connect(leadGain);
-    osc1.start(time);
-    osc2.start(time);
-    osc1.stop(time + duration + 0.04);
-    osc2.stop(time + duration + 0.04);
+    osc1.frequency.setValueAtTime(freq * 0.9994, now);
+    osc2.frequency.setValueAtTime(freq * 1.0006, now);
 
-    // Celestial octave-up shimmer bell when cursor/finger is in upper half
-    if (this.filterNorm > 0.35) {
-      const shimmerOsc = this.ctx.createOscillator();
-      const shimmerGain = this.ctx.createGain();
-      shimmerOsc.type = 'sine';
-      shimmerOsc.frequency.setValueAtTime(freq * 2, time);
-      const shimLevel = (this.filterNorm - 0.35) * 0.065 * vel;
-      shimmerGain.gain.setValueAtTime(0.0005, time);
-      shimmerGain.gain.linearRampToValueAtTime(shimLevel, time + 0.02);
-      shimmerGain.gain.exponentialRampToValueAtTime(0.0005, time + duration * 0.75);
+    const bodyOsc = this.ctx.createOscillator();
+    bodyOsc.type = 'sine';
+    bodyOsc.frequency.setValueAtTime(freq, now);
+    const bodyGain = this.ctx.createGain();
+    bodyGain.gain.value = 0.58;
 
-      shimmerOsc.connect(shimmerGain);
-      shimmerGain.connect(this.masterFilter);
-      shimmerOsc.start(time);
-      shimmerOsc.stop(time + duration);
-    }
-  }
+    osc1.connect(stringFilter);
+    osc2.connect(stringFilter);
+    bodyOsc.connect(bodyGain);
+    bodyGain.connect(stringFilter);
 
-  pluckHarpMonolith(midi) {
-    this.init();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
-    const now = this.ctx.currentTime;
-    const freq = this.midiToFreq(midi);
-    this.triggerCS80Lead(freq, now, 1.65, 0.72);
-  }
+    const hammerSrc = this.ctx.createBufferSource();
+    hammerSrc.buffer = this.hammerNoiseBuffer;
+    const hammerFilter = this.ctx.createBiquadFilter();
+    hammerFilter.type = 'bandpass';
+    hammerFilter.frequency.value = Math.min(380, Math.max(105, freq * 0.6));
+    hammerFilter.Q.value = 1.1;
+    const hammerGain = this.ctx.createGain();
+    hammerGain.gain.setValueAtTime(peakGain * (0.42 + this.feltDarkness * 0.38), now);
+    hammerGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
 
-  toggleFreezeDrone(chordMidis = [37, 49, 61, 65, 68]) {
-    this.init();
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    hammerSrc.connect(hammerFilter);
+    hammerFilter.connect(hammerGain);
+    hammerGain.connect(this.soundboardWarmth);
 
-    if (this.droneActive) {
-      this.droneOscs.forEach(({ osc, gain }) => {
-        try {
-          gain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.25);
-          osc.stop(this.ctx.currentTime + 0.9);
-        } catch {}
-      });
-      this.droneOscs = [];
-      this.droneActive = false;
-      return false;
-    } else {
-      const now = this.ctx.currentTime;
-      chordMidis.forEach((m) => {
-        const osc = this.ctx.createOscillator();
-        const gain = this.ctx.createGain();
-        osc.type = m < 45 ? 'sine' : 'sawtooth';
-        osc.frequency.setValueAtTime(this.midiToFreq(m), now);
-        osc.detune.value = (Math.random() - 0.5) * 14;
-        gain.gain.setValueAtTime(0.001, now);
-        gain.gain.linearRampToValueAtTime(m < 45 ? 0.14 : 0.035, now + 0.8);
-        osc.connect(gain);
-        gain.connect(this.masterFilter);
-        osc.start(now);
-        this.droneOscs.push({ osc, gain });
-      });
-      this.droneActive = true;
-      return true;
-    }
-  }
+    stringFilter.connect(voiceGain);
+    voiceGain.connect(this.soundboardWarmth);
 
-  getEnergy() {
-    if (!this.analyser) return { bass: 0, mid: 0 };
-    this.analyser.getByteFrequencyData(this.freqData);
-    let b = 0;
-    let m = 0;
-    for (let i = 0; i < 8; i++) b += this.freqData[i];
-    for (let i = 8; i < 24; i++) m += this.freqData[i];
-    return {
-      bass: b / (8 * 255),
-      mid: m / (16 * 255)
-    };
+    osc1.start(now);
+    osc2.start(now);
+    bodyOsc.start(now);
+    hammerSrc.start(now);
+
+    const stopTime = now + totalDecay + 0.05;
+    osc1.stop(stopTime);
+    osc2.stop(stopTime);
+    bodyOsc.stop(stopTime);
   }
 }
 
+const pianoEngine = new DarkFeltPianoEngine();
+
 // ============================================================================
-// 3. THREE.JS SCENE: ECLIPSED CYBER-MOON, DARK MIRROR OCEAN & 9 LASER MONOLITHS
+// 3. ARCHITECTURAL 3D DARK GRAND PIANO SCENE
 // ============================================================================
 const container = document.getElementById('canvas-container');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x03010a);
-scene.fog = new THREE.FogExp2(0x050214, 0.018);
+scene.background = new THREE.Color(0x070709);
+scene.fog = new THREE.FogExp2(0x070709, 0.048);
 
-const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 250);
-camera.position.set(0, 3.2, 16);
+const camera = new THREE.PerspectiveCamera(
+  38,
+  window.innerWidth / window.innerHeight,
+  0.1,
+  100
+);
+
+const CAMERA_VIEWS = [
+  { pos: new THREE.Vector3(-2.1, 3.6, 5.8), look: new THREE.Vector3(0.2, 0.1, -0.9) },
+  { pos: new THREE.Vector3(0, 6.2, 1.8), look: new THREE.Vector3(0, 0, -0.4) },
+  { pos: new THREE.Vector3(-3.4, 1.25, 3.8), look: new THREE.Vector3(0.9, 0.05, -0.5) }
+];
+let currentViewIdx = 0;
+camera.position.copy(CAMERA_VIEWS[0].pos);
+camera.lookAt(CAMERA_VIEWS[0].look);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 1.06;
 container.appendChild(renderer.domElement);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
-  1.25,
-  0.5,
-  0.2
+const pmrem = new THREE.PMREMGenerator(renderer);
+const roomEnv = new RoomEnvironment();
+scene.environment = pmrem.fromScene(roomEnv, 0.04).texture;
+roomEnv.dispose();
+
+// Understated Gallery Lighting
+const ambientLight = new THREE.AmbientLight(0x161820, 0.9);
+scene.add(ambientLight);
+
+const overheadKeyLight = new THREE.DirectionalLight(0xfff4e0, 2.4);
+overheadKeyLight.position.set(-2, 8, 4);
+scene.add(overheadKeyLight);
+
+const subtleRimLight = new THREE.DirectionalLight(0x9ab4d8, 1.1);
+subtleRimLight.position.set(5, 5, -5);
+scene.add(subtleRimLight);
+
+const warmFallboardLight = new THREE.PointLight(0xe6cda5, 2.2, 11);
+warmFallboardLight.position.set(0, 2.0, 1.4);
+scene.add(warmFallboardLight);
+
+// ============================================================================
+// 4. SCULPTURAL 3D KEYBOARD & HARP CONSTRUCTION
+// ============================================================================
+const pianoGroup = new THREE.Group();
+scene.add(pianoGroup);
+
+const FIRST_MIDI = 36; // C2
+const LAST_MIDI = 86;  // D6
+const WHITE_KEY_W = 0.255;
+const WHITE_KEY_H = 0.17;
+const WHITE_KEY_L = 1.56;
+const WHITE_KEY_GAP = 0.014;
+
+const BLACK_KEY_W = 0.142;
+const BLACK_KEY_H = 0.25;
+const BLACK_KEY_L = 0.98;
+
+function isBlackMidi(midi) {
+  const m = midi % 12;
+  return m === 1 || m === 3 || m === 6 || m === 8 || m === 10;
+}
+
+let totalWhiteKeys = 0;
+for (let m = FIRST_MIDI; m <= LAST_MIDI; m++) {
+  if (!isBlackMidi(m)) totalWhiteKeys++;
+}
+const keyboardSpanWidth = totalWhiteKeys * (WHITE_KEY_W + WHITE_KEY_GAP);
+const startX = -keyboardSpanWidth / 2 + WHITE_KEY_W / 2;
+
+const lacquerBlackMat = new THREE.MeshPhysicalMaterial({
+  color: 0x070709,
+  roughness: 0.09,
+  metalness: 0.12,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.04
+});
+
+const woolFeltMat = new THREE.MeshStandardMaterial({
+  color: 0x4a101b,
+  roughness: 0.92
+});
+
+// Keybed foundation & Cheek blocks
+const keybedBase = new THREE.Mesh(
+  new THREE.BoxGeometry(keyboardSpanWidth + 0.9, 0.34, 2.2),
+  lacquerBlackMat
 );
-composer.addPass(bloomPass);
+keybedBase.position.set(0, -0.22, 0.15);
+pianoGroup.add(keybedBase);
 
-// Lighting
-scene.add(new THREE.AmbientLight(0x1f113d, 1.5));
-const moonLight = new THREE.PointLight(0x00f3ff, 8, 90);
-moonLight.position.set(0, 14, -28);
-scene.add(moonLight);
-
-const magentaRim = new THREE.PointLight(0xff007f, 6, 70);
-magentaRim.position.set(0, 4, -15);
-scene.add(magentaRim);
-
-// 1. Giant Eclipsed Cyber-Moon with Glowing Corona Rings
-const moonGroup = new THREE.Group();
-moonGroup.position.set(0, 11.5, -36);
-scene.add(moonGroup);
-
-const darkSphereGeo = new THREE.SphereGeometry(7.2, 48, 48);
-const darkSphereMat = new THREE.MeshStandardMaterial({
-  color: 0x04010c,
-  roughness: 0.9,
-  metalness: 0.2
+[-1, 1].forEach((side) => {
+  const cheek = new THREE.Mesh(
+    new THREE.BoxGeometry(0.36, 0.50, 2.15),
+    lacquerBlackMat
+  );
+  cheek.position.set(side * (keyboardSpanWidth / 2 + 0.22), -0.02, 0.15);
+  pianoGroup.add(cheek);
 });
-const darkMoon = new THREE.Mesh(darkSphereGeo, darkSphereMat);
-moonGroup.add(darkMoon);
 
-const coronaGeo = new THREE.RingGeometry(7.25, 8.15, 64);
-const coronaMat = new THREE.MeshBasicMaterial({
-  color: 0x00f3ff,
-  side: THREE.DoubleSide,
-  transparent: true,
-  opacity: 0.85
-});
-const coronaRing = new THREE.Mesh(coronaGeo, coronaMat);
-moonGroup.add(coronaRing);
+const fallboard = new THREE.Mesh(
+  new THREE.BoxGeometry(keyboardSpanWidth + 0.6, 0.64, 0.18),
+  lacquerBlackMat
+);
+fallboard.position.set(0, 0.25, -0.74);
+pianoGroup.add(fallboard);
 
-const outerHaloGeo = new THREE.RingGeometry(8.2, 10.6, 64);
-const outerHaloMat = new THREE.MeshBasicMaterial({
-  color: 0xff007f,
-  side: THREE.DoubleSide,
-  transparent: true,
-  opacity: 0.28
-});
-const outerHalo = new THREE.Mesh(outerHaloGeo, outerHaloMat);
-moonGroup.add(outerHalo);
+const feltStrip = new THREE.Mesh(
+  new THREE.BoxGeometry(keyboardSpanWidth + 0.1, 0.07, 0.08),
+  woolFeltMat
+);
+feltStrip.position.set(0, 0.08, -0.63);
+pianoGroup.add(feltStrip);
 
-// Orbital Gyroscope Ring around the Moon
-const orbitalRingGeo = new THREE.TorusGeometry(10.8, 0.06, 12, 96);
-const orbitalRingMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff, transparent: true, opacity: 0.55 });
-const orbitalRing = new THREE.Mesh(orbitalRingGeo, orbitalRingMat);
-orbitalRing.rotation.x = Math.PI / 2.6;
-moonGroup.add(orbitalRing);
+const soundboard = new THREE.Mesh(
+  new THREE.BoxGeometry(keyboardSpanWidth + 0.7, 0.14, 4.6),
+  new THREE.MeshStandardMaterial({ color: 0x120f0c, roughness: 0.72 })
+);
+soundboard.position.set(0, -0.15, -3.1);
+pianoGroup.add(soundboard);
 
-// 2. Animated Dark Synthwave Ocean Mesh (with wireframe + reflective surface)
-const oceanGeo = new THREE.PlaneGeometry(120, 90, 72, 54);
-oceanGeo.rotateX(-Math.PI / 2);
-const oceanBaseY = new Float32Array(oceanGeo.attributes.position.count);
+// Keys & Strings
+const keyMap = new Map();
+const interactableKeyMeshes = [];
 
-const oceanMat = new THREE.MeshStandardMaterial({
-  color: 0x060316,
-  roughness: 0.2,
-  metalness: 0.85,
-  polygonOffset: true,
-  polygonOffsetFactor: 1,
-  polygonOffsetUnits: 1
-});
-const oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
-oceanMesh.position.set(0, -1.2, -14);
-scene.add(oceanMesh);
+const whiteGeo = new THREE.BoxGeometry(WHITE_KEY_W, WHITE_KEY_H, WHITE_KEY_L);
+whiteGeo.translate(0, 0, WHITE_KEY_L / 2);
 
-const oceanWireMat = new THREE.MeshBasicMaterial({
-  color: 0x3b1778,
-  wireframe: true,
-  transparent: true,
-  opacity: 0.34
-});
-const oceanWire = new THREE.Mesh(oceanGeo, oceanWireMat);
-oceanWire.position.copy(oceanMesh.position);
-scene.add(oceanWire);
+const blackGeo = new THREE.BoxGeometry(BLACK_KEY_W, BLACK_KEY_H, BLACK_KEY_L);
+blackGeo.translate(0, 0, BLACK_KEY_L / 2);
 
-// 3. Nine Interactive Laser Harp Monoliths rising from the Dark Ocean
-const monoliths = [];
-const monolithMeshes = [];
+let whiteIndex = 0;
+for (let midi = FIRST_MIDI; midi <= LAST_MIDI; midi++) {
+  const black = isBlackMidi(midi);
+  let xPos = 0;
 
-HARP_MONOLITH_NOTES.forEach((item, idx) => {
-  const t = (idx / (HARP_MONOLITH_NOTES.length - 1)) * 2 - 1; // -1 to +1
-  const x = t * 11.5;
-  const z = -4.5 - (1 - Math.abs(t)) * 5.5;
-  const height = 9.5 + (1 - Math.abs(t)) * 3.5;
+  if (!black) {
+    xPos = startX + whiteIndex * (WHITE_KEY_W + WHITE_KEY_GAP);
+    whiteIndex++;
+  } else {
+    xPos = startX + (whiteIndex - 1) * (WHITE_KEY_W + WHITE_KEY_GAP) + (WHITE_KEY_W + WHITE_KEY_GAP) * 0.5;
+  }
 
-  const pillarGeo = new THREE.BoxGeometry(0.28, height, 0.28);
-  const pillarMat = new THREE.MeshStandardMaterial({
-    color: 0x0a051d,
-    emissive: item.color,
-    emissiveIntensity: 0.35,
-    roughness: 0.2,
-    metalness: 0.8
+  // Warm natural bone ivory for white keys, satin ebony for sharps/flats
+  const baseColorHex = black ? 0x101013 : 0xe2ddd2;
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: baseColorHex,
+    roughness: black ? 0.28 : 0.15,
+    metalness: 0.04,
+    clearcoat: black ? 0.4 : 0.85,
+    clearcoatRoughness: 0.08,
+    emissive: new THREE.Color(0x000000),
+    emissiveIntensity: 0
   });
-  const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-  pillar.position.set(x, height / 2 - 1.2, z);
-  pillar.userData = { monolithIndex: idx };
-  scene.add(pillar);
-  monolithMeshes.push(pillar);
 
-  // Laser core string running through the monolith
-  const coreGeo = new THREE.CylinderGeometry(0.04, 0.04, height + 8, 8);
-  const coreMat = new THREE.MeshBasicMaterial({
-    color: item.color,
+  const pivot = new THREE.Group();
+  pivot.position.set(xPos, black ? 0.08 : 0.0, -0.62);
+
+  const keyMesh = new THREE.Mesh(black ? blackGeo : whiteGeo, mat);
+  keyMesh.userData = { midi };
+  pivot.add(keyMesh);
+  pianoGroup.add(pivot);
+  interactableKeyMeshes.push(keyMesh);
+
+  // Subtle bronze/steel string receding into the dark soundboard
+  const normalizedPitch = (midi - FIRST_MIDI) / (LAST_MIDI - FIRST_MIDI);
+  const stringLen = 4.2 - normalizedPitch * 2.4;
+  const stringGeo = new THREE.CylinderGeometry(0.01, 0.01, stringLen, 6);
+  stringGeo.rotateX(Math.PI / 2);
+  const stringMat = new THREE.MeshBasicMaterial({
+    color: 0x5c4d35,
     transparent: true,
-    opacity: 0.65
+    opacity: 0.42
   });
-  const core = new THREE.Mesh(coreGeo, coreMat);
-  core.position.set(x, (height + 8) / 2 - 1.2, z);
-  scene.add(core);
+  const stringMesh = new THREE.Mesh(stringGeo, stringMat);
+  stringMesh.position.set(xPos, 0.02, -0.85 - stringLen / 2);
+  pianoGroup.add(stringMesh);
 
-  monoliths.push({
-    idx,
-    item,
-    pillar,
-    pillarMat,
-    core,
-    coreMat,
-    energy: 0,
-    x,
-    z
+  keyMap.set(midi, {
+    midi,
+    pivot,
+    mesh: keyMesh,
+    mat,
+    stringMesh,
+    stringMat,
+    isBlack: black,
+    depress: 0,
+    glow: 0,
+    xPos
   });
-});
-
-// 4. Expanding Shockwave Ripples on the Ocean Surface when Chords/Notes Play
-const activeRipples = [];
-const rippleGeo = new THREE.RingGeometry(0.4, 0.62, 48);
-rippleGeo.rotateX(-Math.PI / 2);
-
-function spawnOceanRipple(x = 0, z = -6, colorHex = 0x00f3ff) {
-  const mat = new THREE.MeshBasicMaterial({
-    color: colorHex,
-    side: THREE.DoubleSide,
-    transparent: true,
-    opacity: 0.9
-  });
-  const mesh = new THREE.Mesh(rippleGeo, mat);
-  mesh.position.set(x, -0.95, z);
-  scene.add(mesh);
-  activeRipples.push({ mesh, mat, scale: 1.0, opacity: 0.9 });
 }
 
-// 5. Floating Bioluminescent Stardust Particles
-const starCount = 700;
-const starGeo = new THREE.BufferGeometry();
-const starPos = new Float32Array(starCount * 3);
-for (let i = 0; i < starCount; i++) {
-  starPos[i * 3] = (Math.random() - 0.5) * 90;
-  starPos[i * 3 + 1] = Math.random() * 35 - 1;
-  starPos[i * 3 + 2] = -Math.random() * 65 + 10;
+function triggerPianoKey(midi, velocity = 0.55, durationSec = 2.6) {
+  pianoEngine.playNote(midi, velocity, durationSec);
+
+  const keyObj = keyMap.get(midi);
+  if (keyObj) {
+    keyObj.depress = 1.0;
+    keyObj.glow = 1.0;
+  }
 }
-starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-const starMat = new THREE.PointsMaterial({
-  color: 0x00f3ff,
-  size: 0.14,
-  transparent: true,
-  opacity: 0.75
-});
-const stars = new THREE.Points(starGeo, starMat);
-scene.add(stars);
 
 // ============================================================================
-// 4. SEQUENCER, INTERACTION MODES & UI CONTROLS
+// 5. SEQUENCER & MINIMALIST CONTROLS
 // ============================================================================
-const synth = new ClairDeLuneSynth();
+let hasBegun = false;
 let scoreIndex = 0;
-let isPlaying = false;
-let mode = 'auto'; // 'auto' | 'conduct'
-let autoTimer = null;
+let isPlayingScore = false;
+let isTouchPerformMode = false;
+let tempoMultiplier = 1.0;
+let stepTimeout = null;
 
-const startVeil = document.getElementById('start-veil');
-const btnStartExp = document.getElementById('btn-start-experience');
-const btnPlayPause = document.getElementById('btn-play-pause');
-const playIcon = document.getElementById('play-icon');
+const whisperPrompt = document.getElementById('whisper-prompt');
+const harmonicLabel = document.getElementById('harmonic-label');
+const btnPlay = document.getElementById('btn-play');
 const playLabel = document.getElementById('play-label');
-const btnModeToggle = document.getElementById('btn-mode-toggle');
-const modeLabel = document.getElementById('mode-label');
-const chordReadout = document.getElementById('chord-readout');
-const filterReadout = document.getElementById('filter-readout');
-const shimmerReadout = document.getElementById('shimmer-readout');
-const stepCounter = document.getElementById('step-counter');
-const btnTriggerNote = document.getElementById('btn-trigger-note');
-const btnDroneHold = document.getElementById('btn-drone-hold');
-const droneLabel = document.getElementById('drone-label');
+const statusDot = document.getElementById('status-dot');
+const btnMode = document.getElementById('btn-mode');
+const btnCamera = document.getElementById('btn-camera');
 
-// Minimize card toggle
-const nocturneCard = document.getElementById('nocturne-card');
-const btnMinimizeNocturne = document.getElementById('btn-minimize-nocturne');
-const nocturneCollapseIcon = document.getElementById('nocturne-collapse-icon');
-const nocturneTitleBar = document.getElementById('nocturne-title-bar');
-
-function toggleNocturneMinimize() {
-  const collapsed = nocturneCard.classList.toggle('collapsed');
-  nocturneCollapseIcon.textContent = collapsed ? '+' : '−';
-}
-btnMinimizeNocturne.addEventListener('click', toggleNocturneMinimize);
-nocturneTitleBar.addEventListener('click', toggleNocturneMinimize);
-
-function highlightMonolithByMidi(midi) {
-  const pitchClass = midi % 12;
-  monoliths.forEach((m) => {
-    if (m.item.midi % 12 === pitchClass) {
-      m.energy = 1.4;
-      spawnOceanRipple(m.x, m.z, m.item.color);
-    }
-  });
-}
-
-function triggerCurrentScoreStep(customRipplePos = null) {
+function playCurrentScoreStep() {
   const step = CLAIR_DE_LUNE_SCORE[scoreIndex];
-  chordReadout.textContent = `CHORD: ${step.label}`;
-  stepCounter.textContent = `${String(scoreIndex + 1).padStart(2, '0')} / ${CLAIR_DE_LUNE_SCORE.length}`;
+  scoreIndex = (scoreIndex + 1) % CLAIR_DE_LUNE_SCORE.length;
 
-  synth.playStep(step, (midiNote) => {
-    highlightMonolithByMidi(midiNote);
+  harmonicLabel.textContent = step.label;
+
+  step.notes.forEach((nObj) => {
+    const midi = noteToMidi(nObj.n);
+    const delayMs = (nObj.delay || 0) / tempoMultiplier;
+    setTimeout(() => {
+      triggerPianoKey(midi, nObj.v, nObj.d);
+    }, delayMs);
   });
 
-  if (customRipplePos) {
-    spawnOceanRipple(customRipplePos.x, customRipplePos.z, 0xff007f);
-  } else {
-    spawnOceanRipple(0, -8, 0x00f3ff);
+  if (isPlayingScore && !isTouchPerformMode) {
+    const nextWaitMs = (step.wait * 1000) / tempoMultiplier;
+    clearTimeout(stepTimeout);
+    stepTimeout = setTimeout(playCurrentScoreStep, nextWaitMs);
   }
-
-  scoreIndex = (scoreIndex + 1) % CLAIR_DE_LUNE_SCORE.length;
-  return step.wait;
 }
 
-function scheduleNextAutoStep() {
-  if (autoTimer) clearTimeout(autoTimer);
-  if (!isPlaying || mode !== 'auto') return;
-
-  const waitSec = triggerCurrentScoreStep();
-  autoTimer = setTimeout(scheduleNextAutoStep, waitSec * 1000);
+function ensureStarted() {
+  if (hasBegun) return;
+  hasBegun = true;
+  whisperPrompt.classList.add('fade-out');
+  pianoEngine.init();
+  isPlayingScore = true;
+  playLabel.textContent = 'Playing';
+  statusDot.style.opacity = '1';
+  if (!isTouchPerformMode) {
+    playCurrentScoreStep();
+  }
 }
 
-btnStartExp.addEventListener('click', () => {
-  startVeil.classList.add('hidden-veil');
-  isPlaying = true;
-  scheduleNextAutoStep();
-});
-
-btnPlayPause.addEventListener('click', () => {
-  isPlaying = !isPlaying;
-  if (isPlaying) {
-    playIcon.textContent = '⏸';
-    playLabel.textContent = 'FLOWING';
-    if (mode === 'auto') scheduleNextAutoStep();
-  } else {
-    playIcon.textContent = '▶';
-    playLabel.textContent = 'PAUSED';
-    if (autoTimer) clearTimeout(autoTimer);
+btnPlay.addEventListener('click', () => {
+  if (!hasBegun) {
+    ensureStarted();
+    return;
+  }
+  pianoEngine.init();
+  isPlayingScore = !isPlayingScore;
+  playLabel.textContent = isPlayingScore ? 'Playing' : 'Paused';
+  statusDot.style.opacity = isPlayingScore ? '1' : '0.3';
+  clearTimeout(stepTimeout);
+  if (isPlayingScore && !isTouchPerformMode) {
+    playCurrentScoreStep();
   }
 });
 
-btnModeToggle.addEventListener('click', () => {
-  if (mode === 'auto') {
-    mode = 'conduct';
-    if (autoTimer) clearTimeout(autoTimer);
-    modeLabel.textContent = 'MODE: TAP TO CONDUCT';
-  } else {
-    mode = 'auto';
-    modeLabel.textContent = 'MODE: AUTO-FLOW';
-    if (isPlaying) scheduleNextAutoStep();
+btnMode.addEventListener('click', () => {
+  ensureStarted();
+  isTouchPerformMode = !isTouchPerformMode;
+  btnMode.textContent = isTouchPerformMode ? 'Mode: Perform by touch' : 'Mode: Auto';
+  btnMode.classList.toggle('active', isTouchPerformMode);
+  clearTimeout(stepTimeout);
+  if (!isTouchPerformMode && isPlayingScore) {
+    playCurrentScoreStep();
   }
 });
 
-btnTriggerNote.addEventListener('click', () => {
-  triggerCurrentScoreStep();
+btnCamera.addEventListener('click', () => {
+  currentViewIdx = (currentViewIdx + 1) % CAMERA_VIEWS.length;
 });
 
-btnDroneHold.addEventListener('click', () => {
-  const currentStep = CLAIR_DE_LUNE_SCORE[scoreIndex];
-  const active = synth.toggleFreezeDrone([currentStep.bass || 37, ...currentStep.chord]);
-  btnDroneHold.classList.toggle('active', active);
-  droneLabel.textContent = active ? '∞ FREEZE DRONE: ON' : '∞ FREEZE DRONE: OFF';
+document.getElementById('slider-felt').addEventListener('input', (e) => {
+  pianoEngine.setFeltDarkness(Number(e.target.value) / 100);
 });
 
-// Pointer / Touch Expression & Laser Harp Plucking
-const pointer = new THREE.Vector2();
+document.getElementById('slider-reverb').addEventListener('input', (e) => {
+  pianoEngine.setReverbAmount(Number(e.target.value) / 100);
+});
+
+document.getElementById('slider-tempo').addEventListener('input', (e) => {
+  tempoMultiplier = Number(e.target.value) / 100;
+});
+
+// Raycasting for 3D Piano Keys
 const raycaster = new THREE.Raycaster();
-let lastPluckedMonolith = null;
+const pointer = new THREE.Vector2();
+let isPointerDown = false;
+let lastHoveredMidi = null;
 
-function handlePointerMove(clientX, clientY) {
-  const normX = clientX / window.innerWidth;
-  const normY = 1.0 - clientY / window.innerHeight;
+function handleKeyInteraction(clientX, clientY, isInitialDown = false) {
+  if (!hasBegun) {
+    ensureStarted();
+  }
 
-  pointer.x = normX * 2 - 1;
-  pointer.y = normY * 2 - 1;
-
-  const hz = synth.setExpression(normX, normY);
-  filterReadout.textContent = `${hz.toLocaleString()} Hz`;
-  shimmerReadout.textContent = `${Math.round(normY * 100)}%`;
-
-  // Check if brushing across one of the 9 Laser Harp Monoliths
+  pointer.x = (clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(clientY / window.innerHeight) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(monolithMeshes, false);
+
+  const hits = raycaster.intersectObjects(interactableKeyMeshes, false);
   if (hits.length > 0) {
-    const idx = hits[0].object.userData.monolithIndex;
-    if (lastPluckedMonolith !== idx) {
-      lastPluckedMonolith = idx;
-      const m = monoliths[idx];
-      m.energy = 1.6;
-      synth.pluckHarpMonolith(m.item.midi);
-      spawnOceanRipple(m.x, m.z, m.item.color);
+    const midi = hits[0].object.userData.midi;
+    if (isInitialDown || midi !== lastHoveredMidi) {
+      lastHoveredMidi = midi;
+      if (isTouchPerformMode && isInitialDown) {
+        playCurrentScoreStep();
+      } else {
+        triggerPianoKey(midi, 0.58, 2.6);
+      }
     }
-  } else {
-    lastPluckedMonolith = null;
+  } else if (isInitialDown && isTouchPerformMode) {
+    playCurrentScoreStep();
   }
 }
 
-window.addEventListener('mousemove', (e) => {
-  handlePointerMove(e.clientX, e.clientY);
+container.addEventListener('pointerdown', (e) => {
+  isPointerDown = true;
+  handleKeyInteraction(e.clientX, e.clientY, true);
 });
 
-window.addEventListener('touchstart', (e) => {
-  if (e.target.closest('button, a, .start-box, .nocturne-hud-card')) return;
-  if (e.touches.length > 0) {
-    document.body.classList.add('is-steering');
-    handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
-    if (mode === 'conduct') {
-      triggerCurrentScoreStep({ x: pointer.x * 8, z: -6 });
-    }
+window.addEventListener('pointermove', (e) => {
+  pointer.x = (e.clientX / window.innerWidth) * 2 - 1;
+  pointer.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  if (isPointerDown && !isTouchPerformMode) {
+    handleKeyInteraction(e.clientX, e.clientY, false);
   }
-}, { passive: true });
-
-window.addEventListener('touchmove', (e) => {
-  if (e.target.closest('button, a, .start-box')) return;
-  if (e.touches.length > 0) {
-    handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
-  }
-}, { passive: true });
-
-window.addEventListener('touchend', () => {
-  document.body.classList.remove('is-steering');
-  lastPluckedMonolith = null;
-}, { passive: true });
-
-window.addEventListener('pointerdown', (e) => {
-  if (e.pointerType === 'touch') return;
-  if (e.target.closest('button, a, .start-box, .nocturne-hud-card')) return;
-  triggerCurrentScoreStep({ x: pointer.x * 8, z: -6 });
 });
+
+window.addEventListener('pointerup', () => {
+  isPointerDown = false;
+  lastHoveredMidi = null;
+});
+
+const KEYBOARD_TO_MIDI = {
+  a: 61, s: 63, d: 65, f: 66, g: 68, h: 70, j: 72, k: 73, l: 75, ';': 77
+};
 
 window.addEventListener('keydown', (e) => {
   if (e.repeat) return;
-  if (e.key === ' ' || (e.key.length === 1 && /[a-zA-Z]/.test(e.key))) {
-    triggerCurrentScoreStep();
+  if (!hasBegun) {
+    ensureStarted();
+    return;
+  }
+  if (e.key === ' ') {
+    e.preventDefault();
+    playCurrentScoreStep();
+    return;
+  }
+  const midi = KEYBOARD_TO_MIDI[e.key.toLowerCase()];
+  if (midi) {
+    triggerPianoKey(midi, 0.58, 2.6);
   }
 });
 
 // ============================================================================
-// 5. ANIMATION LOOP
+// 6. ANIMATION LOOP
 // ============================================================================
 const clock = new THREE.Clock();
+const currentLookAt = new THREE.Vector3().copy(CAMERA_VIEWS[0].look);
 
 function animate() {
   requestAnimationFrame(animate);
+
   const dt = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
 
-  const energy = synth.getEnergy();
+  keyMap.forEach((k) => {
+    k.depress = k.depress > 0.001 ? THREE.MathUtils.lerp(k.depress, 0, dt * 8.0) : 0;
+    k.glow = k.glow > 0.001 ? THREE.MathUtils.lerp(k.glow, 0, dt * 2.4) : 0;
 
-  // Animate Ocean Waves + Bass Reactivity
-  const pos = oceanGeo.attributes.position;
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const z = pos.getZ(i);
-    const dist = Math.sqrt(x * x + (z + 6) * (z + 6));
-    const wave =
-      Math.sin(dist * 0.45 - elapsed * 2.2) * (0.18 + energy.bass * 0.45) +
-      Math.cos(x * 0.25 + elapsed * 1.4) * 0.12;
-    pos.setY(i, oceanBaseY[i] + wave);
-  }
-  pos.needsUpdate = true;
+    // Realistic piano key dip around balance rail
+    k.pivot.rotation.x = k.depress * 0.065;
 
-  // Pulse Eclipsed Moon & Gyroscope Ring
-  const moonScale = 1.0 + energy.bass * 0.14;
-  coronaRing.scale.set(moonScale, moonScale, 1);
-  outerHalo.scale.set(1.0 + energy.mid * 0.22, 1.0 + energy.mid * 0.22, 1);
-  orbitalRing.rotation.z = elapsed * 0.25;
-  orbitalRing.rotation.y = Math.sin(elapsed * 0.4) * 0.35;
+    // Subtle warm ivory/amber reflection on struck key
+    k.mat.emissive.setHex(0xc8ad78);
+    k.mat.emissiveIntensity = k.glow * 0.24;
 
-  // Update 9 Laser Harp Monoliths
-  monoliths.forEach((m, i) => {
-    m.energy = Math.max(0, m.energy - dt * 1.8);
-    const glow = 0.28 + m.energy * 1.6 + energy.mid * 0.35;
-    m.pillarMat.emissiveIntensity = glow;
-    m.coreMat.opacity = Math.min(1.0, 0.35 + m.energy * 0.65);
-    m.pillar.position.y = (m.pillar.geometry.parameters.height / 2 - 1.2) + Math.sin(elapsed * 2 + i) * 0.08 + m.energy * 0.35;
+    // Subtle string shimmer on the harp
+    k.stringMat.opacity = 0.38 + k.glow * 0.52;
+    k.stringMat.color.setHex(k.glow > 0.1 ? 0xd9bf8c : 0x5c4d35);
+    k.stringMesh.position.x = k.xPos + (k.glow > 0.05 ? Math.sin(elapsed * 95) * 0.004 * k.glow : 0);
   });
 
-  // Update Expanding Ocean Shockwave Ripples
-  for (let i = activeRipples.length - 1; i >= 0; i--) {
-    const r = activeRipples[i];
-    r.scale += dt * 12.5;
-    r.opacity -= dt * 0.55;
-    r.mesh.scale.set(r.scale, r.scale, 1);
-    r.mat.opacity = Math.max(0, r.opacity);
-    if (r.opacity <= 0) {
-      scene.remove(r.mesh);
-      r.mat.dispose();
-      activeRipples.splice(i, 1);
-    }
-  }
+  const view = CAMERA_VIEWS[currentViewIdx];
+  const aspect = window.innerWidth / window.innerHeight;
+  const mobileBackoff = aspect < 1.0 ? (1.0 - aspect) * 4.0 : 0;
 
-  // Adaptive Camera Framing & Smooth Parallax Orbit
-  const isNarrow = camera.aspect < 1.1;
-  const baseZ = isNarrow ? 19.5 : 15.5;
-  const targetCamX = pointer.x * 3.2;
-  const targetCamY = 3.0 + pointer.y * 1.6;
+  const targetX = view.pos.x + pointer.x * 0.22;
+  const targetY = view.pos.y + pointer.y * 0.14;
+  const targetZ = view.pos.z + mobileBackoff;
 
-  camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetCamX, dt * 3.5);
-  camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetCamY, dt * 3.5);
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, baseZ, dt * 3.5);
-  camera.lookAt(0, 3.8, -18);
+  camera.position.x = THREE.MathUtils.lerp(camera.position.x, targetX, dt * 4);
+  camera.position.y = THREE.MathUtils.lerp(camera.position.y, targetY, dt * 4);
+  camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZ, dt * 4);
 
-  stars.rotation.y = elapsed * 0.015;
-  composer.render();
+  currentLookAt.lerp(view.look, dt * 5);
+  camera.lookAt(currentLookAt);
+
+  renderer.render(scene, camera);
 }
 
 animate();
@@ -966,5 +662,4 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
 });
