@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>0xVAULT // BEVELEZ.AI — Vibe-Coded Cassette Archive</title>
+  <meta name="description" content="Secret 3D Cassette Vault of vibe-coded apps, games, and interactive synth experiments by Brandon Edward Velez." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./style.css" />
+  <style>
+    .vault-header-sub {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: var(--neon-magenta);
+      letter-spacing: 0.12em;
+    }
+
+    .vault-center-hud {
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: auto;
+      margin-bottom: 10px;
+      text-align: center;
+      padding: 0 12px;
+    }
+
+    .tape-info-card {
+      pointer-events: auto;
+      background: rgba(9, 6, 26, 0.78);
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      border-radius: 12px;
+      padding: 14px 22px;
+      max-width: 520px;
+      width: 100%;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 25px rgba(0, 243, 255, 0.14);
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .tape-meta-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+    }
+
+    .tape-Slot-id {
+      color: var(--neon-cyan);
+      letter-spacing: 0.12em;
+      font-weight: 700;
+    }
+
+    .tape-status-tag {
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: rgba(0, 243, 255, 0.16);
+      border: 1px solid var(--neon-cyan);
+      color: #fff;
+      font-size: 0.62rem;
+      letter-spacing: 0.1em;
+    }
+
+    .tape-status-tag.locked {
+      background: rgba(255, 0, 127, 0.15);
+      border-color: rgba(255, 0, 127, 0.5);
+      color: #ff9ec9;
+    }
+
+    .tape-title {
+      font-family: var(--font-display);
+      font-size: clamp(1.05rem, 2.5vw, 1.45rem);
+      font-weight: 900;
+      letter-spacing: 0.05em;
+      color: #ffffff;
+      margin-bottom: 5px;
+      text-shadow: 0 0 14px rgba(0, 243, 255, 0.4);
+    }
+
+    .tape-desc {
+      font-size: 0.82rem;
+      line-height: 1.42;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+
+    .tape-controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: nowrap;
+    }
+
+    .vault-hint {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      letter-spacing: 0.08em;
+    }
+
+    @media (max-width: 640px) {
+      .tape-info-card {
+        padding: 11px 14px;
+      }
+      .tape-desc {
+        font-size: 0.76rem;
+        margin-bottom: 9px;
+      }
+      .vault-hint {
+        display: none;
+      }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="canvas-container" aria-hidden="true"></div>
+  <div class="crt-overlay" aria-hidden="true"></div>
+
+  <div class="ui-layer">
+    <!-- Top Bar -->
+    <header class="top-bar">
+      <div class="brand-cluster">
+        <span class="status-dot"></span>
+        <span class="brand-domain">0xVAULT</span>
+        <span class="brand-divider">//</span>
+        <span class="vault-header-sub">TRANSLUCENT CASSETTE ARCHIVE</span>
+      </div>
+
+      <div class="audio-cluster">
+        <a href="./index.html" class="cyber-btn cyber-btn-ghost">
+          <span>← HIGHWAY</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Selected Cassette Deck Readout Card -->
+    <main class="vault-center-hud">
+      <section class="tape-info-card" id="tape-info-card">
+        <div class="tape-meta-row">
+          <span class="tape-Slot-id" id="tape-slot-id">TAPE_01 // CrO2 90m</span>
+          <span class="tape-status-tag" id="tape-status-tag">PLAYABLE DEMO</span>
+        </div>
+        <h1 class="tape-title" id="tape-title">CLAIR DE LUNE // NOCTURNE 2099</h1>
+        <p class="tape-desc" id="tape-desc">
+          Dark synth futuristic reimagining of Debussy's Clair de Lune. Sculpt the analog CS-80 filter, pluck orbital laser-harp monoliths, or conduct every chord note-by-note across a moonlit cyber ocean.
+        </p>
+        <div class="tape-controls-row">
+          <button id="btn-prev-tape" class="cyber-btn cyber-btn-small" type="button" aria-label="Previous Cassette">
+            <span>◀ PREV</span>
+          </button>
+          <button id="btn-insert-tape" class="cyber-btn cyber-btn-primary" type="button">
+            <span id="insert-btn-label">▶ INSERT &amp; PLAY TAPE</span>
+          </button>
+          <button id="btn-next-tape" class="cyber-btn cyber-btn-small" type="button" aria-label="Next Cassette">
+            <span>NEXT ▶</span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Telemetry -->
+    <footer class="bottom-bar">
+      <div class="telemetry-group">
+        <span class="vault-hint">CLICK OR TAP ANY 3D CASSETTE TO INSPECT &amp; LAUNCH • SWIPE OR USE ARROWS TO BROWSE</span>
+      </div>
+      <div class="controls-group">
+        <span class="cyber-badge">DECK READY</span>
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="./vault.js"></script>
+</body>
+</html>

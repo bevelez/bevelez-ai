@@ -140,6 +140,68 @@ html, body {
   flex-wrap: nowrap;
 }
 
+/* Secret Easter Egg Cyber-Cassette / Data Shard Button */
+.secret-shard-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 28px;
+  padding: 4px 6px;
+  background: rgba(8, 5, 22, 0.45);
+  border: 1px solid rgba(0, 243, 255, 0.18);
+  border-radius: 6px;
+  color: rgba(0, 243, 255, 0.58);
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: all 0.22s ease;
+  animation: shardGlitchPulse 6.5s infinite ease-in-out;
+}
+
+.secret-shard-btn:hover,
+.secret-shard-btn:active {
+  color: #ffffff;
+  background: rgba(255, 0, 127, 0.28);
+  border-color: var(--neon-magenta);
+  box-shadow: 0 0 18px rgba(255, 0, 127, 0.65), 0 0 8px rgba(0, 243, 255, 0.5);
+  transform: translateY(-1px) scale(1.08);
+}
+
+@keyframes shardGlitchPulse {
+  0%, 88%, 100% {
+    opacity: 0.62;
+    filter: drop-shadow(0 0 2px rgba(0, 243, 255, 0.3));
+    transform: translate(0, 0);
+  }
+  90% {
+    opacity: 1;
+    color: var(--neon-magenta);
+    filter: drop-shadow(-2px 0 4px #ff007f) drop-shadow(2px 0 4px #00f3ff);
+    transform: translate(-1px, 0.5px);
+  }
+  92% {
+    opacity: 0.45;
+    transform: translate(1px, -0.5px);
+  }
+  94% {
+    opacity: 0.95;
+    color: var(--neon-cyan);
+    filter: drop-shadow(0 0 8px #00f3ff);
+    transform: translate(0, 0);
+  }
+}
+
+body.warping-to-vault {
+  animation: warpFlash 0.65s forwards ease-in;
+}
+
+@keyframes warpFlash {
+  0% { filter: brightness(1) contrast(1); }
+  50% { filter: brightness(1.6) contrast(1.35) hue-rotate(25deg); }
+  100% { filter: brightness(2.8) blur(4px); opacity: 0; }
+}
+
 #audio-visualizer {
   background: rgba(8, 5, 22, 0.72);
   border: 1px solid rgba(255, 0, 127, 0.35);

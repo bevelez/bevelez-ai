@@ -696,6 +696,42 @@ btnCamera.addEventListener('click', () => {
   cameraLabel.textContent = `CAM: ${CAMERA_MODES[currentCameraIdx].name}`;
 });
 
+// Secret Easter Egg Cyber-Cassette Vault Transition
+const btnSecretVault = document.getElementById('btn-secret-vault');
+if (btnSecretVault) {
+  btnSecretVault.addEventListener('click', () => {
+    overdriveLocked = true;
+    displayedMph = 999;
+    speedValueEl.textContent = '999';
+    document.body.classList.add('warping-to-vault');
+
+    // Quick futuristic cassette-insert synth chime
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = audioEngine.ctx || new AudioCtx();
+      const now = ctx.currentTime;
+      [554.37, 659.25, 830.61, 1108.73].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.065);
+        gain.gain.setValueAtTime(0.14, now + idx * 0.065);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.065 + 0.32);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.065);
+        osc.stop(now + idx * 0.065 + 0.34);
+      });
+    } catch {
+      // Ignore audio errors if blocked
+    }
+
+    setTimeout(() => {
+      window.location.href = './vault.html';
+    }, 580);
+  });
+}
+
 // Lyria 3.5 Modal Controls
 btnLyriaModal.addEventListener('click', () => {
   lyriaModal.classList.remove('hidden');
