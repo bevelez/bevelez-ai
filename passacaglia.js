@@ -134,18 +134,24 @@ function getChapterAtTime(t) {
 
 class PassacagliaAudioEngine {
   constructor() {
-    this.audio = new Audio('./assets/passacaglia.mp3?v=15');
+    this.audio = document.getElementById('passacaglia-audio') || new Audio('./assets/passacaglia.mp3?v=16');
     this.audio.preload = 'auto';
+    this.audio.playsInline = true;
     this.isPlaying = false;
+    this._starting = false;
     this.smoothedEnergy = 0.2;
   }
 
   async play() {
+    if (this._starting || (this.isPlaying && !this.audio.paused)) return;
+    this._starting = true;
     try {
       await this.audio.play();
       this.isPlaying = true;
     } catch (err) {
       console.warn('Audio play prevented:', err);
+    } finally {
+      this._starting = false;
     }
   }
 
@@ -295,6 +301,10 @@ const NUM_SPECTRUM_BINS = 240;
 const DST_M = PTS_PER_STROKE - 2; // 14 interior points/modes
 const dstBasis = new Float32Array(DST_M * DST_M);
 const dstProjMatrix = new Float32Array(DST_M * DST_M);
+const dstWeights = new Float32Array(DST_M);
+const dstResX = new Float32Array(DST_M);
+const dstResY = new Float32Array(DST_M);
+const dstResZ = new Float32Array(DST_M);
 for (let m = 0; m < DST_M; m++) {
   for (let k = 0; k < DST_M; k++) {
     dstBasis[m * DST_M + k] = Math.sqrt(2.0 / (DST_M + 1)) * Math.sin((Math.PI * (m + 1) * (k + 1)) / (DST_M + 1));
@@ -313,25 +323,23 @@ function applyPerStrokeHarmonicCrystallization(inOutXYZ, modeCutoff) {
   const mu = Math.max(0.65, modeCutoff);
 
   // Build symmetric 14x14 spectral projection matrix P(mu) = Phi^T * diag(w_m) * Phi
-  const weights = new Float32Array(DST_M);
   for (let m = 0; m < DST_M; m++) {
     const ratio = (m + 1) / mu;
-    weights[m] = Math.exp(-0.5 * Math.pow(ratio, 3.2));
+    dstWeights[m] = Math.exp(-0.5 * Math.pow(ratio, 3.2));
   }
   for (let r = 0; r < DST_M; r++) {
     for (let c = r; c < DST_M; c++) {
       let sum = 0.0;
       for (let m = 0; m < DST_M; m++) {
-        sum += dstBasis[m * DST_M + r] * weights[m] * dstBasis[m * DST_M + c];
+        sum += dstBasis[m * DST_M + r] * dstWeights[m] * dstBasis[m * DST_M + c];
       }
       dstProjMatrix[r * DST_M + c] = sum;
       dstProjMatrix[c * DST_M + r] = sum;
     }
   }
-
-  const resX = new Float32Array(DST_M);
-  const resY = new Float32Array(DST_M);
-  const resZ = new Float32Array(DST_M);
+  const resX = dstResX;
+  const resY = dstResY;
+  const resZ = dstResZ;
 
   for (let s = 0; s < NUM_STROKES; s++) {
     const baseVertex = s * PTS_PER_STROKE;
@@ -580,8 +588,9 @@ function sampleSceneIntoBuffer(sceneKey, localProgress, timeSec, outXYZ, outPen)
 // ============================================================================
 
 const container = document.getElementById('canvas-container');
+const isMobileDevice = window.innerWidth < 860 || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobileDevice ? 1.35 : 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.02;
@@ -606,8 +615,9 @@ controls.target.set(0, -0.05, 0);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+const bloomScale = isMobileDevice ? 0.5 : 1.0;
 const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  new THREE.Vector2(window.innerWidth * bloomScale, window.innerHeight * bloomScale),
   0.50,
   0.40,
   0.24
@@ -953,7 +963,14 @@ if (btnFourierLens) {
   });
 }
 
-window.addEventListener('pointerdown', (e) => {
+whisperPrompt.addEventListener('click', (e) => {
+  e.stopPropagation();
+  if (!audioEngine.isPlaying) {
+    startPlayback();
+  }
+});
+
+window.addEventListener('click', (e) => {
   if (e.target.closest('.ui')) return;
   if (!audioEngine.isPlaying && !whisperPrompt.classList.contains('fade-out')) {
     startPlayback();

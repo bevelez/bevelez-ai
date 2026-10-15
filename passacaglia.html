@@ -7,6 +7,7 @@
   <meta name="description" content="A visual story of a life in 3D Spatio-Temporal Fourier curves set to Handel's Passacaglia in G Minor, HWV 432/6." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preload" href="./assets/passacaglia.mp3?v=16" as="audio" type="audio/mpeg" />
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 
   <style>
@@ -68,12 +69,14 @@
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      pointer-events: none;
+      pointer-events: auto;
+      cursor: pointer;
       transition: opacity 0.8s ease;
     }
 
     .whisper-prompt.fade-out {
       opacity: 0;
+      pointer-events: none;
     }
 
     .whisper-text {
@@ -475,7 +478,8 @@
     </footer>
   </div>
 
-  <script src="./passacaglia-scenes.js?v=15"></script>
-  <script type="module" src="./passacaglia.js?v=15"></script>
+  <audio id="passacaglia-audio" src="./assets/passacaglia.mp3?v=16" preload="auto" playsinline webkit-playsinline></audio>
+  <script src="./passacaglia-scenes.js?v=16"></script>
+  <script type="module" src="./passacaglia.js?v=16"></script>
 </body>
 </html>
