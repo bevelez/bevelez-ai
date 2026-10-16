@@ -2,17 +2,17 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ============================================================================
-// 1. CURATED CASSETTE ARCHIVE — EACH TAPE MATCHES ITS MUSICAL & VISUAL WORLD
+// 1. CURATED CASSETTE ARCHIVE — 2-ACROSS VERTICAL GRID OF 3D TAPES
 // ============================================================================
 const TAPES = [
   {
     id: '01',
-    pillLabel: '01  Clair de Lune',
     indexMeta: 'No. 01 — Claude Debussy, 1890',
     title: 'Clair de Lune',
     desc: 'An intimate nocturnal study for dark felt grand piano in D♭ major. Listen as the piano performs, or play directly across the keys.',
     unlocked: true,
     url: './clair-de-lune.html',
+    ctaLabel: 'Enter Clair de Lune',
     shellColor: 0x1e2942,
     shellAttenuation: 0x0b101d,
     ribColor: 0x151d30,
@@ -21,27 +21,26 @@ const TAPES = [
   },
   {
     id: '02',
-    pillLabel: '02  Passacaglia',
     indexMeta: 'No. 02 — G. F. Handel, HWV 432/6',
     title: 'Passacaglia in G Minor',
-    desc: 'A visual story of a life told through intricate 3D emissive line sculptures that merge across eight movements of Handel’s Passacaglia.',
+    desc: 'A visual story of a life told through intricate 3D Fourier line sculptures that flow across eight movements of Handel’s Passacaglia.',
     unlocked: true,
     url: './passacaglia.html',
-    // Warm Smoked Bronze / Espresso Obsidian translucent shell
-    shellColor: 0x3b2a1e,
-    shellAttenuation: 0x1a110b,
-    ribColor: 0x2b1d14,
-    hubColor: 0xede4d3,
+    ctaLabel: 'Enter Passacaglia',
+    shellColor: 0x241d34,
+    shellAttenuation: 0x0c0816,
+    ribColor: 0x1a1426,
+    hubColor: 0xf4e8d1,
     artStyle: 'passacaglia'
   },
   {
     id: '03',
-    pillLabel: '03  Night Drive',
     indexMeta: 'No. 03 — Interactive Audio Cruiser',
     title: 'Night Drive',
     desc: 'Endless midnight highway cruiser with procedural synthwave and Gemini Lyria 3.5 soundtrack generation.',
     unlocked: true,
     url: './index.html',
+    ctaLabel: 'Enter Night Drive',
     shellColor: 0x9e1b3e,
     shellAttenuation: 0x59091e,
     ribColor: 0x7d1230,
@@ -50,12 +49,12 @@ const TAPES = [
   },
   {
     id: '04',
-    pillLabel: '04  Etude in Glass',
     indexMeta: 'No. 04 — In Production',
     title: 'Etude in Glass',
     desc: 'Upcoming polyphonic harmonic study for bowed glass and resonant strings.',
     unlocked: false,
     url: null,
+    ctaLabel: 'In Production',
     shellColor: 0x5c7a6b,
     shellAttenuation: 0x2d4238,
     ribColor: 0x486356,
@@ -65,50 +64,9 @@ const TAPES = [
 ];
 
 // ============================================================================
-// 2. THREE.JS SCENE, HDR STUDIO LIGHTING & SOFT CONTACT SHADOW
+// 2. PER-STAGE BOUND THREE.JS SCENE & RENDERER FACTORY
 // ============================================================================
-const container = document.getElementById('canvas-container');
-const scene = new THREE.Scene();
-
-// Pulled-back camera framing so the cassette sits with generous negative space
-const camera = new THREE.PerspectiveCamera(
-  34,
-  window.innerWidth / window.innerHeight,
-  0.5,
-  60
-);
-camera.position.set(0, 0.08, 10.4);
-
-const renderer = new THREE.WebGLRenderer({
-  antialias: true,
-  alpha: true,
-  powerPreference: 'high-performance'
-});
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
-container.appendChild(renderer.domElement);
-
-const pmremGenerator = new THREE.PMREMGenerator(renderer);
-const roomEnv = new RoomEnvironment();
-scene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
-roomEnv.dispose();
-
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
-scene.add(ambientLight);
-
-const keyLight = new THREE.DirectionalLight(0xfffcf5, 2.5);
-keyLight.position.set(5, 8, 7);
-scene.add(keyLight);
-
-const fillLight = new THREE.DirectionalLight(0xeef2ff, 1.35);
-fillLight.position.set(-6, 3, 5);
-scene.add(fillLight);
-
-const rimLight = new THREE.DirectionalLight(0xffffff, 1.9);
-rimLight.position.set(0, 5, -7);
-scene.add(rimLight);
+const isMobile = window.innerWidth < 900 || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
 
 function createShadowTexture() {
   const c = document.createElement('canvas');
@@ -116,24 +74,17 @@ function createShadowTexture() {
   c.height = 256;
   const ctx = c.getContext('2d');
   const grad = ctx.createRadialGradient(256, 128, 10, 256, 128, 220);
-  grad.addColorStop(0, 'rgba(15, 14, 12, 0.25)');
-  grad.addColorStop(0.5, 'rgba(15, 14, 12, 0.09)');
+  grad.addColorStop(0, 'rgba(15, 14, 12, 0.24)');
+  grad.addColorStop(0.5, 'rgba(15, 14, 12, 0.08)');
   grad.addColorStop(1, 'rgba(15, 14, 12, 0)');
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 512, 256);
   return new THREE.CanvasTexture(c);
 }
 
-const shadowGeo = new THREE.PlaneGeometry(5.2, 1.45);
+const shadowGeo = new THREE.PlaneGeometry(5.0, 1.38);
 shadowGeo.rotateX(-Math.PI / 2);
-const shadowMat = new THREE.MeshBasicMaterial({
-  map: createShadowTexture(),
-  transparent: true,
-  depthWrite: false
-});
-const floorShadow = new THREE.Mesh(shadowGeo, shadowMat);
-floorShadow.position.set(0, -1.72, 0);
-scene.add(floorShadow);
+const sharedShadowTex = createShadowTexture();
 
 // ============================================================================
 // 3. BESPOKE COVER ART GENERATOR FOR EACH CASSETTE TAPE
@@ -167,7 +118,6 @@ function drawClairDeLuneArtwork(ctx) {
   ctx.fillStyle = moonGlow;
   ctx.fillRect(0, 0, 1024, 480);
 
-  // Full Moon
   ctx.save();
   ctx.fillStyle = '#f3e3be';
   ctx.beginPath();
@@ -181,7 +131,6 @@ function drawClairDeLuneArtwork(ctx) {
   ctx.fill();
   ctx.restore();
 
-  // Moonlight water ripples
   ctx.save();
   ctx.strokeStyle = 'rgba(235, 212, 160, 0.55)';
   for (let i = 0; i < 14; i++) {
@@ -196,7 +145,6 @@ function drawClairDeLuneArtwork(ctx) {
   }
   ctx.restore();
 
-  // Bottom piano keybed band
   ctx.fillStyle = '#070910';
   ctx.fillRect(16, 396, 992, 68);
 
@@ -254,111 +202,250 @@ function drawClairDeLuneArtwork(ctx) {
 }
 
 function drawPassacagliaArtwork(ctx) {
-  // Deep warm espresso-obsidian canvas with golden Fourier epicycle rings & dancing couple contour
+  // 1. Deep nocturnal midnight-indigo & warm obsidian cosmos backdrop
   const bg = ctx.createLinearGradient(0, 0, 1024, 480);
-  bg.addColorStop(0, '#0f0b08');
-  bg.addColorStop(0.55, '#1c140e');
-  bg.addColorStop(1, '#0c0806');
+  bg.addColorStop(0, '#050812');
+  bg.addColorStop(0.5, '#0c1326');
+  bg.addColorStop(1, '#120c1c');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 1024, 480);
 
-  // Warm golden aura around the Fourier epicycles on the right
-  const glow = ctx.createRadialGradient(835, 210, 8, 835, 210, 170);
-  glow.addColorStop(0, 'rgba(235, 195, 120, 0.32)');
-  glow.addColorStop(0.5, 'rgba(210, 155, 80, 0.10)');
-  glow.addColorStop(1, 'rgba(15, 11, 8, 0)');
-  ctx.fillStyle = glow;
+  // Dual harmonic auras: ice-cyan & warm champagne gold around the waltzing couple stage
+  const cyanAura = ctx.createRadialGradient(892, 210, 6, 892, 210, 185);
+  cyanAura.addColorStop(0, 'rgba(102, 212, 255, 0.34)');
+  cyanAura.addColorStop(0.45, 'rgba(102, 212, 255, 0.12)');
+  cyanAura.addColorStop(1, 'rgba(5, 8, 18, 0)');
+  ctx.fillStyle = cyanAura;
   ctx.fillRect(0, 0, 1024, 480);
 
-  // Nested Fourier Epicycle Circles & Radius Vectors on right side
-  ctx.save();
-  const epicycles = [
-    { x: 835, y: 205, r: 78 },
-    { x: 835 + 55, y: 205 - 55, r: 38 },
-    { x: 835 + 55 - 26, y: 205 - 55 - 28, r: 18 },
-    { x: 835 + 55 - 26 + 14, y: 205 - 55 - 28 + 11, r: 8 }
-  ];
-  epicycles.forEach((c, idx) => {
-    ctx.strokeStyle = `rgba(230, 194, 128, ${0.35 + idx * 0.12})`;
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-    ctx.stroke();
+  const goldAura = ctx.createRadialGradient(855, 145, 8, 855, 145, 170);
+  goldAura.addColorStop(0, 'rgba(242, 198, 120, 0.26)');
+  goldAura.addColorStop(0.5, 'rgba(212, 165, 90, 0.08)');
+  goldAura.addColorStop(1, 'rgba(5, 8, 18, 0)');
+  ctx.fillStyle = goldAura;
+  ctx.fillRect(0, 0, 1024, 480);
 
-    if (idx < epicycles.length - 1) {
-      const next = epicycles[idx + 1];
-      ctx.strokeStyle = 'rgba(245, 222, 179, 0.65)';
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(next.x, next.y);
-      ctx.stroke();
-    }
+  // Subtle starlight harmonic dust across the top sky
+  const starCoords = [
+    [540, 52, 1.4], [585, 84, 1.1], [630, 46, 1.6], [678, 72, 1.2],
+    [725, 58, 1.8], [768, 92, 1.3], [818, 48, 1.5], [948, 64, 1.4],
+    [965, 118, 1.2], [835, 355, 1.3], [962, 342, 1.5], [148, 192, 1.3]
+  ];
+  starCoords.forEach(([sx, sy, sr], idx) => {
+    ctx.fillStyle = idx % 2 === 0 ? 'rgba(130, 224, 255, 0.7)' : 'rgba(245, 212, 148, 0.7)';
+    ctx.beginPath();
+    ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+    ctx.fill();
   });
 
-  // Glowing continuous Fourier curve silhouette on the right (waltzing arc)
-  ctx.strokeStyle = '#f7e4bc';
-  ctx.shadowColor = '#e6b86a';
-  ctx.shadowBlur = 12;
-  ctx.lineWidth = 2.8;
-  ctx.beginPath();
-  for (let t = 0; t <= Math.PI * 2; t += 0.04) {
-    const x = 835 + Math.sin(t) * 46 + Math.cos(2 * t + 0.6) * 22 + Math.sin(3 * t) * 11;
-    const y = 215 + Math.cos(t) * 64 + Math.sin(2 * t) * 18 + Math.cos(5 * t) * 7;
-    if (t === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+  // 2. Optimal-Transport Geodesic Ribbons sweeping across the upper sky (x=510..875, y=55..148)
+  ctx.save();
+  for (let r = 0; r < 4; r++) {
+    ctx.strokeStyle = r % 2 === 0
+      ? `rgba(115, 216, 255, ${0.28 + r * 0.08})`
+      : `rgba(240, 196, 120, ${0.26 + r * 0.08})`;
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    for (let x = 515; x <= 870; x += 6) {
+      const t = (x - 515) / 355;
+      const y = 118 - Math.sin(t * Math.PI) * (36 - r * 7) + Math.sin(t * 9 + r * 1.4) * 5;
+      if (x === 515) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
   }
-  ctx.closePath();
-  ctx.stroke();
   ctx.restore();
 
-  // Bottom bar with harmonic wave
-  ctx.fillStyle = '#090604';
+  // 3. Fourier Epicycle Orbits behind the Waltzing Couple (Right Stage x=892, y=218)
+  ctx.save();
+  const cx = 892;
+  const cy = 218;
+  const rings = [
+    { x: cx, y: cy, r: 78, color: 'rgba(235, 195, 120, 0.25)' },
+    { x: cx + 22, y: cy - 28, r: 46, color: 'rgba(115, 216, 255, 0.30)' },
+    { x: cx + 8, y: cy - 48, r: 22, color: 'rgba(245, 218, 165, 0.38)' }
+  ];
+  rings.forEach((ring) => {
+    ctx.strokeStyle = ring.color;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+  ctx.restore();
+
+  // 4. Iconic 3D Calligraphic Line Sculpture: The Waltzing Couple (Scene I & VII)
+  // Helper to stroke a calligraphic curve with cyan outer luminescence & warm ivory-cyan core
+  function strokeCalligraphicPath(points, close = false, isGoldAccent = false) {
+    if (points.length < 2) return;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // Outer glow pass
+    ctx.strokeStyle = isGoldAccent ? 'rgba(242, 196, 115, 0.55)' : 'rgba(102, 212, 255, 0.62)';
+    ctx.shadowColor = isGoldAccent ? '#f2c473' : '#66d4ff';
+    ctx.shadowBlur = 12;
+    ctx.lineWidth = 3.6;
+    ctx.beginPath();
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const mx = (prev[0] + curr[0]) * 0.5;
+      const my = (prev[1] + curr[1]) * 0.5;
+      ctx.quadraticCurveTo(prev[0], prev[1], mx, my);
+    }
+    const last = points[points.length - 1];
+    ctx.lineTo(last[0], last[1]);
+    if (close) ctx.closePath();
+    ctx.stroke();
+
+    // Crisp luminous core pass
+    ctx.shadowBlur = 4;
+    ctx.strokeStyle = isGoldAccent ? '#fff3d6' : '#e8f9ff';
+    ctx.lineWidth = 1.7;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Gentleman silhouette & waltz posture (left partner of the waltz)
+  strokeCalligraphicPath([
+    [872, 114], [863, 122], [864, 136], [873, 144], [879, 138], [876, 124]
+  ], true);
+  // Gentleman shoulders, tailored coat & torso
+  strokeCalligraphicPath([
+    [866, 148], [852, 168], [848, 206], [854, 248], [851, 296], [847, 344]
+  ]);
+  strokeCalligraphicPath([
+    [874, 152], [877, 195], [874, 245], [876, 298], [880, 346]
+  ]);
+  // Gentleman leading arm raised to clasp her hand
+  strokeCalligraphicPath([
+    [868, 156], [884, 174], [898, 166], [906, 152]
+  ], false, true);
+  // Gentleman embrace arm around her waist
+  strokeCalligraphicPath([
+    [862, 170], [885, 192], [912, 196]
+  ]);
+
+  // Lady head in profile & flowing hair ribbon (right partner of the waltz)
+  strokeCalligraphicPath([
+    [920, 122], [912, 130], [914, 143], [924, 148], [931, 138], [928, 125]
+  ], true);
+  strokeCalligraphicPath([
+    [928, 126], [942, 134], [952, 150], [948, 168]
+  ], false, true);
+  // Lady raised arm meeting his hand at (906, 152)
+  strokeCalligraphicPath([
+    [906, 152], [914, 164], [922, 156]
+  ], false, true);
+  // Lady bodice & arched waltz back
+  strokeCalligraphicPath([
+    [916, 154], [908, 182], [906, 206]
+  ]);
+  strokeCalligraphicPath([
+    [928, 156], [930, 184], [926, 208]
+  ]);
+
+  // Swirling 3D Fourier Waltz Gown — cascading calligraphic contour ribbons
+  const dressRibbons = [
+    [[906, 206], [894, 242], [882, 286], [868, 336], [892, 348]],
+    [[911, 207], [904, 246], [898, 294], [894, 346], [918, 354]],
+    [[916, 208], [918, 248], [922, 298], [926, 350], [948, 346]],
+    [[922, 208], [934, 246], [948, 292], [964, 338], [942, 348]],
+    [[926, 208], [946, 240], [966, 280], [978, 322]]
+  ];
+  dressRibbons.forEach((ribbon, idx) => {
+    strokeCalligraphicPath(ribbon, false, idx % 2 === 1);
+  });
+
+  // Swirling hemline harmonic wave connecting the gown folds in 3D space
+  strokeCalligraphicPath([
+    [866, 336], [884, 350], [906, 342], [928, 354], [952, 344], [976, 324]
+  ], false, true);
+
+  // 5. Lower Frieze: The 8 Scenes of a Life Harmonic Timeline (y=396..464)
+  ctx.fillStyle = '#04060d';
   ctx.fillRect(16, 396, 992, 68);
 
-  ctx.strokeStyle = '#d4af72';
+  ctx.strokeStyle = '#d8b474';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(16, 396);
   ctx.lineTo(1008, 396);
   ctx.stroke();
 
-  // Fourier wave along bottom center
-  ctx.strokeStyle = 'rgba(230, 194, 128, 0.75)';
-  ctx.lineWidth = 2;
+  // Dual interweaving Fourier waves (cyan & gold) across the center of the frieze
+  ctx.save();
+  ctx.strokeStyle = 'rgba(102, 212, 255, 0.72)';
+  ctx.lineWidth = 1.8;
   ctx.beginPath();
-  for (let x = 310; x <= 714; x += 3) {
-    const u = (x - 310) * 0.045;
-    const y = 430 + Math.sin(u) * 11 + Math.sin(u * 2.7) * 5 + Math.cos(u * 5.1) * 2.5;
-    if (x === 310) ctx.moveTo(x, y);
+  for (let x = 235; x <= 775; x += 3) {
+    const u = ((x - 235) / 540) * Math.PI * 4;
+    const y = 426 + Math.sin(u) * 10 + Math.cos(u * 2.5) * 4;
+    if (x === 235) ctx.moveTo(x, y);
     else ctx.lineTo(x, y);
   }
   ctx.stroke();
 
-  // Typography
-  ctx.fillStyle = '#d4af72';
+  ctx.strokeStyle = 'rgba(232, 190, 116, 0.78)';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  for (let x = 235; x <= 775; x += 3) {
+    const u = ((x - 235) / 540) * Math.PI * 4;
+    const y = 426 - Math.sin(u) * 9 + Math.sin(u * 3.0) * 3.5;
+    if (x === 235) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // 8 Glowing Life-Variation Nodes (I through VIII)
+  const numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
+  ctx.font = '500 11px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  numerals.forEach((num, idx) => {
+    const nx = 255 + idx * (500 / 7);
+    ctx.fillStyle = idx % 2 === 0 ? '#73d8ff' : '#f0c678';
+    ctx.beginPath();
+    ctx.arc(nx, 422, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(245, 240, 230, 0.72)';
+    ctx.fillText(num, nx, 452);
+  });
+  ctx.restore();
+
+  // 6. Editorial Typography & Archival Metadata
+  ctx.fillStyle = '#e0bc7c';
   ctx.font = '500 17px "JetBrains Mono", monospace';
-  ctx.fillText('G. F. HANDEL  ·  SUITE NO. 7 IN G MINOR, HWV 432/6', 56, 62);
+  ctx.fillText('G. F. HANDEL  ·  HWV 432/6  ·  A LIFE IN 8 SCENES', 56, 62);
 
-  ctx.fillStyle = '#f7f2e7';
+  ctx.save();
+  ctx.fillStyle = '#f7f3eb';
+  ctx.shadowColor = 'rgba(102, 212, 255, 0.28)';
+  ctx.shadowBlur = 10;
   ctx.font = 'italic 600 68px "Cormorant Garamond", "Georgia", serif';
-  ctx.fillText('VI. Passacaglia', 54, 132);
+  ctx.fillText('Passacaglia', 54, 132);
+  ctx.restore();
 
-  ctx.fillStyle = '#d4af72';
-  ctx.font = '500 16px "JetBrains Mono", monospace';
-  ctx.fillText('SIDE A', 56, 245);
-  ctx.fillStyle = 'rgba(247, 242, 231, 0.68)';
+  ctx.fillStyle = '#73d8ff';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('8 MOVEMENTS', 56, 242);
+  ctx.fillStyle = 'rgba(247, 243, 235, 0.72)';
   ctx.font = '400 15px "JetBrains Mono", monospace';
-  ctx.fillText('G MINOR', 56, 270);
-  ctx.fillText('FOURIER LIFE', 56, 294);
-  ctx.fillText('8 VARIATIONS', 56, 318);
+  ctx.fillText('G MINOR', 56, 268);
+  ctx.fillText('3D FOURIER', 56, 292);
+  ctx.fillText('LINE STORY', 56, 316);
 
-  ctx.fillStyle = '#d4af72';
+  ctx.fillStyle = '#e0bc7c';
+  ctx.font = '400 15px "JetBrains Mono", monospace';
   ctx.fillText('NO. 02', 56, 436);
   ctx.textAlign = 'right';
-  ctx.fillText('∑ cₙ e^(inωt)', 968, 436);
+  ctx.fillText('∑ cₙ e^(inωt) · 8 VAR.', 968, 436);
   ctx.textAlign = 'left';
 
-  ctx.strokeStyle = 'rgba(212, 175, 114, 0.65)';
+  ctx.strokeStyle = 'rgba(224, 188, 124, 0.68)';
   ctx.lineWidth = 3;
   roundedRectPath(ctx, 26, 24, 972, 432, 20);
   ctx.stroke();
@@ -483,7 +570,6 @@ function createCassetteStickerTexture(tape) {
   }
   ctx.restore();
 
-  // PILL-SHAPED TRANSPARENT CENTER WINDOW CUTOUT
   const winX = 216;
   const winY = 166;
   const winW = 592;
@@ -510,11 +596,8 @@ function createCassetteStickerTexture(tape) {
 }
 
 // ============================================================================
-// 4. ZERO-Z-FIGHTING PRECISION 3D TRANSLUCENT CASSETTE ASSEMBLY
+// 4. SHARED CASSETTE GEOMETRIES & PER-TAPE 3D CASSETTE BUILDER
 // ============================================================================
-const cassetteRoot = new THREE.Group();
-scene.add(cassetteRoot);
-
 const SHELL_W = 4.2;
 const SHELL_H = 2.68;
 const WALL_T = 0.14;
@@ -580,49 +663,9 @@ function createRoundedPlateGeometry(w, h, depth, cornerR) {
   return geo;
 }
 
-const clearAcrylicMat = new THREE.MeshPhysicalMaterial({
-  color: 0x1e2942,
-  attenuationColor: new THREE.Color(0x0b101d),
-  attenuationDistance: 0.85,
-  transparent: true,
-  opacity: 1.0,
-  transmission: 0.86,
-  ior: 1.5,
-  thickness: 0.65,
-  roughness: 0.07,
-  metalness: 0.02,
-  clearcoat: 1.0,
-  clearcoatRoughness: 0.05
-});
-
-const innerRibAcrylicMat = new THREE.MeshPhysicalMaterial({
-  color: 0x151d30,
-  transparent: true,
-  opacity: 0.68,
-  transmission: 0.55,
-  ior: 1.48,
-  roughness: 0.15,
-  metalness: 0.08,
-  clearcoat: 1.0
-});
-
-// LAYER 1: Hollow Outer Rim Wall — strictly spans z = [-0.18, +0.18]
 const rimFrameGeo = createHollowFrameGeometry(SHELL_W, SHELL_H, 0.36, 0.18, WALL_T);
-const rimFrameMesh = new THREE.Mesh(rimFrameGeo, innerRibAcrylicMat);
-cassetteRoot.add(rimFrameMesh);
-
-// LAYER 2: Front & Back Faceplates — strictly outside the rim wall (z = ±0.200, spanning [0.186, 0.214])
 const plateGeo = createRoundedPlateGeometry(SHELL_W, SHELL_H, 0.028, 0.18);
-const frontPlate = new THREE.Mesh(plateGeo, clearAcrylicMat);
-frontPlate.position.z = 0.200;
-cassetteRoot.add(frontPlate);
 
-const backPlate = new THREE.Mesh(plateGeo, clearAcrylicMat);
-backPlate.position.z = -0.200;
-cassetteRoot.add(backPlate);
-
-// LAYER 3: Bottom Trapezoidal Head Bridge — positioned in the lower bay (y = [-1.26, -0.66])
-// Strictly below the sticker label (which ends at y = -0.56) and mounted on the exterior (z = ±0.228)!
 const trapShape = new THREE.Shape();
 trapShape.moveTo(-1.36, -0.28);
 trapShape.lineTo(1.36, -0.28);
@@ -645,36 +688,14 @@ const trapPlateGeo = new THREE.ExtrudeGeometry(trapShape, {
 });
 trapPlateGeo.center();
 
-const trapFront = new THREE.Mesh(trapPlateGeo, innerRibAcrylicMat);
-trapFront.position.set(0, -0.96, 0.228);
-cassetteRoot.add(trapFront);
-
-const trapBack = new THREE.Mesh(trapPlateGeo, innerRibAcrylicMat);
-trapBack.position.set(0, -0.96, -0.228);
-cassetteRoot.add(trapBack);
-
-// Internal structural ribs inside the hollow cavity (z = [-0.16, +0.16])
 const ribGeo = new THREE.BoxGeometry(0.032, 0.44, 0.32);
-[-0.65, -0.22, 0.22, 0.65].forEach((rx) => {
-  const rib = new THREE.Mesh(ribGeo, innerRibAcrylicMat);
-  rib.position.set(rx, -0.96, 0);
-  cassetteRoot.add(rib);
-});
+const padShieldGeo = new THREE.BoxGeometry(0.36, 0.20, 0.22);
 
-// Metallic Pressure Pad Shield inside bottom slot (z = [-0.11, +0.11])
 const metalMat = new THREE.MeshStandardMaterial({
   color: 0xd8d4ca,
   metalness: 0.88,
   roughness: 0.22
 });
-const padShield = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.20, 0.22), metalMat);
-padShield.position.set(0, -1.06, 0);
-cassetteRoot.add(padShield);
-
-// LAYER 4: Two Spinning Internal Tape Reels (Strictly non-overlapping Z depths!)
-const reels = [];
-const reelPositionsX = [-0.88, 0.88];
-const reelRadii = [0.66, 0.49];
 
 const tapeOxideMat = new THREE.MeshStandardMaterial({
   color: 0x141218,
@@ -682,95 +703,55 @@ const tapeOxideMat = new THREE.MeshStandardMaterial({
   metalness: 0.22
 });
 
-const hubPlasticMat = new THREE.MeshStandardMaterial({
-  color: 0xe8dfd1,
-  roughness: 0.24,
-  metalness: 0.15
-});
-
-reelPositionsX.forEach((rx, idx) => {
-  const reelGroup = new THREE.Group();
-  reelGroup.position.set(rx, 0.22, 0);
-
-  // Magnetic tape pancake: depth = 0.20 (z = [-0.10, +0.10]), outerR -> 0.29
-  const packRadius = reelRadii[idx];
-  const innerHubR = 0.29;
-  const pancakeShape = new THREE.Shape();
-  pancakeShape.absarc(0, 0, packRadius, 0, Math.PI * 2, false);
-  const pancakeHole = new THREE.Path();
-  pancakeHole.absarc(0, 0, innerHubR, 0, Math.PI * 2, true);
-  pancakeShape.holes.push(pancakeHole);
-
-  const pancakeGeo = new THREE.ExtrudeGeometry(pancakeShape, {
-    depth: 0.20,
-    bevelEnabled: false,
-    curveSegments: 48
-  });
-  pancakeGeo.center();
-  const pancakeMesh = new THREE.Mesh(pancakeGeo, tapeOxideMat);
-  reelGroup.add(pancakeMesh);
-
-  // Hub Collar Ring: radius 0.285 -> 0.20, depth = 0.24 (z = [-0.12, +0.12])
-  const collarShape = new THREE.Shape();
-  collarShape.absarc(0, 0, 0.285, 0, Math.PI * 2, false);
-  const collarHole = new THREE.Path();
-  collarHole.absarc(0, 0, 0.20, 0, Math.PI * 2, true);
-  collarShape.holes.push(collarHole);
-
-  const collarGeo = new THREE.ExtrudeGeometry(collarShape, {
-    depth: 0.24,
-    bevelEnabled: false,
-    curveSegments: 32
-  });
-  collarGeo.center();
-  const collarMesh = new THREE.Mesh(collarGeo, hubPlasticMat);
-  reelGroup.add(collarMesh);
-
-  // 6 Inward Splined Drive Teeth: depth = 0.18 (z = [-0.09, +0.09]) — no Z-fighting with collar!
-  const toothGeo = new THREE.BoxGeometry(0.044, 0.075, 0.18);
-  for (let t = 0; t < 6; t++) {
-    const angle = (t / 6) * Math.PI * 2;
-    const tooth = new THREE.Mesh(toothGeo, hubPlasticMat);
-    tooth.position.set(Math.cos(angle) * 0.172, Math.sin(angle) * 0.172, 0);
-    tooth.rotation.z = angle + Math.PI / 2;
-    reelGroup.add(tooth);
-  }
-
-  cassetteRoot.add(reelGroup);
-  reels.push(reelGroup);
-});
-
-// Two Spinning Bottom-Corner Guide Rollers (Strictly stepped Z depths!)
-const guideRollers = [];
-const rollerGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.18, 24);
-rollerGeo.rotateX(Math.PI / 2);
 const rollerMat = new THREE.MeshStandardMaterial({
   color: 0x181520,
   roughness: 0.3,
   metalness: 0.5
 });
 
-[-1.62, 1.62].forEach((gx) => {
-  const rGroup = new THREE.Group();
-  rGroup.position.set(gx, -0.88, 0);
-
-  const rWheel = new THREE.Mesh(rollerGeo, rollerMat);
-  rGroup.add(rWheel);
-
-  const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.026, 0.21), metalMat);
-  rGroup.add(spoke);
-
-  const pin = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 0.25, 16).rotateX(Math.PI / 2),
-    metalMat
-  );
-  rGroup.add(pin);
-
-  cassetteRoot.add(rGroup);
-  guideRollers.push(rGroup);
+const reelPositionsX = [-0.88, 0.88];
+const reelRadii = [0.66, 0.49];
+const pancakeGeos = reelRadii.map((packRadius) => {
+  const innerHubR = 0.29;
+  const pancakeShape = new THREE.Shape();
+  pancakeShape.absarc(0, 0, packRadius, 0, Math.PI * 2, false);
+  const pancakeHole = new THREE.Path();
+  pancakeHole.absarc(0, 0, innerHubR, 0, Math.PI * 2, true);
+  pancakeShape.holes.push(pancakeHole);
+  const geo = new THREE.ExtrudeGeometry(pancakeShape, {
+    depth: 0.20,
+    bevelEnabled: false,
+    curveSegments: 40
+  });
+  geo.center();
+  return geo;
 });
 
-// Magnetic Tape Ribbon Path (depth = 0.16)
+const collarShape = new THREE.Shape();
+collarShape.absarc(0, 0, 0.285, 0, Math.PI * 2, false);
+const collarHole = new THREE.Path();
+collarHole.absarc(0, 0, 0.20, 0, Math.PI * 2, true);
+collarShape.holes.push(collarHole);
+const collarGeo = new THREE.ExtrudeGeometry(collarShape, {
+  depth: 0.24,
+  bevelEnabled: false,
+  curveSegments: 28
+});
+collarGeo.center();
+
+const toothGeo = new THREE.BoxGeometry(0.044, 0.075, 0.18);
+const rollerGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.18, 20);
+rollerGeo.rotateX(Math.PI / 2);
+const spokeGeo = new THREE.BoxGeometry(0.24, 0.026, 0.21);
+const pinGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.25, 14);
+pinGeo.rotateX(Math.PI / 2);
+
+const bossGeo = new THREE.CylinderGeometry(0.095, 0.095, 0.34, 18);
+bossGeo.rotateX(Math.PI / 2);
+const screwCapGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.012, 14);
+screwCapGeo.rotateX(Math.PI / 2);
+const stickerGeo = new THREE.PlaneGeometry(3.68, 1.72);
+
 const tapePathPoints = [
   new THREE.Vector3(-1.48, 0.22, 0),
   new THREE.Vector3(-1.76, -0.88, 0),
@@ -779,222 +760,363 @@ const tapePathPoints = [
   new THREE.Vector3(1.76, -0.88, 0),
   new THREE.Vector3(1.34, 0.22, 0)
 ];
-for (let i = 0; i < tapePathPoints.length - 1; i++) {
-  const start = tapePathPoints[i];
-  const end = tapePathPoints[i + 1];
-  const len = start.distanceTo(end);
-  const segGeo = new THREE.BoxGeometry(len, 0.016, 0.16);
-  const segMesh = new THREE.Mesh(segGeo, tapeOxideMat);
-  segMesh.position.copy(start).lerp(end, 0.5);
-  segMesh.rotation.z = Math.atan2(end.y - start.y, end.x - start.x);
-  cassetteRoot.add(segMesh);
+
+function buildCassetteInstance(tape, stageEl) {
+  const itemScene = new THREE.Scene();
+  const itemCamera = new THREE.PerspectiveCamera(32, 1.5, 0.5, 50);
+  itemCamera.position.set(0, 0.08, 8.2);
+
+  const itemRenderer = new THREE.WebGLRenderer({
+    antialias: true,
+    alpha: true,
+    powerPreference: 'high-performance'
+  });
+  const initW = Math.max(1, stageEl.clientWidth || 520);
+  const initH = Math.max(1, stageEl.clientHeight || 320);
+  itemRenderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+  itemRenderer.setSize(initW, initH, false);
+  itemRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  itemRenderer.toneMappingExposure = 1.12;
+  stageEl.appendChild(itemRenderer.domElement);
+
+  const pmremGenerator = new THREE.PMREMGenerator(itemRenderer);
+  const roomEnv = new RoomEnvironment();
+  itemScene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+  roomEnv.dispose();
+  pmremGenerator.dispose();
+
+  itemScene.add(new THREE.AmbientLight(0xffffff, 1.25));
+
+  const keyLight = new THREE.DirectionalLight(0xfffcf5, 2.5);
+  keyLight.position.set(5, 8, 7);
+  itemScene.add(keyLight);
+
+  const fillLight = new THREE.DirectionalLight(0xeef2ff, 1.35);
+  fillLight.position.set(-6, 3, 5);
+  itemScene.add(fillLight);
+
+  const rimLight = new THREE.DirectionalLight(0xffffff, 1.9);
+  rimLight.position.set(0, 5, -7);
+  itemScene.add(rimLight);
+
+  const shadowMat = new THREE.MeshBasicMaterial({
+    map: sharedShadowTex,
+    transparent: true,
+    depthWrite: false
+  });
+  const floorShadow = new THREE.Mesh(shadowGeo, shadowMat);
+  floorShadow.position.set(0, -1.66, 0);
+  itemScene.add(floorShadow);
+
+  const root = new THREE.Group();
+  itemScene.add(root);
+
+  const shellMat = new THREE.MeshPhysicalMaterial({
+    color: tape.shellColor,
+    attenuationColor: new THREE.Color(tape.shellAttenuation),
+    attenuationDistance: 0.85,
+    transparent: true,
+    opacity: 1.0,
+    transmission: 0.86,
+    ior: 1.5,
+    thickness: 0.65,
+    roughness: 0.07,
+    metalness: 0.02,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05
+  });
+
+  const ribMat = new THREE.MeshPhysicalMaterial({
+    color: tape.ribColor,
+    transparent: true,
+    opacity: 0.68,
+    transmission: 0.55,
+    ior: 1.48,
+    roughness: 0.15,
+    metalness: 0.08,
+    clearcoat: 1.0
+  });
+
+  const hubMat = new THREE.MeshStandardMaterial({
+    color: tape.hubColor,
+    roughness: 0.24,
+    metalness: 0.15
+  });
+
+  root.add(new THREE.Mesh(rimFrameGeo, ribMat));
+
+  const frontPlate = new THREE.Mesh(plateGeo, shellMat);
+  frontPlate.position.z = 0.200;
+  root.add(frontPlate);
+
+  const backPlate = new THREE.Mesh(plateGeo, shellMat);
+  backPlate.position.z = -0.200;
+  root.add(backPlate);
+
+  const trapFront = new THREE.Mesh(trapPlateGeo, ribMat);
+  trapFront.position.set(0, -0.96, 0.228);
+  root.add(trapFront);
+
+  const trapBack = new THREE.Mesh(trapPlateGeo, ribMat);
+  trapBack.position.set(0, -0.96, -0.228);
+  root.add(trapBack);
+
+  [-0.65, -0.22, 0.22, 0.65].forEach((rx) => {
+    const rib = new THREE.Mesh(ribGeo, ribMat);
+    rib.position.set(rx, -0.96, 0);
+    root.add(rib);
+  });
+
+  const padShield = new THREE.Mesh(padShieldGeo, metalMat);
+  padShield.position.set(0, -1.06, 0);
+  root.add(padShield);
+
+  const reels = [];
+  reelPositionsX.forEach((rx, idx) => {
+    const reelGroup = new THREE.Group();
+    reelGroup.position.set(rx, 0.22, 0);
+    reelGroup.add(new THREE.Mesh(pancakeGeos[idx], tapeOxideMat));
+    reelGroup.add(new THREE.Mesh(collarGeo, hubMat));
+
+    for (let t = 0; t < 6; t++) {
+      const angle = (t / 6) * Math.PI * 2;
+      const tooth = new THREE.Mesh(toothGeo, hubMat);
+      tooth.position.set(Math.cos(angle) * 0.172, Math.sin(angle) * 0.172, 0);
+      tooth.rotation.z = angle + Math.PI / 2;
+      reelGroup.add(tooth);
+    }
+    root.add(reelGroup);
+    reels.push(reelGroup);
+  });
+
+  const guideRollers = [];
+  [-1.62, 1.62].forEach((gx) => {
+    const rGroup = new THREE.Group();
+    rGroup.position.set(gx, -0.88, 0);
+    rGroup.add(new THREE.Mesh(rollerGeo, rollerMat));
+    rGroup.add(new THREE.Mesh(spokeGeo, metalMat));
+    rGroup.add(new THREE.Mesh(pinGeo, metalMat));
+    root.add(rGroup);
+    guideRollers.push(rGroup);
+  });
+
+  for (let i = 0; i < tapePathPoints.length - 1; i++) {
+    const start = tapePathPoints[i];
+    const end = tapePathPoints[i + 1];
+    const len = start.distanceTo(end);
+    const segGeo = new THREE.BoxGeometry(len, 0.016, 0.16);
+    const segMesh = new THREE.Mesh(segGeo, tapeOxideMat);
+    segMesh.position.copy(start).lerp(end, 0.5);
+    segMesh.rotation.z = Math.atan2(end.y - start.y, end.x - start.x);
+    root.add(segMesh);
+  }
+
+  [
+    [-1.88, 1.12],
+    [1.88, 1.12],
+    [-1.88, -1.12],
+    [1.88, -1.12]
+  ].forEach(([sx, sy]) => {
+    const boss = new THREE.Mesh(bossGeo, ribMat);
+    boss.position.set(sx, sy, 0);
+    root.add(boss);
+
+    const screwFront = new THREE.Mesh(screwCapGeo, metalMat);
+    screwFront.position.set(sx, sy, 0.222);
+    root.add(screwFront);
+
+    const screwBack = new THREE.Mesh(screwCapGeo, metalMat);
+    screwBack.position.set(sx, sy, -0.222);
+    root.add(screwBack);
+  });
+
+  const stickerMat = new THREE.MeshStandardMaterial({
+    map: createCassetteStickerTexture(tape),
+    alphaTest: 0.4,
+    transparent: false,
+    roughness: 0.26,
+    metalness: 0.06,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2
+  });
+
+  const stickerFrontMesh = new THREE.Mesh(stickerGeo, stickerMat);
+  stickerFrontMesh.position.set(0, 0.30, 0.224);
+  root.add(stickerFrontMesh);
+
+  const stickerBackMesh = new THREE.Mesh(stickerGeo, stickerMat);
+  stickerBackMesh.position.set(0, 0.30, -0.224);
+  stickerBackMesh.rotation.y = Math.PI;
+  root.add(stickerBackMesh);
+
+  return { root, reels, guideRollers, itemScene, itemCamera, itemRenderer, floorShadow };
 }
 
-// Corner Screw Posts (internal z = [-0.17, +0.17]) & Exterior Screw Heads (z = ±0.222)
-const bossGeo = new THREE.CylinderGeometry(0.095, 0.095, 0.34, 20);
-bossGeo.rotateX(Math.PI / 2);
-const screwCapGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.012, 16);
-screwCapGeo.rotateX(Math.PI / 2);
-
-[
-  [-1.88, 1.12],
-  [1.88, 1.12],
-  [-1.88, -1.12],
-  [1.88, -1.12]
-].forEach(([sx, sy]) => {
-  const boss = new THREE.Mesh(bossGeo, innerRibAcrylicMat);
-  boss.position.set(sx, sy, 0);
-  cassetteRoot.add(boss);
-
-  const screwFront = new THREE.Mesh(screwCapGeo, metalMat);
-  screwFront.position.set(sx, sy, 0.222);
-  cassetteRoot.add(screwFront);
-
-  const screwBack = new THREE.Mesh(screwCapGeo, metalMat);
-  screwBack.position.set(sx, sy, -0.222);
-  cassetteRoot.add(screwBack);
-});
-
-// LAYER 5: Exterior Die-Cut Cover Art Sticker Label
-// Height = 1.72, centered at y = +0.30 (spans y = [-0.56, +1.16], cleanly above the bottom trapezoid at y = -0.68!)
-// Positioned at z = ±0.224 with polygonOffset so it NEVER Z-fights with the faceplate (z = ±0.214)!
-const stickerGeo = new THREE.PlaneGeometry(3.68, 1.72);
-const stickerMat = new THREE.MeshStandardMaterial({
-  alphaTest: 0.4,
-  transparent: false,
-  roughness: 0.26,
-  metalness: 0.06,
-  polygonOffset: true,
-  polygonOffsetFactor: -2,
-  polygonOffsetUnits: -2
-});
-
-const stickerFrontMesh = new THREE.Mesh(stickerGeo, stickerMat);
-stickerFrontMesh.position.set(0, 0.30, 0.224);
-cassetteRoot.add(stickerFrontMesh);
-
-const stickerBackMesh = new THREE.Mesh(stickerGeo, stickerMat);
-stickerBackMesh.position.set(0, 0.30, -0.224);
-stickerBackMesh.rotation.y = Math.PI;
-cassetteRoot.add(stickerBackMesh);
-
 // ============================================================================
-// 5. UI WIRING & STATE
+// 5. BUILD 2-ACROSS VERTICAL GRID CARDS & INTERACTION HANDLERS
 // ============================================================================
-let currentTapeIdx = 0;
-let isPlayingAnim = true;
-let isRewinding = false;
-let isAutoOrbit = true;
-
-let isDragging = false;
-let dragMovedDistance = 0;
-let prevPointer = { x: 0, y: 0 };
-let userRotY = -0.22;
-let userRotX = 0.06;
-let targetZoomZ = 10.2; // Comfortable, uncrowded gallery framing
-
-const workIndexEl = document.getElementById('work-index');
-const workTitleEl = document.getElementById('work-title');
-const workDescEl = document.getElementById('work-desc');
-const btnOpenWork = document.getElementById('btn-open-work');
-const openWorkLabel = document.getElementById('open-work-label');
-const tapeSelectorEl = document.getElementById('tape-selector');
-
+const tapeGridEl = document.getElementById('tape-grid');
 const btnRewind = document.getElementById('btn-rewind');
 const btnReelPlay = document.getElementById('btn-reel-play');
 const reelPlayLabel = document.getElementById('reel-play-label');
 const btnOrbit = document.getElementById('btn-orbit');
 const btnBackdrop = document.getElementById('btn-backdrop');
 
-TAPES.forEach((tape, idx) => {
-  const pill = document.createElement('button');
-  pill.type = 'button';
-  pill.className = 'tape-pill' + (idx === 0 ? ' active' : '');
-  pill.textContent = tape.pillLabel;
-  pill.addEventListener('click', () => selectTape(idx));
-  tapeSelectorEl.appendChild(pill);
-});
+let isPlayingAnim = true;
+let isRewinding = false;
+let isAutoOrbit = true;
 
-function selectTape(idx) {
-  currentTapeIdx = idx;
-  const tape = TAPES[idx];
+const tapeItems = TAPES.map((tape, idx) => {
+  const cardEl = document.createElement('article');
+  cardEl.className = `tape-card ${tape.unlocked ? 'unlocked' : 'locked'}`;
+  cardEl.setAttribute('role', tape.unlocked ? 'link' : 'region');
+  if (tape.unlocked) {
+    cardEl.tabIndex = 0;
+  }
 
-  clearAcrylicMat.color.setHex(tape.shellColor);
-  clearAcrylicMat.attenuationColor.setHex(tape.shellAttenuation);
-  innerRibAcrylicMat.color.setHex(tape.ribColor);
-  hubPlasticMat.color.setHex(tape.hubColor);
+  cardEl.innerHTML = `
+    <div class="tape-stage" id="tape-stage-${idx}"></div>
+    <div class="tape-caption">
+      <div class="work-index">${tape.indexMeta}</div>
+      <h2 class="work-title">${tape.title}</h2>
+      <p class="work-desc">${tape.desc}</p>
+      <button class="open-work-btn" type="button" ${tape.unlocked ? '' : 'disabled'}>
+        <span>${tape.ctaLabel}</span>
+        ${tape.unlocked ? '<span>→</span>' : ''}
+      </button>
+    </div>
+  `;
 
-  const prevTex = stickerMat.map;
-  stickerMat.map = createCassetteStickerTexture(tape);
-  stickerMat.needsUpdate = true;
-  if (prevTex) prevTex.dispose();
+  tapeGridEl.appendChild(cardEl);
+  const stageEl = cardEl.querySelector('.tape-stage');
+  const model = buildCassetteInstance(tape, stageEl);
 
-  workIndexEl.textContent = tape.indexMeta;
-  workTitleEl.textContent = tape.title;
-  workDescEl.textContent = tape.desc;
+  const item = {
+    tape,
+    idx,
+    cardEl,
+    stageEl,
+    model,
+    hovered: false,
+    isDragging: false,
+    dragDistance: 0,
+    prevX: 0,
+    prevY: 0,
+    rotY: (idx % 2 === 0 ? -0.22 : 0.22),
+    rotX: 0.08,
+    hoverOffsetX: 0,
+    hoverOffsetY: 0
+  };
 
-  document.querySelectorAll('.tape-pill').forEach((el, i) => {
-    el.classList.toggle('active', i === idx);
+  const ro = new ResizeObserver(() => {
+    const w = Math.max(1, stageEl.clientWidth);
+    const h = Math.max(1, stageEl.clientHeight);
+    model.itemRenderer.setSize(w, h, false);
+  });
+  ro.observe(stageEl);
+
+  function navigateToWork() {
+    if (!tape.unlocked || !tape.url) return;
+    window.location.href = tape.url;
+  }
+
+  cardEl.addEventListener('pointerenter', () => {
+    item.hovered = true;
   });
 
-  if (tape.unlocked) {
-    btnOpenWork.disabled = false;
-    openWorkLabel.textContent = `Enter ${tape.title}`;
-  } else {
-    btnOpenWork.disabled = true;
-    openWorkLabel.textContent = 'In Production';
-  }
-}
+  cardEl.addEventListener('pointerleave', () => {
+    item.hovered = false;
+    item.isDragging = false;
+    item.hoverOffsetX = 0;
+    item.hoverOffsetY = 0;
+  });
 
-selectTape(0);
+  cardEl.addEventListener('pointermove', (e) => {
+    const rect = cardEl.getBoundingClientRect();
+    const nx = ((e.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+    const ny = ((e.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1;
+    item.hoverOffsetX = nx * 0.16;
+    item.hoverOffsetY = ny * 0.10;
 
-function openSelectedWork() {
-  const tape = TAPES[currentTapeIdx];
-  if (!tape.unlocked || !tape.url) return;
-  targetZoomZ = 7.4;
-  setTimeout(() => {
-    window.location.href = tape.url;
-  }, 260);
-}
-
-btnOpenWork.addEventListener('click', openSelectedWork);
-
-btnRewind.addEventListener('click', () => {
-  isRewinding = !isRewinding;
-  if (isRewinding) isPlayingAnim = true;
-  btnRewind.classList.toggle('active', isRewinding);
-  btnReelPlay.classList.toggle('active', isPlayingAnim);
-  reelPlayLabel.textContent = isRewinding ? 'Rewinding' : (isPlayingAnim ? 'Playing' : 'Paused');
-});
-
-btnReelPlay.addEventListener('click', () => {
-  isPlayingAnim = !isPlayingAnim;
-  if (!isPlayingAnim) isRewinding = false;
-  btnRewind.classList.remove('active');
-  btnReelPlay.classList.toggle('active', isPlayingAnim);
-  reelPlayLabel.textContent = isPlayingAnim ? 'Playing' : 'Paused';
-});
-
-btnOrbit.addEventListener('click', () => {
-  isAutoOrbit = !isAutoOrbit;
-  btnOrbit.classList.toggle('active', isAutoOrbit);
-});
-
-btnBackdrop.addEventListener('click', () => {
-  const isDark = document.body.classList.toggle('theme-dark');
-  btnBackdrop.textContent = isDark ? 'Light room' : 'Dark room';
-});
-
-// ============================================================================
-// 6. POINTER DRAG-TO-INSPECT, SCROLL-TO-ZOOM & CLICK-CASSETTE-TO-OPEN
-// ============================================================================
-const raycaster = new THREE.Raycaster();
-const pointerNDC = new THREE.Vector2();
-
-container.addEventListener('pointerdown', (e) => {
-  isDragging = true;
-  dragMovedDistance = 0;
-  prevPointer.x = e.clientX;
-  prevPointer.y = e.clientY;
-});
-
-window.addEventListener('pointermove', (e) => {
-  pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
-  pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
-
-  if (!isDragging) return;
-  const dx = e.clientX - prevPointer.x;
-  const dy = e.clientY - prevPointer.y;
-  dragMovedDistance += Math.hypot(dx, dy);
-
-  userRotY += dx * 0.008;
-  userRotX = THREE.MathUtils.clamp(userRotX + dy * 0.006, -0.7, 0.7);
-
-  prevPointer.x = e.clientX;
-  prevPointer.y = e.clientY;
-});
-
-window.addEventListener('pointerup', (e) => {
-  if (!isDragging) return;
-  isDragging = false;
-
-  if (dragMovedDistance < 10) {
-    pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
-    pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    raycaster.setFromCamera(pointerNDC, camera);
-    const hits = raycaster.intersectObjects(cassetteRoot.children, true);
-    if (hits.length > 0) {
-      openSelectedWork();
+    if (item.isDragging) {
+      const dx = e.clientX - item.prevX;
+      const dy = e.clientY - item.prevY;
+      item.dragDistance += Math.hypot(dx, dy);
+      item.rotY += dx * 0.010;
+      item.rotX = THREE.MathUtils.clamp(item.rotX + dy * 0.008, -0.65, 0.65);
+      item.prevX = e.clientX;
+      item.prevY = e.clientY;
     }
-  }
+  });
+
+  stageEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') return;
+    item.isDragging = true;
+    item.dragDistance = 0;
+    item.prevX = e.clientX;
+    item.prevY = e.clientY;
+  });
+
+  window.addEventListener('pointerup', () => {
+    item.isDragging = false;
+  });
+
+  cardEl.addEventListener('click', () => {
+    if (item.dragDistance > 10) {
+      item.dragDistance = 0;
+      return;
+    }
+    navigateToWork();
+  });
+
+  cardEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      navigateToWork();
+    }
+  });
+
+  return item;
 });
 
-window.addEventListener('wheel', (e) => {
-  targetZoomZ = THREE.MathUtils.clamp(targetZoomZ + e.deltaY * 0.004, 7.2, 14.0);
-}, { passive: true });
+if (btnRewind) {
+  btnRewind.addEventListener('click', () => {
+    isRewinding = !isRewinding;
+    if (isRewinding) isPlayingAnim = true;
+    btnRewind.classList.toggle('active', isRewinding);
+    btnReelPlay.classList.toggle('active', isPlayingAnim);
+    reelPlayLabel.textContent = isRewinding ? 'Rewinding' : (isPlayingAnim ? 'Playing' : 'Paused');
+  });
+}
+
+if (btnReelPlay) {
+  btnReelPlay.addEventListener('click', () => {
+    isPlayingAnim = !isPlayingAnim;
+    if (!isPlayingAnim) isRewinding = false;
+    if (btnRewind) btnRewind.classList.remove('active');
+    btnReelPlay.classList.toggle('active', isPlayingAnim);
+    reelPlayLabel.textContent = isPlayingAnim ? 'Playing' : 'Paused';
+  });
+}
+
+if (btnOrbit) {
+  btnOrbit.addEventListener('click', () => {
+    isAutoOrbit = !isAutoOrbit;
+    btnOrbit.classList.toggle('active', isAutoOrbit);
+  });
+}
+
+if (btnBackdrop) {
+  btnBackdrop.addEventListener('click', () => {
+    const isDark = document.body.classList.toggle('theme-dark');
+    document.documentElement.classList.toggle('theme-dark', isDark);
+    btnBackdrop.textContent = isDark ? 'Light room' : 'Dark room';
+  });
+}
 
 // ============================================================================
-// 7. ANIMATION LOOP
+// 6. PER-STAGE ANIMATION LOOP (EACH CASSETTE BOUND TO ITS OWN STAGE CANVAS)
 // ============================================================================
 const clock = new THREE.Clock();
 
@@ -1004,47 +1126,49 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   const elapsed = clock.getElapsedTime();
 
-  const aspect = window.innerWidth / window.innerHeight;
-  const responsiveZ = aspect < 1.0 ? (1.0 - aspect) * 4.2 : 0;
-  camera.position.z = THREE.MathUtils.lerp(camera.position.z, targetZoomZ + responsiveZ, dt * 6);
+  tapeItems.forEach((item, idx) => {
+    const width = Math.max(1, item.stageEl.clientWidth);
+    const height = Math.max(1, item.stageEl.clientHeight);
 
-  if (isPlayingAnim) {
-    const reelVel = isRewinding ? 15.0 : -2.4;
-    reels.forEach((r, idx) => {
-      const radiusFactor = idx === 0 ? 0.85 : 1.15;
-      r.rotation.z += reelVel * radiusFactor * dt;
-    });
-    guideRollers.forEach((gr) => {
-      gr.rotation.z += reelVel * 2.4 * dt;
-    });
-  }
+    if (isPlayingAnim) {
+      const speedBoost = item.hovered ? 1.65 : 1.0;
+      const reelVel = (isRewinding ? 15.0 : -2.4) * speedBoost;
+      item.model.reels.forEach((r, rIdx) => {
+        const radiusFactor = rIdx === 0 ? 0.85 : 1.15;
+        r.rotation.z += reelVel * radiusFactor * dt;
+      });
+      item.model.guideRollers.forEach((gr) => {
+        gr.rotation.z += reelVel * 2.4 * dt;
+      });
+    }
 
-  if (isAutoOrbit && !isDragging) {
-    userRotY += dt * 0.36;
-  }
+    if (isAutoOrbit && !item.isDragging) {
+      item.rotY += dt * 0.36;
+      item.rotX = THREE.MathUtils.lerp(item.rotX, 0.08 + Math.sin(elapsed * 0.8 + idx) * 0.04, dt * 3);
+    }
 
-  const finalRotY = userRotY + pointerNDC.x * 0.12;
-  const finalRotX = userRotX - pointerNDC.y * 0.09;
+    const targetY = item.rotY + item.hoverOffsetX;
+    const targetX = item.rotX + item.hoverOffsetY;
+    item.model.root.rotation.y = THREE.MathUtils.lerp(item.model.root.rotation.y, targetY, dt * 8);
+    item.model.root.rotation.x = THREE.MathUtils.lerp(item.model.root.rotation.x, targetX, dt * 8);
 
-  cassetteRoot.rotation.y = THREE.MathUtils.lerp(cassetteRoot.rotation.y, finalRotY, dt * 8);
-  cassetteRoot.rotation.x = THREE.MathUtils.lerp(cassetteRoot.rotation.x, finalRotX, dt * 8);
+    const floatBob = Math.sin(elapsed * 1.7 + idx * 0.9) * 0.05;
+    const hoverLift = item.hovered ? 0.08 : 0.0;
+    item.model.root.position.y = THREE.MathUtils.lerp(item.model.root.position.y, 0.06 + floatBob + hoverLift, dt * 8);
+    item.model.root.rotation.z = Math.sin(elapsed * 1.1 + idx) * 0.015;
 
-  const rewJitter = isRewinding ? Math.sin(elapsed * 65) * 0.009 : 0;
-  const floatBob = Math.sin(elapsed * 1.8) * 0.055;
-  cassetteRoot.position.y = 0.22 + floatBob + rewJitter;
-  cassetteRoot.rotation.z = Math.sin(elapsed * 1.2) * 0.018;
+    const profileScale = 0.55 + 0.45 * Math.abs(Math.cos(item.model.root.rotation.y));
+    item.model.floorShadow.scale.x = profileScale * (1 - floatBob * 0.4);
+    item.model.floorShadow.material.opacity = (item.hovered ? 0.92 : 0.76) - floatBob * 0.8;
 
-  const profileScale = 0.45 + 0.55 * Math.abs(Math.cos(cassetteRoot.rotation.y));
-  floorShadow.scale.x = profileScale * (1 - floatBob * 0.4);
-  floorShadow.material.opacity = 0.82 - floatBob * 1.1;
+    const cam = item.model.itemCamera;
+    cam.aspect = width / height;
+    const aspectAdjust = cam.aspect < 1.35 ? (1.35 - cam.aspect) * 3.0 : 0;
+    cam.position.z = (item.hovered ? 7.85 : 8.2) + aspectAdjust;
+    cam.updateProjectionMatrix();
 
-  renderer.render(scene, camera);
+    item.model.itemRenderer.render(item.model.itemScene, cam);
+  });
 }
 
 animate();
-
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});

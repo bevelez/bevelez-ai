@@ -1,0 +1,14 @@
+.env
+.env.*
+.DS_Store
+__pycache__/
+*.pyc
+.agents/
+tests/
+GEMINI.md
+taste.md
+PROJECT.md
+TEST_INFRA.md
+TEST_READY.md
+*_turnaround_*.png
+*.wav
