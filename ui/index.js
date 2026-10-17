@@ -554,6 +554,17 @@ export function initAccessibilityControls({
         }
       }
     }
+
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      const tag = document.activeElement ? document.activeElement.tagName : '';
+      if (tag !== 'INPUT' && tag !== 'TEXTAREA') {
+        const undoBtn = document.getElementById('btn-batch-rezone-undo');
+        if (undoBtn && undoBtn.style.display !== 'none') {
+          e.preventDefault();
+          undoBtn.click();
+        }
+      }
+    }
   });
 
   const tabButtons = Array.from(document.querySelectorAll('.planner-tab'));

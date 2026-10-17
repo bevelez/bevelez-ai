@@ -60,8 +60,8 @@ const renderScene = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(viewportSize().width, viewportSize().height),
   0.36, // strength
-  0.3,  // radius
-  1.06  // threshold (HDR: only neon / sun / emissive windows cross it)
+  0.42, // radius
+  0.9   // threshold (HDR: neon, sun, the thrusters and the light pooling under the car)
 );
 const outputPass = new OutputPass(); // AgX tone mapping + sRGB, applied once, after bloom
 
@@ -137,7 +137,7 @@ let boostBlend = 0;
 const ambientLight = new THREE.AmbientLight(0x28154a, 1.4);
 scene.add(ambientLight);
 
-const horizonLight = new THREE.DirectionalLight(0xff007f, 1.0);
+const horizonLight = new THREE.DirectionalLight(0xff007f, 1.6);
 horizonLight.position.set(0, 35, -260);
 scene.add(horizonLight);
 
@@ -237,8 +237,8 @@ const ROAD_WIDTH = 18;
 const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH);
 const roadMat = new THREE.MeshStandardMaterial({
   color: 0x080612,
-  roughness: 0.56,
-  metalness: 0.5
+  roughness: 0.3,
+  metalness: 0.68
 });
 const roadMesh = new THREE.Mesh(roadGeo, roadMat);
 roadMesh.rotation.x = -Math.PI / 2;
@@ -592,6 +592,21 @@ lowerTail.position.set(0, 0.18, 2.34);
 carGroup.add(lowerTail);
 
 // Dual Plasma Afterburner Exhaust Thrusters
+function createHaloTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.25, 'rgba(180,250,255,0.75)');
+  grad.addColorStop(0.6, 'rgba(0,243,255,0.22)');
+  grad.addColorStop(1, 'rgba(0,243,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(canvas);
+}
+const thrusterHaloTexture = createHaloTexture();
 const exhaustFlames = [];
 [-0.55, 0.55].forEach((xEx) => {
   const pipeGeo = new THREE.CylinderGeometry(0.12, 0.14, 0.25, 12);
@@ -600,18 +615,51 @@ const exhaustFlames = [];
   pipe.position.set(xEx, 0.12, 2.32);
   carGroup.add(pipe);
 
-  const flameGeo = new THREE.ConeGeometry(0.11, 0.75, 12);
+  const flameGeo = new THREE.ConeGeometry(0.16, 1.6, 14);
   flameGeo.rotateX(Math.PI / 2);
   const flameMat = new THREE.MeshBasicMaterial({
-    color: neonColor(0x00f3ff, 1.4),
+    color: neonColor(0x00f3ff, 2.2),
     transparent: true,
-    opacity: 0.9
+    opacity: 0.95
   });
   const flame = new THREE.Mesh(flameGeo, flameMat);
   flame.position.set(xEx, 0.12, 2.68);
   carGroup.add(flame);
-  exhaustFlames.push(flame);
+
+  // White-hot core inside the plume
+  const coreGeo = new THREE.ConeGeometry(0.07, 1.15, 10);
+  coreGeo.rotateX(Math.PI / 2);
+  const coreMat = new THREE.MeshBasicMaterial({
+    color: neonColor(0xdcffff, 4.0),
+    transparent: true,
+    opacity: 0.95,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  });
+  const core = new THREE.Mesh(coreGeo, coreMat);
+  core.position.set(xEx, 0.12, 2.6);
+  carGroup.add(core);
+
+  // Hot glow at the nozzle mouth; the cone extends well past it so the plume keeps its shape
+  const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: thrusterHaloTexture,
+    color: neonColor(0x00f3ff, 2.0),
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending
+  }));
+  halo.position.set(xEx, 0.13, 2.42);
+  halo.scale.set(0.55, 0.55, 1);
+  carGroup.add(halo);
+
+  exhaustFlames.push({ flame, core, halo, phase: Math.random() * Math.PI * 2 });
 });
+
+// Plasma light the thrusters throw onto the road behind the car
+const thrusterLight = new THREE.PointLight(0x00f3ff, 2.5, 8);
+thrusterLight.position.set(0, 0.2, 3.4);
+carGroup.add(thrusterLight);
 
 // 4 Spinning Wheels with Neon Cyan Rims
 const carWheels = [];
@@ -646,11 +694,11 @@ wheelPositions.forEach((wp) => {
 });
 
 // Car Neon Underglow & Rear Tail Light PointLight
-const underglowLight = new THREE.PointLight(0x00f3ff, 1.6, 9);
+const underglowLight = new THREE.PointLight(0x00f3ff, 3.5, 9);
 underglowLight.position.set(0, -0.1, 0);
 carGroup.add(underglowLight);
 
-const tailPointLight = new THREE.PointLight(0xff0055, 1.5, 10);
+const tailPointLight = new THREE.PointLight(0xff0055, 4.0, 10);
 tailPointLight.position.set(0, 0.4, 2.8);
 carGroup.add(tailPointLight);
 
@@ -666,14 +714,14 @@ const CAMERA_MODES = [
   { name: 'CHASE', offset: new THREE.Vector3(0, 2.35, 11.4), lookZ: -35 },
   { name: 'LOW RETRO', offset: new THREE.Vector3(0, 1.35, 9.8), lookZ: -50 },
   { name: 'COCKPIT HOOD', offset: new THREE.Vector3(0, 1.32, 5.2), lookZ: -80 },
-  { name: 'HELI WIDE', offset: new THREE.Vector3(0, 5.8, 15.5), lookZ: -45 }
+  { name: 'HELI WIDE', offset: new THREE.Vector3(0, 6.5, 20), lookZ: -24 } // car in the lower third, thrusters in frame
 ];
-let currentCameraIdx = 0;
+let currentCameraIdx = 3; // HELI WIDE by default: the car, its thrusters and the valley all in frame
 
 // Start on the chase preset instead of lerping in from the origin: the first frames (and any
 // crawler / share-preview capture) show the highway, not the road plane edge-on from ground level.
-camera.position.copy(CAMERA_MODES[0].offset);
-camera.lookAt(0, 1.8, CAMERA_MODES[0].lookZ);
+camera.position.copy(CAMERA_MODES[currentCameraIdx].offset);
+camera.lookAt(0, 1.8, CAMERA_MODES[currentCameraIdx].lookZ);
 
 window.addEventListener('mousemove', (e) => {
   const normX = (e.clientX / window.innerWidth) * 2 - 1;
@@ -937,13 +985,25 @@ function animate() {
     w.rotation.x -= baseSpeed * dt * 0.45;
   });
 
-  // Pulse exhaust flames & tail lights with boost + bass
-  const flameScaleZ = (isBoosting ? 2.1 : 1.0) + Math.sin(elapsed * 45) * 0.25 + metrics.bass * 0.9;
-  exhaustFlames.forEach((flame) => {
-    flame.scale.set(1 + metrics.bass * 0.3, 1 + metrics.bass * 0.3, flameScaleZ);
-    flame.position.z = 2.52 + flameScaleZ * 0.22;
+  // Thrusters fire: fast pulse, per-plume flicker, longer and hotter under boost and on bass hits
+  const flameBase = (isBoosting ? 3.0 : 1.6) + metrics.bass * 1.0;
+  let thrusterFlicker = 0;
+  exhaustFlames.forEach(({ flame, core, halo, phase }) => {
+    const flicker = 0.78 + 0.22 * Math.sin(elapsed * 45 + phase) + (Math.random() - 0.5) * 0.18;
+    const scaleZ = flameBase * flicker;
+    flame.scale.set(1 + metrics.bass * 0.3, 1 + metrics.bass * 0.3, scaleZ);
+    flame.position.z = 2.45 + scaleZ * 0.4;
+    flame.material.opacity = 0.8 + 0.2 * flicker;
+    core.scale.set(1, 1, scaleZ * 0.9);
+    core.position.z = 2.42 + scaleZ * 0.26;
+    core.material.opacity = 0.7 + 0.3 * flicker;
+    const haloSize = (0.55 + boostBlend * 0.3 + metrics.bass * 0.2) * (0.9 + 0.2 * flicker);
+    halo.scale.set(haloSize, haloSize, 1);
+    halo.material.opacity = 0.45 + 0.3 * flicker;
+    thrusterFlicker += flicker;
   });
-  tailPointLight.intensity = 1.5 + metrics.bass * 1.8 + boostBlend * 1.0;
+  thrusterLight.intensity = (2.2 + boostBlend * 2.5 + metrics.bass * 1.5) * (thrusterFlicker / exhaustFlames.length);
+  tailPointLight.intensity = 3.8 + metrics.bass * 4.5 + boostBlend * 2.5;
 
   // Post grade: aberration widens with bass hits and under boost, grain keeps moving
   boostBlend = THREE.MathUtils.lerp(boostBlend, isBoosting ? 1 : 0, dt * 3);

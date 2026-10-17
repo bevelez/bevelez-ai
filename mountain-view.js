@@ -2236,7 +2236,7 @@ function formatHourLabel(hourFloat, tzOffsetHours, isOverride, altitudeDeg) {
 }
 
 function updateSolarUiReadout(solar) {
-  const valEl = document.getElementById('val-solar-time');
+  const valEl = document.getElementById('val-solar-hour') || document.getElementById('val-solar-time');
   const sliderEl = document.getElementById('slider-solar-hour');
   const isOverride = simEngines.solarHourOverride !== null && Number.isFinite(simEngines.solarHourOverride);
   if (valEl && solar) {
@@ -2761,6 +2761,8 @@ function togglePlannerDrawer(forceState) {
   const isCollapsed = plannerDrawer.classList.contains('collapsed');
   const targetOpen = forceState !== undefined ? forceState : isCollapsed;
   plannerDrawer.classList.toggle('collapsed', !targetOpen);
+  plannerDrawer.setAttribute('aria-modal', targetOpen ? 'true' : 'false');
+  plannerDrawer.setAttribute('aria-hidden', targetOpen ? 'false' : 'true');
   if (btnPlannerPill) {
     btnPlannerPill.classList.toggle('active', targetOpen);
     btnPlannerPill.setAttribute('aria-expanded', targetOpen ? 'true' : 'false');

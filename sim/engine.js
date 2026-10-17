@@ -569,12 +569,16 @@ export class SimulationEngines {
     );
 
     // Instantaneous rooftop PV generation under live irradiance (0 MW when liveDni === 0 or sun below horizon)
-    let rooftopPvMw = Math.round(
-      (totalRoofAreaM2 * usableRoofFraction * liveDni * pvEfficiency * prFactor) / 1000000
-    );
-    if (altitudeRad <= 0 && (rawDni === null || rawDni === undefined || rawDni === 0)) {
-      rooftopPvMw = 0;
+    const isHourOverridden = this.solarHourOverride !== null && Number.isFinite(this.solarHourOverride);
+    let effectiveIrradiance = liveDni;
+    if (altitudeRad <= 0) {
+      effectiveIrradiance = 0;
+    } else if (isHourOverridden) {
+      effectiveIrradiance = Math.round(SOLAR_MODEL.fallbackDniWm2 * Math.min(1.15, Math.sin(altitudeRad) / 0.68));
     }
+    const rooftopPvMw = altitudeRad <= 0
+      ? 0
+      : Math.round((totalRoofAreaM2 * usableRoofFraction * effectiveIrradiance * pvEfficiency * prFactor) / 1000000);
 
     return {
       dayOfYear,
@@ -589,7 +593,7 @@ export class SimulationEngines {
       totalRoofAreaM2: Math.round(totalRoofAreaM2),
       rooftopPvMw,
       planningRooftopPvMw,
-      liveDni,
+      liveDni: effectiveIrradiance,
       provenance: PROVENANCE.MODELED
     };
   }
@@ -702,7 +706,7 @@ export class SimulationEngines {
     const canopySolarBonus = Math.round((clampedGreenPct - 16.4) * 4.2 + Math.max(0, rhnaDelta) * 0.004);
     const baselinePlanningSolarMw = solarPhysics.planningRooftopPvMw;
     const planningSolarMw = Math.max(0, solarPhysics.planningRooftopPvMw + canopySolarBonus);
-    const solarMw = Math.max(0, solarPhysics.rooftopPvMw + canopySolarBonus);
+    const solarMw = solarPhysics.altitudeRad <= 0 ? 0 : Math.max(0, solarPhysics.rooftopPvMw + canopySolarBonus);
 
     const runoffCapturePct = Math.max(35, Math.min(96, Math.round(62 + (clampedGreenPct - 16.4) * 1.15)));
     const uhiDelta = +(-(clampedGreenPct - 16.4) * 0.095 + (this.params.farCap - 2.4) * 0.08).toFixed(1);
@@ -729,6 +733,7 @@ export class SimulationEngines {
       solarMw,
       planningSolarMw,
       baselinePlanningSolarMw,
+      solar: solarPhysics,
       baselineFloodParcels: 0,
       runoffCapturePct,
       uhiDelta,

@@ -353,8 +353,15 @@ export const StylizedCompositeShader = {
 };
 
 export function initPostProcessing(renderer, scene, camera, width, height, options = {}) {
-  const w = width || (renderer.domElement ? renderer.domElement.width : window.innerWidth);
-  const h = height || (renderer.domElement ? renderer.domElement.height : window.innerHeight);
+  const _sizeVec = new THREE.Vector2();
+  const _drawBufVec = new THREE.Vector2();
+  if (renderer && typeof renderer.getSize === 'function') {
+    renderer.getSize(_sizeVec);
+  }
+  const w = Math.max(1, Math.floor(width || _sizeVec.x || (renderer && renderer.domElement ? renderer.domElement.width : 0) || window.innerWidth || 1));
+  const h = Math.max(1, Math.floor(height || _sizeVec.y || (renderer && renderer.domElement ? renderer.domElement.height : 0) || window.innerHeight || 1));
+  let lastW = w;
+  let lastH = h;
   const isLowTier = Boolean(options.isLowTier);
 
   if (camera && camera.layers) {
@@ -388,9 +395,14 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
     blending: THREE.NoBlending
   });
 
-  const composer = new EffectComposer(renderer);
-  composer.setSize(w, h);
+  const composerTarget = new THREE.WebGLRenderTarget(w, h, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    format: THREE.RGBAFormat
+  });
+  const composer = new EffectComposer(renderer, composerTarget);
   composer.setPixelRatio(1);
+  composer.setSize(w, h);
 
   const depthNormalPass = new DepthNormalPass(scene, camera, depthNormalTarget, normalOverrideMaterial);
   depthNormalPass.enabled = !isLowTier;
@@ -529,6 +541,15 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
   }
 
   function update(dt, rawDt) {
+    if (renderer && typeof renderer.getDrawingBufferSize === 'function') {
+      renderer.getDrawingBufferSize(_drawBufVec);
+      const curW = Math.max(1, Math.floor(_drawBufVec.x || 1));
+      const curH = Math.max(1, Math.floor(_drawBufVec.y || 1));
+      if (curW !== lastW || curH !== lastH) {
+        onResize(curW, curH);
+      }
+    }
+
     const now = performance.now();
     syncImpact(now);
 
@@ -538,8 +559,13 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
   }
 
   function onResize(widthVal, heightVal) {
-    const newW = widthVal || window.innerWidth;
-    const newH = heightVal || window.innerHeight;
+    if (renderer && typeof renderer.getSize === 'function') {
+      renderer.getSize(_sizeVec);
+    }
+    const newW = Math.max(1, Math.floor(widthVal || _sizeVec.x || (renderer && renderer.domElement ? renderer.domElement.width : 0) || window.innerWidth || 1));
+    const newH = Math.max(1, Math.floor(heightVal || _sizeVec.y || (renderer && renderer.domElement ? renderer.domElement.height : 0) || window.innerHeight || 1));
+    lastW = newW;
+    lastH = newH;
 
     composer.setSize(newW, newH);
     depthNormalPass.setSize(newW, newH);
@@ -555,7 +581,17 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
     }
   }
 
+  onResize(w, h);
+
   function render() {
+    if (renderer && typeof renderer.getDrawingBufferSize === 'function') {
+      renderer.getDrawingBufferSize(_drawBufVec);
+      const curW = Math.max(1, Math.floor(_drawBufVec.x || 1));
+      const curH = Math.max(1, Math.floor(_drawBufVec.y || 1));
+      if (curW !== lastW || curH !== lastH) {
+        onResize(curW, curH);
+      }
+    }
     composer.render();
   }
 
@@ -568,7 +604,7 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
         isEffectComposer: true,
         passesCount: composer.passes.length,
         render: () => composer.render(),
-        setSize: (wVal, hVal) => composer.setSize(wVal, hVal)
+        setSize: (wVal, hVal) => onResize(wVal, hVal)
       },
       renderTarget: {
         width: depthNormalTarget.width,
@@ -637,6 +673,7 @@ export function initPostProcessing(renderer, scene, camera, width, height, optio
     render,
     update,
     onResize,
+    setSize: onResize,
     triggerImpact,
     getState,
     tagSceneLayers

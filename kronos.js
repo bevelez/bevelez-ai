@@ -1276,8 +1276,10 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance',
   preserveDrawingBuffer: IS_DEBUG_MODE
 });
-renderer.setSize(window.innerWidth, window.innerHeight);
+const _initW = Math.max(1, window.innerWidth || 1280);
+const _initH = Math.max(1, window.innerHeight || 800);
 renderer.setPixelRatio(IS_LOW_TIER ? 1 : Math.min(window.devicePixelRatio || 1, 1.5));
+renderer.setSize(_initW, _initH);
 renderer.shadowMap.enabled = !IS_LOW_TIER;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -1319,7 +1321,7 @@ const cameraJuice = {
   decaySpeed: 8.5
 };
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 140);
+const camera = new THREE.PerspectiveCamera(45, _initW / _initH, 0.05, 140);
 camera.position.copy(CAMERA_PRESETS.orbit.pos);
 camera.lookAt(CAMERA_PRESETS.orbit.lookAt);
 
@@ -1354,15 +1356,22 @@ function resetCameraToOrbit() {
 }
 
 let postProcessing = null;
+const _rendererSizeVec = new THREE.Vector2();
+renderer.getSize(_rendererSizeVec);
+let _lastCanvasW = Math.max(1, Math.floor(_rendererSizeVec.x || _initW));
+let _lastCanvasH = Math.max(1, Math.floor(_rendererSizeVec.y || _initH));
 try {
   postProcessing = initPostProcessing(
     renderer,
     scene,
     camera,
-    window.innerWidth,
-    window.innerHeight,
+    _lastCanvasW,
+    _lastCanvasH,
     { isLowTier: IS_LOW_TIER }
   );
+  if (postProcessing && postProcessing.onResize) {
+    postProcessing.onResize(_lastCanvasW, _lastCanvasH);
+  }
 } catch (err) {
   postProcessing = null;
 }
@@ -3651,14 +3660,20 @@ window.addEventListener('pointermove', onPointerMove);
 window.addEventListener('pointerup', onPointerUp);
 window.addEventListener('pointercancel', onPointerUp);
 window.addEventListener('wheel', onWheel, { passive: true });
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function syncViewportResize() {
+  const w = Math.max(1, Math.floor(window.innerWidth || _lastCanvasW || 1280));
+  const h = Math.max(1, Math.floor(window.innerHeight || _lastCanvasH || 800));
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  if (postProcessing && postProcessing.setSize) {
-    postProcessing.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(w, h);
+  renderer.getSize(_rendererSizeVec);
+  _lastCanvasW = Math.max(1, Math.floor(_rendererSizeVec.x || w));
+  _lastCanvasH = Math.max(1, Math.floor(_rendererSizeVec.y || h));
+  if (postProcessing && postProcessing.onResize) {
+    postProcessing.onResize(_lastCanvasW, _lastCanvasH);
   }
-});
+}
+window.addEventListener('resize', syncViewportResize);
 
 let activeBarIdx = -1;
 function refreshTrackReadoutOnSwitch() {
@@ -4772,6 +4787,12 @@ let _crowdDeferredScheduled = false;
 function animate() {
   requestAnimationFrame(animate);
 
+  const curWinW = Math.max(1, Math.floor(window.innerWidth || _lastCanvasW));
+  const curWinH = Math.max(1, Math.floor(window.innerHeight || _lastCanvasH));
+  if (curWinW !== _lastCanvasW || curWinH !== _lastCanvasH) {
+    syncViewportResize();
+  }
+
   const rawDt = Math.min(clock.getDelta(), 0.1);
   if (gameState.hitStopTimer > 0) {
     gameState.hitStopTimer -= rawDt;
@@ -4909,7 +4930,18 @@ if (IS_DEBUG_MODE) {
       restartGameSession: restartGame,
       triggerGameEnd,
       getActiveBruiserCount,
-      evaluateBeatWindow: () => evaluateBeatWindow(audioEngine.getSongTime()),
+      computeAccuracyRank,
+      evaluateBeatWindow: (t) => evaluateBeatWindow(t !== undefined ? t : audioEngine.getSongTime()),
+      evaluateBeatWindowAtTime: (t) => evaluateBeatWindow(t),
+      quantizeWindupToBeat,
+      estimateBpmFromAudioBuffer,
+      buildCustomTrackChart,
+      KRONOS_TRACK_CHARTS,
+      KRONOS_BPM,
+      KRONOS_BEAT_SEC,
+      KRONOS_LOOP_DURATION,
+      KRONOS_BEAT_TIMES,
+      KRONOS_BARS,
       stepSimulation: (dtSec = 0.016) => {
         const chart = audioEngine.getActiveChart();
         const songTime = audioEngine.getSongTime();
