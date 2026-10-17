@@ -6,6 +6,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 
+window.THREE = THREE;
+
 // Load authentic Mountain View GIS dataset
 let mvGisData = null;
 try {
@@ -74,7 +76,9 @@ const ZONE_DEFS = {
     unitsPerArea: 0.35,
     jobsPerArea: 0.05,
     greenFactor: 0.28,
-    colorHex: 0xe6e4de
+    colorHex: 0xf7f4eb,
+    roughness: 0.78,
+    metalness: 0.03
   },
   R3: {
     code: 'R-3 MID',
@@ -84,7 +88,9 @@ const ZONE_DEFS = {
     unitsPerArea: 1.35,
     jobsPerArea: 0.22,
     greenFactor: 0.24,
-    colorHex: 0xeeece6
+    colorHex: 0xede8dc,
+    roughness: 0.76,
+    metalness: 0.03
   },
   MU6: {
     code: 'CRA-MU6',
@@ -94,7 +100,9 @@ const ZONE_DEFS = {
     unitsPerArea: 2.4,
     jobsPerArea: 1.6,
     greenFactor: 0.20,
-    colorHex: 0xf4f1ea
+    colorHex: 0xf4eee2,
+    roughness: 0.75,
+    metalness: 0.03
   },
   TOD10: {
     code: 'TOD-10',
@@ -104,7 +112,9 @@ const ZONE_DEFS = {
     unitsPerArea: 4.2,
     jobsPerArea: 2.8,
     greenFactor: 0.26,
-    colorHex: 0xfaf7f0
+    colorHex: 0xeae5db,
+    roughness: 0.74,
+    metalness: 0.03
   },
   PARK: {
     code: 'OS-ECO',
@@ -114,7 +124,9 @@ const ZONE_DEFS = {
     unitsPerArea: 0.0,
     jobsPerArea: 0.04,
     greenFactor: 0.92,
-    colorHex: 0x28a86b
+    colorHex: 0x28a86b,
+    roughness: 0.82,
+    metalness: 0.02
   }
 };
 
@@ -853,6 +865,7 @@ class TelemetryPipeline {
     };
 
     this._loadCachedTelemetry();
+    this._updateProvenanceUI();
   }
 
   _loadCachedTelemetry() {
@@ -882,6 +895,7 @@ class TelemetryPipeline {
     } catch (e) {
       console.warn('Telemetry cache notice:', e);
     }
+    this._updateProvenanceUI();
   }
 
   async fetchWeather() {
@@ -922,6 +936,7 @@ class TelemetryPipeline {
     } catch (e) {
       console.warn('Open-Meteo runtime fetch fallback:', e);
     }
+    this._updateProvenanceUI();
     return this.weatherData;
   }
 
@@ -954,6 +969,7 @@ class TelemetryPipeline {
     } catch (e) {
       console.warn('NOAA Tide runtime fetch fallback:', e);
     }
+    this._updateProvenanceUI();
     return this.tideData;
   }
 
@@ -1002,19 +1018,38 @@ class TelemetryPipeline {
   }
 
   _updateProvenanceUI() {
+    if (typeof window !== 'undefined' && window.TelemetryPipeline && window.TelemetryPipeline !== this) return;
     const weatherBadge = document.getElementById('prov-weather');
     if (weatherBadge) {
-      const isLive = this.weatherData.isLive;
-      const prov = this.weatherData.provenance;
-      const dotCls = isLive ? 'live' : (prov === 'CACHED' ? 'cached' : 'baseline');
-      weatherBadge.innerHTML = `<span class="prov-dot ${dotCls}">●</span> ${prov === 'LIVE API' ? 'LIVE OPEN-METEO' : (prov === 'CACHED' ? 'CACHED METEO' : 'METEO BASELINE')}`;
+      const isLive = Boolean(this.weatherData && this.weatherData.isLive);
+      const prov = this.weatherData ? this.weatherData.provenance : 'PUBLISHED BASELINE';
+      if (isLive) {
+        weatherBadge.innerHTML = '<span class="prov-dot live">●</span> LIVE OPEN-METEO';
+      } else if (prov === 'CACHED') {
+        weatherBadge.innerHTML = '<span class="prov-dot cached">●</span> CACHED';
+      } else {
+        weatherBadge.innerHTML = '<span class="prov-dot baseline">●</span> PUBLISHED BASELINE';
+      }
+      if (this.weatherData) {
+        const w = this.weatherData;
+        weatherBadge.title = `Weather: ${w.tempC}°C / ${w.tempF}°F | DNI: ${w.solarDni} W/m² | GHI: ${w.solarGhi} W/m² | Wind: ${w.windKph} km/h (${w.provenance})`;
+      }
     }
     const tideBadge = document.getElementById('prov-tide');
     if (tideBadge) {
-      const isLive = this.tideData.isLive;
-      const prov = this.tideData.provenance;
-      const dotCls = isLive ? 'live' : (prov === 'CACHED' ? 'cached' : 'baseline');
-      tideBadge.innerHTML = `<span class="prov-dot ${dotCls}">●</span> ${prov === 'LIVE API' ? 'LIVE NOAA 9414523' : (prov === 'CACHED' ? 'CACHED NOAA' : 'NOAA BASELINE')}`;
+      const isLive = Boolean(this.tideData && this.tideData.isLive);
+      const prov = this.tideData ? this.tideData.provenance : 'PUBLISHED BASELINE';
+      if (isLive) {
+        tideBadge.innerHTML = '<span class="prov-dot live">●</span> LIVE NOAA 9414523';
+      } else if (prov === 'CACHED') {
+        tideBadge.innerHTML = '<span class="prov-dot cached">●</span> CACHED';
+      } else {
+        tideBadge.innerHTML = '<span class="prov-dot baseline">●</span> PUBLISHED BASELINE';
+      }
+      if (this.tideData) {
+        const t = this.tideData;
+        tideBadge.title = `Tide Water Level: ${t.waterLevelM} m NAVD88 | Station: ${t.stationId} (${t.stationName || 'Redwood City SF Bay'}) (${t.provenance})`;
+      }
     }
   }
 
@@ -1297,23 +1332,48 @@ const ambientLight = new THREE.AmbientLight(0x98b0c8, 0.42);
 scene.add(ambientLight);
 
 const keyLight = new THREE.DirectionalLight(0xfff6e8, 2.05);
-keyLight.position.set(-92, 118, 52);
+// Calibrated Spencer astronomical solar position for Mountain View (37.3861°N, -122.0839°W) at 14:00 (Altitude 72.2°, Azimuth 221.0°, R=160)
+keyLight.position.set(-32.0, 152.4, 36.9);
 keyLight.castShadow = true;
-keyLight.shadow.mapSize.width = 2048;
-keyLight.shadow.mapSize.height = 2048;
+keyLight.shadow.mapSize.width = 4096;
+keyLight.shadow.mapSize.height = 4096;
 keyLight.shadow.camera.near = 25;
 keyLight.shadow.camera.far = 320;
-const d = 98;
+const d = 85;
 keyLight.shadow.camera.left = -d;
 keyLight.shadow.camera.right = d;
 keyLight.shadow.camera.top = d;
 keyLight.shadow.camera.bottom = -d;
-keyLight.shadow.bias = -0.0004;
+keyLight.shadow.normalBias = 0.02;
+keyLight.shadow.bias = -0.00015;
+keyLight.shadow.radius = 1.6;
 scene.add(keyLight);
 
 const rimLight = new THREE.DirectionalLight(0x58c4f0, 0.58);
 rimLight.position.set(95, 58, -90);
 scene.add(rimLight);
+
+// Defensive pointer capture wrapper for synthetic test events in headless Chrome
+if (renderer.domElement.setPointerCapture) {
+  const origSetPointerCapture = renderer.domElement.setPointerCapture;
+  renderer.domElement.setPointerCapture = function(id) {
+    try {
+      return origSetPointerCapture.call(this, id);
+    } catch (err) {
+      // Safe no-op if synthetic pointer ID has no physical device in automated tests
+    }
+  };
+}
+if (renderer.domElement.releasePointerCapture) {
+  const origReleasePointerCapture = renderer.domElement.releasePointerCapture;
+  renderer.domElement.releasePointerCapture = function(id) {
+    try {
+      return origReleasePointerCapture.call(this, id);
+    } catch (err) {
+      // Safe no-op
+    }
+  };
+}
 
 // OrbitControls with smooth damping centered on Full-City Mountain View
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -1443,237 +1503,22 @@ const coastlineWorldPts = [
 ];
 const coastlineCurve = new THREE.CatmullRomCurve3(coastlineWorldPts, false, 'centripetal', 0.35);
 
-// Organic Tidal Marshland Peninsulas & Islands along Northern SF Bay Shoreline
-const MARSH_ISLANDS_WORLD = [
-  [
-    [-45.0, -66.5], [-18.0, -66.5], [-14.0, -54.0], [-22.0, -49.5],
-    [-34.0, -51.0], [-44.0, -56.0]
-  ],
-  [
-    [-4.0, -64.0], [18.0, -65.0], [22.0, -53.0], [12.0, -49.0],
-    [-2.0, -51.0], [-7.0, -57.0]
-  ],
-  [
-    [30.0, -66.0], [64.0, -66.0], [64.0, -44.0], [48.0, -42.0],
-    [34.0, -45.0], [28.0, -54.0]
-  ]
+const toCanvasXY = (wx, wz, size = 4096) => [
+  ((wx / TABLE_W) + 0.5) * size,
+  ((wz / TABLE_W) + 0.5) * size
 ];
 
-// Procedural Topographic Land, Street Grid & SF Bay Wetlands Canvas Texture (2048x2048)
+// High-DPI (4096×4096, Anisotropy = 8) True OpenStreetMap Cartographic Base Map Texture
 function createTableSurfaceTexture() {
+  if (window.MVGraphicsFidelity && typeof window.MVGraphicsFidelity.generate4KTableSurfaceTexture === 'function') {
+    return window.MVGraphicsFidelity.generate4KTableSurfaceTexture(geoToScene, toCanvasXY, THREE);
+  }
   const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
+  canvas.width = 4096;
+  canvas.height = 4096;
   const ctx = canvas.getContext('2d');
-
-  const toCanvasXY = (wx, wz) => [
-    ((wx / TABLE_W) + 0.5) * 2048,
-    ((wz / TABLE_W) + 0.5) * 2048
-  ];
-
-  // 1. Deep matte obsidian-charcoal asphalt land base
-  ctx.fillStyle = '#0a0d12';
-  ctx.fillRect(0, 0, 2048, 2048);
-
-  // Subtle urban block platters & street network South of SF Bay Coastline
-  const stepPx = (3.95 / TABLE_W) * 2048;
-  for (let gx = -64.0; gx <= 64.0; gx += 3.95) {
-    for (let gz = -38.0; gz <= 64.0; gz += 3.95) {
-      if (gz < getUs101ZAtX(gx) - 18.0) continue;
-      const [bx, by] = toCanvasXY(gx, gz);
-      ctx.fillStyle = '#11161f';
-      ctx.strokeStyle = 'rgba(218, 224, 234, 0.065)';
-      ctx.lineWidth = 1.2;
-      ctx.fillRect(bx - stepPx * 0.42, by - stepPx * 0.42, stepPx * 0.84, stepPx * 0.84);
-      ctx.strokeRect(bx - stepPx * 0.42, by - stepPx * 0.42, stepPx * 0.84, stepPx * 0.84);
-    }
-  }
-
-  // Subtle secondary street grid lines across entire land table
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.038)';
-  ctx.lineWidth = 2.0;
-  for (let i = 0; i < 2048; i += stepPx) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i, 2048);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(2048, i);
-    ctx.stroke();
-  }
-
-  // Official City of Mountain View Municipal Boundary Outline (from OSM relation 1544956)
-  if (mvGisData && Array.isArray(mvGisData.city_boundary) && mvGisData.city_boundary.length > 3) {
-    ctx.save();
-    ctx.strokeStyle = 'rgba(232, 192, 118, 0.34)';
-    ctx.lineWidth = 3.0;
-    ctx.setLineDash([10, 6]);
-    ctx.beginPath();
-    mvGisData.city_boundary.forEach(([lon, lat], idx) => {
-      const sc = geoToScene(lon, lat);
-      const [px, py] = toCanvasXY(sc.x, sc.z);
-      if (idx === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
-    ctx.closePath();
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  // Curved North Bayshore campus ring road framing Google Bay View & Shoreline Amphitheatre
-  ctx.strokeStyle = 'rgba(222, 190, 134, 0.48)';
-  ctx.lineWidth = 3.5;
-  ctx.beginPath();
-  const loopPts = [
-    [-8.5, -39.5], [1.5, -42.5], [11.5, -39.5], [12.5, -28.0],
-    [6.5, -22.5], [-4.5, -23.5], [-9.5, -31.0], [-8.5, -39.5]
-  ];
-  const loopCurve = new THREE.CatmullRomCurve3(loopPts.map(([lx, lz]) => new THREE.Vector3(lx, 0, lz)), true);
-  loopCurve.getPoints(90).forEach((pt, idx) => {
-    const [px, py] = toCanvasXY(pt.x, pt.z);
-    if (idx === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  });
-  ctx.stroke();
-
-  // Shoreline Lake retention basin just west of Shoreline Amphitheatre
-  ctx.fillStyle = '#0f2b2e';
-  ctx.strokeStyle = 'rgba(218, 184, 122, 0.52)';
-  ctx.lineWidth = 2.2;
-  ctx.beginPath();
-  const [pondX, pondY] = toCanvasXY(-5.5, -40.5);
-  ctx.ellipse(pondX, pondY, 42, 26, -0.25, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  // 2. Northern San Francisco Bay Wetlands & Charleston Slough Lagoon (z < -36)
-  const coastSamples = coastlineCurve.getPoints(180);
-  ctx.save();
-  ctx.beginPath();
-  const [cStartX, cStartY] = toCanvasXY(coastSamples[0].x, coastSamples[0].z);
-  ctx.moveTo(cStartX, cStartY);
-  for (let i = 1; i < coastSamples.length; i++) {
-    const [cx, cy] = toCanvasXY(coastSamples[i].x, coastSamples[i].z);
-    ctx.lineTo(cx, cy);
-  }
-  ctx.lineTo(2048, 0);
-  ctx.lineTo(0, 0);
-  ctx.closePath();
-
-  const [gradCx, gradCy] = toCanvasXY(4.0, -56.0);
-  const waterGrad = ctx.createRadialGradient(gradCx, gradCy, 40, gradCx, gradCy, 1100);
-  waterGrad.addColorStop(0, '#54b4a6');
-  waterGrad.addColorStop(0.32, '#34867d');
-  waterGrad.addColorStop(0.66, '#1b5452');
-  waterGrad.addColorStop(1, '#0d292d');
-  ctx.fillStyle = waterGrad;
-  ctx.fill();
-
-  // Fine stippled bathymetric wave matrix inside Northern SF Bay Wetlands
-  ctx.clip();
-  for (let x = 0; x < 2048; x += 8) {
-    for (let y = 0; y < 560; y += 8) {
-      const dist = Math.hypot(x - gradCx, y - gradCy);
-      const wave = Math.sin(x * 0.036 + y * 0.022) * Math.cos(y * 0.032 - x * 0.014) * 0.14;
-      const alpha = Math.max(0.04, Math.min(0.52, 0.44 - dist / 1850 + wave));
-      ctx.fillStyle = `rgba(124, 242, 214, ${alpha})`;
-      ctx.fillRect(x, y, 2.4, 2.4);
-    }
-  }
-  ctx.restore();
-
-  // Smooth Organic Marshland Peninsulas & Islands inside SF Bay
-  MARSH_ISLANDS_WORLD.forEach((pts) => {
-    const islandCurve = new THREE.CatmullRomCurve3(
-      pts.map(([ix, iz]) => new THREE.Vector3(ix, 0, iz)),
-      true,
-      'centripetal',
-      0.4
-    );
-    const sampled = islandCurve.getPoints(96);
-    ctx.fillStyle = '#0d1218';
-    ctx.strokeStyle = 'rgba(186, 164, 112, 0.56)';
-    ctx.lineWidth = 2.6;
-    ctx.beginPath();
-    sampled.forEach((pt, idx) => {
-      const [px, py] = toCanvasXY(pt.x, pt.z);
-      if (idx === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    });
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  });
-
-  // Golden Shoreline contour border hugging the entire Northern Bayfront edge
-  ctx.strokeStyle = 'rgba(222, 182, 112, 0.76)';
-  ctx.lineWidth = 3.2;
-  ctx.beginPath();
-  coastSamples.forEach((pt, idx) => {
-    const [cx, cy] = toCanvasXY(pt.x, pt.z);
-    if (idx === 0) ctx.moveTo(cx, cy);
-    else ctx.lineTo(cx, cy);
-  });
-  ctx.stroke();
-
-  // 3. Stevens Creek Riparian Corridor Ravine & Dual Braided Emerald Paths
-  ctx.save();
-  ctx.strokeStyle = '#06120b';
-  ctx.lineWidth = 36;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  for (let i = 0; i <= 90; i++) {
-    const pt = stevensCreekCurve.getPointAt(i / 90);
-    const [px, py] = toCanvasXY(pt.x, pt.z);
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.stroke();
-
-  // Subtle emerald creek bank glow on canvas
-  [stevensCreekCurve, stevensCreekBraidedCurve].forEach((crv, idx) => {
-    ctx.strokeStyle = idx === 0 ? 'rgba(64, 244, 152, 0.85)' : 'rgba(64, 244, 152, 0.58)';
-    ctx.lineWidth = idx === 0 ? 3.2 : 2.2;
-    ctx.beginPath();
-    for (let i = 0; i <= 90; i++) {
-      const pt = crv.getPointAt(i / 90);
-      const [px, py] = toCanvasXY(pt.x, pt.z);
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.stroke();
-  });
-  ctx.restore();
-
-  // 4. Moffett Federal Airfield Tarmac, Parallel Runways 32L/32R & NASA Ames Apron at (32.5, -22.5)
-  ctx.save();
-  const [hx, hy] = toCanvasXY(32.5, -22.5);
-  ctx.translate(hx, hy);
-  ctx.rotate(-0.52);
-  ctx.fillStyle = '#090c11';
-  ctx.fillRect(-130, -210, 260, 420);
-  ctx.strokeStyle = 'rgba(210, 178, 118, 0.38)';
-  ctx.lineWidth = 2.2;
-  ctx.strokeRect(-130, -210, 260, 420);
-
-  // Twin parallel runways & taxiways
-  ctx.strokeStyle = 'rgba(180, 190, 205, 0.22)';
-  ctx.lineWidth = 2.4;
-  [-45, 45].forEach((tx) => {
-    ctx.beginPath();
-    ctx.moveTo(tx, -195);
-    ctx.lineTo(tx, 195);
-    ctx.stroke();
-  });
-  [-120, 0, 120].forEach((ty) => {
-    ctx.beginPath();
-    ctx.moveTo(-115, ty);
-    ctx.lineTo(115, ty);
-    ctx.stroke();
-  });
-  ctx.restore();
-
+  ctx.fillStyle = '#090d14';
+  ctx.fillRect(0, 0, 4096, 4096);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
@@ -1692,44 +1537,11 @@ surfaceMesh.position.y = -0.18;
 surfaceMesh.receiveShadow = true;
 cityRoot.add(surfaceMesh);
 
-// 3D Low-Relief Marshland Peninsulas inside SF Bay Wetlands for authentic maquette depth
+// 3D Low-Relief Salt Pond & Wetland Formations inside SF Bay for authentic maquette depth
 function buildMarshlandReliefPads() {
-  const marshMat = new THREE.MeshStandardMaterial({
-    color: 0x0e1319,
-    roughness: 0.82,
-    metalness: 0.1
-  });
-  const rimMat = new THREE.LineBasicMaterial({
-    color: 0x9c885e,
-    transparent: true,
-    opacity: 0.52
-  });
-
-  MARSH_ISLANDS_WORLD.forEach((pts) => {
-    const curve = new THREE.CatmullRomCurve3(
-      pts.map(([ix, iz]) => new THREE.Vector3(ix, 0, iz)),
-      true,
-      'centripetal',
-      0.4
-    );
-    const sampled = curve.getPoints(72);
-    const shape = new THREE.Shape();
-    sampled.forEach((pt, idx) => {
-      if (idx === 0) shape.moveTo(pt.x, -pt.z);
-      else shape.lineTo(pt.x, -pt.z);
-    });
-    const extGeo = new THREE.ExtrudeGeometry(shape, { depth: 0.08, bevelEnabled: false });
-    extGeo.rotateX(-Math.PI / 2);
-    const mesh = new THREE.Mesh(extGeo, marshMat);
-    mesh.position.y = -0.17;
-    mesh.receiveShadow = true;
-    cityRoot.add(mesh);
-
-    const linePts = sampled.map((p) => new THREE.Vector3(p.x, -0.08, p.z));
-    linePts.push(linePts[0].clone());
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(linePts);
-    cityRoot.add(new THREE.Line(lineGeo, rimMat));
-  });
+  if (window.MVGraphicsFidelity && typeof window.MVGraphicsFidelity.buildAuthenticSaltPondRelief === 'function') {
+    window.MVGraphicsFidelity.buildAuthenticSaltPondRelief(cityRoot, geoToScene, THREE);
+  }
 }
 buildMarshlandReliefPads();
 
@@ -1758,25 +1570,69 @@ cityRoot.add(surgeWaterMesh);
 const corridorsGroup = new THREE.Group();
 cityRoot.add(corridorsGroup);
 
+function createRibbonGeometry(pointsOrCurve, width, segments = 128) {
+  const curve = (pointsOrCurve && pointsOrCurve.isCurve)
+    ? pointsOrCurve
+    : (Array.isArray(pointsOrCurve) && pointsOrCurve.length > 0 && pointsOrCurve[0].isVector3
+        ? new THREE.CatmullRomCurve3(pointsOrCurve)
+        : new THREE.CatmullRomCurve3(pointsOrCurve.map((p) => (p.isVector3 ? p : new THREE.Vector3(p.x, p.y || 0, p.z)))));
+  const halfW = width * 0.5;
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const pt = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t).normalize();
+    // 2D perpendicular normal on XZ ground plane: (-tangent.z, 0, tangent.x)
+    const normX = -tangent.z;
+    const normZ = tangent.x;
+    const len = Math.hypot(normX, normZ) || 1;
+    const nx = (normX / len) * halfW;
+    const nz = (normZ / len) * halfW;
+
+    // Left vertex
+    positions.push(pt.x + nx, 0, pt.z + nz);
+    uvs.push(0, t);
+
+    // Right vertex
+    positions.push(pt.x - nx, 0, pt.z - nz);
+    uvs.push(1, t);
+
+    if (i < segments) {
+      const base = i * 2;
+      indices.push(base, base + 1, base + 2);
+      indices.push(base + 1, base + 3, base + 2);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return { geo, curve };
+}
+
 function buildGlowingCorridor(points, width, colorHex, yOffset = 0.03, opacity = 0.94, hdrMultiplier = 1.0, renderOrder = 3) {
-  const curve = new THREE.CatmullRomCurve3(points);
-  const tubeGeo = new THREE.TubeGeometry(curve, 108, width * 0.5, 6, false);
-  tubeGeo.scale(1, 0.014, 1);
+  const { geo, curve } = createRibbonGeometry(points, width);
   const col = new THREE.Color(colorHex).multiplyScalar(hdrMultiplier);
   const mat = new THREE.MeshBasicMaterial({
     color: col,
     transparent: true,
     opacity,
-    depthWrite: false
+    depthWrite: false,
+    side: THREE.DoubleSide
   });
-  const mesh = new THREE.Mesh(tubeGeo, mat);
+  const mesh = new THREE.Mesh(geo, mat);
   mesh.position.y = yOffset;
   mesh.renderOrder = renderOrder;
   corridorsGroup.add(mesh);
   return { curve, mesh, mat, width };
 }
 
-// 1. Caltrain Electrified Corridor (True geoToScene NW-to-SE multi-track cyan laser rails through San Antonio & Downtown MV)
+// 1. Caltrain Electrified Corridor (True-Scale 2.5D Ribbon: ROW 0.25 units ~ 20m true width)
 const caltrainPoints = [
   new THREE.Vector3(-58.0, 0, -32.7),
   new THREE.Vector3(-46.7, 0, -23.8),
@@ -1788,21 +1644,21 @@ const caltrainPoints = [
   new THREE.Vector3(29.7, 0, 19.3),
   new THREE.Vector3(48.5, 0, 27.2)
 ];
-buildGlowingCorridor(caltrainPoints, 3.8, 0x0e6c8a, 0.018, 0.20, 1.08, 2);
-const caltrainMain = buildGlowingCorridor(caltrainPoints, 1.9, 0x1ca8cc, 0.025, 0.42, 1.25, 2);
-[-0.55, 0.0, 0.55].forEach((offset, idx) => {
+buildGlowingCorridor(caltrainPoints, 0.25, 0x0e6c8a, 0.022, 0.24, 1.08, 2);
+const caltrainMain = buildGlowingCorridor(caltrainPoints, 0.14, 0x1ca8cc, 0.026, 0.44, 1.25, 2);
+[-0.04, 0.0, 0.04].forEach((offset, idx) => {
   buildGlowingCorridor(
     caltrainPoints.map((p) => new THREE.Vector3(p.x + offset * 0.45, 0, p.z - offset * 0.85)),
-    idx === 1 ? 0.20 : 0.30,
+    idx === 1 ? 0.025 : 0.035,
     idx === 1 ? 0x6ceeff : 0xb4feff,
-    0.068,
+    0.032,
     idx === 1 ? 0.82 : 0.98,
     1.78,
     4
   );
 });
 
-// 2. US-101 Bayshore Freeway (True geoToScene Sweeping HDR Cyan Multi-Lane Corridor separating North Bayshore from Central MV)
+// 2. US-101 Bayshore Freeway (True-Scale 2.5D Ribbon: ROW 0.58 units ~ 47m true width)
 const us101Points = [
   new THREE.Vector3(-46.6, 0, -66.4),
   new THREE.Vector3(-27.6, 0, -43.7),
@@ -1815,17 +1671,17 @@ const us101Points = [
   new THREE.Vector3(44.9, 0, -1.6),
   new THREE.Vector3(58.0, 0, 2.2)
 ];
-buildGlowingCorridor(us101Points, 4.4, 0x1284a8, 0.02, 0.22, 1.12, 2);
-buildGlowingCorridor(us101Points, 2.2, 0x28bce0, 0.028, 0.44, 1.3, 3);
-const us101Main = buildGlowingCorridor(us101Points, 0.88, 0xc4ffff, 0.072, 0.98, 1.82, 4);
+buildGlowingCorridor(us101Points, 0.58, 0x1284a8, 0.022, 0.24, 1.12, 2);
+buildGlowingCorridor(us101Points, 0.38, 0x28bce0, 0.026, 0.46, 1.3, 3);
+const us101Main = buildGlowingCorridor(us101Points, 0.22, 0xc4ffff, 0.032, 0.98, 1.82, 4);
 
-// Parallel US-101 outer freeway lanes for authentic multi-lane light-trail separation
-[-0.75, 0.75].forEach((shift) => {
+// Parallel US-101 outer freeway lanes inside true 0.58 ROW
+[-0.14, 0.14].forEach((shift) => {
   const shiftedPts = us101Points.map((p) => new THREE.Vector3(p.x + shift * 0.55, 0, p.z - shift * 0.65));
-  buildGlowingCorridor(shiftedPts, 0.24, 0x8ef8ff, 0.066, 0.88, 1.55, 4);
+  buildGlowingCorridor(shiftedPts, 0.06, 0x8ef8ff, 0.034, 0.88, 1.55, 4);
 });
 
-// 3. El Camino Real / SR-82 Grand Boulevard Spine (True geoToScene warm amber corridor from San Antonio to Sunnyvale border)
+// 3. El Camino Real / SR-82 Grand Boulevard Spine (True-Scale 2.5D Ribbon: ROW 0.42 units ~ 34m true width)
 const ecrPoints = [
   new THREE.Vector3(-52.0, 0, -16.8),
   new THREE.Vector3(-43.5, 0, -9.2),
@@ -1838,11 +1694,11 @@ const ecrPoints = [
   new THREE.Vector3(29.1, 0, 36.9),
   new THREE.Vector3(48.5, 0, 43.2)
 ];
-buildGlowingCorridor(ecrPoints, 3.4, 0xb8580a, 0.018, 0.16, 1.08, 2);
-buildGlowingCorridor(ecrPoints, 1.65, 0xe0821c, 0.024, 0.36, 1.24, 3);
-const ecrMain = buildGlowingCorridor(ecrPoints, 0.60, 0xffe092, 0.064, 0.94, 1.65, 4);
+buildGlowingCorridor(ecrPoints, 0.42, 0xb8580a, 0.020, 0.18, 1.08, 2);
+buildGlowingCorridor(ecrPoints, 0.26, 0xe0821c, 0.024, 0.38, 1.24, 3);
+const ecrMain = buildGlowingCorridor(ecrPoints, 0.14, 0xffe092, 0.030, 0.94, 1.65, 4);
 
-// Extra-intense El Camino & Castro Promenade Aura along the central spine
+// El Camino & Castro Promenade Spine
 const ecrPromenadePoints = [
   new THREE.Vector3(-34.3, 0, -0.5),
   new THREE.Vector3(-24.7, 0, 5.1),
@@ -1851,11 +1707,11 @@ const ecrPromenadePoints = [
   new THREE.Vector3(2.0, 0, 23.2),
   new THREE.Vector3(11.9, 0, 29.1)
 ];
-buildGlowingCorridor(ecrPromenadePoints, 3.8, 0xc8640c, 0.019, 0.18, 1.12, 2);
-buildGlowingCorridor(ecrPromenadePoints, 1.9, 0xe88a20, 0.026, 0.42, 1.32, 3);
-buildGlowingCorridor(ecrPromenadePoints, 0.72, 0xffe69c, 0.068, 0.98, 1.78, 4);
+buildGlowingCorridor(ecrPromenadePoints, 0.42, 0xc8640c, 0.021, 0.20, 1.12, 2);
+buildGlowingCorridor(ecrPromenadePoints, 0.26, 0xe88a20, 0.025, 0.44, 1.32, 3);
+buildGlowingCorridor(ecrPromenadePoints, 0.14, 0xffe69c, 0.032, 0.98, 1.78, 4);
 
-// 4. Downtown Castro Street / Miramonte Ave / Moffett Blvd Cross-Arterial (True geoToScene Alignment)
+// 4. Downtown Castro Street / Miramonte Ave Cross-Arterial (True-Scale 2.5D Ribbon: ROW 0.28 units ~ 23m true width)
 const castroPoints = [
   new THREE.Vector3(-7.7, 0, 35.9),
   new THREE.Vector3(-7.5, 0, 24.4),
@@ -1865,19 +1721,19 @@ const castroPoints = [
   new THREE.Vector3(11.5, 0, -6.5),
   new THREE.Vector3(19.5, 0, -18.5)
 ];
-buildGlowingCorridor(castroPoints, 2.2, 0xc06410, 0.019, 0.18, 1.1, 2);
-const castroMain = buildGlowingCorridor(castroPoints, 0.52, 0xf8d688, 0.06, 0.90, 1.48, 3);
+buildGlowingCorridor(castroPoints, 0.28, 0xc06410, 0.020, 0.20, 1.1, 2);
+const castroMain = buildGlowingCorridor(castroPoints, 0.14, 0xf8d688, 0.028, 0.90, 1.48, 3);
 
-// Intense Warm Amber-Gold Downtown Castro St. Pedestrian Promenade Core
+// Downtown Castro St. Pedestrian Promenade Core
 const castroDowntownPoints = [
   new THREE.Vector3(-7.5, 0, 24.4),
   new THREE.Vector3(-2.7, 0, 18.9),
   new THREE.Vector3(0.6, 0, 13.2),
   new THREE.Vector3(3.8, 0, 7.2)
 ];
-buildGlowingCorridor(castroDowntownPoints, 3.6, 0xc86810, 0.02, 0.22, 1.14, 2);
-buildGlowingCorridor(castroDowntownPoints, 1.85, 0xe88c24, 0.027, 0.46, 1.35, 3);
-buildGlowingCorridor(castroDowntownPoints, 0.74, 0xffe498, 0.069, 0.98, 1.82, 4);
+buildGlowingCorridor(castroDowntownPoints, 0.28, 0xc86810, 0.022, 0.24, 1.14, 2);
+buildGlowingCorridor(castroDowntownPoints, 0.18, 0xe88c24, 0.026, 0.48, 1.35, 3);
+buildGlowingCorridor(castroDowntownPoints, 0.10, 0xffe498, 0.032, 0.98, 1.82, 4);
 
 // 5. Shoreline Boulevard Overpass Connector from El Camino across Caltrain & US-101 to North Bayshore
 const shorelinePoints = [
@@ -1890,12 +1746,12 @@ const shorelinePoints = [
   new THREE.Vector3(2.18, 0, -24.1),
   new THREE.Vector3(2.25, 0, -34.5)
 ];
-const shorelineMain = buildGlowingCorridor(shorelinePoints, 0.42, 0xf2c874, 0.054, 0.85, 1.35, 3);
+const shorelineMain = buildGlowingCorridor(shorelinePoints, 0.22, 0xf2c874, 0.028, 0.85, 1.35, 3);
 
 // 6. Dual Braided Emerald Stevens Creek Trail 3D Ribbons
-buildGlowingCorridor(stevensCreekCurve.getPoints(72), 0.90, 0x0e6b3c, 0.012, 0.28, 1.1, 1);
-buildGlowingCorridor(stevensCreekCurve.getPoints(72), 0.28, 0x42f89c, 0.018, 0.92, 1.52, 2);
-buildGlowingCorridor(stevensCreekBraidedCurve.getPoints(64), 0.20, 0x62ffae, 0.018, 0.78, 1.38, 2);
+buildGlowingCorridor(stevensCreekCurve.getPoints(72), 0.18, 0x0e6b3c, 0.016, 0.32, 1.1, 1);
+buildGlowingCorridor(stevensCreekCurve.getPoints(72), 0.08, 0x42f89c, 0.022, 0.92, 1.52, 2);
+buildGlowingCorridor(stevensCreekBraidedCurve.getPoints(64), 0.06, 0x62ffae, 0.022, 0.78, 1.38, 2);
 
 // Warm architectural point lights over Downtown Castro & El Camino transit plaza
 const castroPlazaLight = new THREE.PointLight(0xffb44c, 3.1, 38, 1.45);
@@ -1952,14 +1808,14 @@ function renderGisInfrastructure() {
   // Remaining Real Road Corridors (SR-85, SR-237, Central Expy, Miramonte, Rengstorff, San Antonio, Middlefield, Grant)
   if (Array.isArray(mvGisData.roads)) {
     const roadStyles = {
-      'SR-85': { width: 1.5, color: 0x1ca2cc, y: 0.034, op: 0.68, hdr: 1.35 },
-      'SR-237': { width: 1.5, color: 0x20a8d4, y: 0.034, op: 0.68, hdr: 1.35 },
-      'Central Expressway': { width: 1.15, color: 0xee9224, y: 0.035, op: 0.58, hdr: 1.25 },
-      'Miramonte Avenue': { width: 0.68, color: 0xecd088, y: 0.028, op: 0.46, hdr: 1.1 },
-      'Rengstorff Avenue': { width: 0.68, color: 0xecd088, y: 0.028, op: 0.46, hdr: 1.1 },
-      'San Antonio Road': { width: 0.85, color: 0xf0c878, y: 0.030, op: 0.54, hdr: 1.18 },
-      'Middlefield Road': { width: 0.78, color: 0xedd28e, y: 0.029, op: 0.48, hdr: 1.12 },
-      'Grant Road': { width: 0.72, color: 0xecd088, y: 0.028, op: 0.48, hdr: 1.12 }
+      'SR-85': { width: 0.44, color: 0x1ca2cc, y: 0.034, op: 0.68, hdr: 1.35 },
+      'SR-237': { width: 0.44, color: 0x20a8d4, y: 0.034, op: 0.68, hdr: 1.35 },
+      'Central Expressway': { width: 0.34, color: 0xee9224, y: 0.035, op: 0.58, hdr: 1.25 },
+      'Miramonte Avenue': { width: 0.24, color: 0xecd088, y: 0.028, op: 0.46, hdr: 1.1 },
+      'Rengstorff Avenue': { width: 0.24, color: 0xecd088, y: 0.028, op: 0.46, hdr: 1.1 },
+      'San Antonio Road': { width: 0.26, color: 0xf0c878, y: 0.030, op: 0.54, hdr: 1.18 },
+      'Middlefield Road': { width: 0.26, color: 0xedd28e, y: 0.029, op: 0.48, hdr: 1.12 },
+      'Grant Road': { width: 0.24, color: 0xecd088, y: 0.028, op: 0.48, hdr: 1.12 }
     };
 
     mvGisData.roads.forEach((road) => {
@@ -1976,7 +1832,7 @@ function renderGisInfrastructure() {
         }
       }
       if (pts.length >= 2) {
-        const style = roadStyles[road.name] || { width: 0.65, color: 0xe6caa0, y: 0.028, op: 0.42, hdr: 1.1 };
+        const style = roadStyles[road.name] || { width: 0.22, color: 0xe6caa0, y: 0.028, op: 0.42, hdr: 1.1 };
         buildGlowingCorridor(pts, style.width, style.color, style.y, style.op, style.hdr, 2);
       }
     });
@@ -1998,7 +1854,7 @@ function renderGisInfrastructure() {
         }
       }
       if (pts.length >= 2) {
-        buildGlowingCorridor(pts, 0.85, 0xff9933, 0.042, 0.72, 1.4, 3);
+        buildGlowingCorridor(pts, 0.24, 0xff9933, 0.042, 0.72, 1.4, 3);
       }
     });
   }
@@ -2019,7 +1875,31 @@ function renderGisInfrastructure() {
         }
       }
       if (pts.length >= 2) {
-        buildGlowingCorridor(pts, 0.42, 0x3ae88a, 0.022, 0.65, 1.3, 2);
+        buildGlowingCorridor(pts, 0.18, 0x3ae88a, 0.022, 0.65, 1.3, 2);
+      }
+    });
+  }
+
+  // Moffett Federal Airfield Runways and Taxiways (14L/32R, 14R/32L)
+  if (Array.isArray(mvGisData.aeroways)) {
+    mvGisData.aeroways.forEach((aero) => {
+      if (!Array.isArray(aero.coords) || aero.coords.length < 2) return;
+      const pts = [];
+      for (const [lon, lat] of aero.coords) {
+        const sc = geoToScene(lon, lat);
+        if (Math.abs(sc.x) <= TABLE_W * 0.51 && Math.abs(sc.z) <= TABLE_W * 0.51) {
+          const v = new THREE.Vector3(sc.x, 0, sc.z);
+          if (pts.length === 0 || v.distanceToSquared(pts[pts.length - 1]) > 0.15) {
+            pts.push(v);
+          }
+        }
+      }
+      if (pts.length >= 2) {
+        const isRunway = aero.type === 'runway';
+        buildGlowingCorridor(pts, isRunway ? 0.52 : 0.16, isRunway ? 0x222a34 : 0x364452, 0.024, isRunway ? 0.88 : 0.62, 1.0, 2);
+        if (isRunway) {
+          buildGlowingCorridor(pts, 0.08, 0xfff6d8, 0.032, 0.90, 1.45, 3);
+        }
       }
     });
   }
@@ -2545,7 +2425,8 @@ function buildNasaHangarOne() {
   const ribMat = new THREE.MeshStandardMaterial({
     color: 0xe6ebf2,
     roughness: 0.34,
-    metalness: 0.46
+    metalness: 0.46,
+    depthWrite: false
   });
   for (let iz = 0; iz <= 10; iz++) {
     const zPos = ((iz / 10) - 0.5) * length;
@@ -2605,7 +2486,7 @@ function buildDowntownTransitCenter() {
   group.scale.setScalar(0.55);
 
   const stuccoMat = new THREE.MeshStandardMaterial({ color: 0xede6d8, roughness: 0.65 });
-  const tileRoofMat = new THREE.MeshStandardMaterial({ color: 0xc45c2c, roughness: 0.45 });
+  const tileRoofMat = new THREE.MeshStandardMaterial({ color: 0xc45c2c, roughness: 0.45, depthWrite: false });
   const clockFaceMat = new THREE.MeshBasicMaterial({ color: 0xfffae6 });
 
   // Main Station Depot
@@ -2713,6 +2594,62 @@ const castroSamples = sampleCurvePoints(castroMain.curve, 140);
 const shorelineSamples = sampleCurvePoints(shorelineMain.curve, 90);
 const stevensCreekSamples = sampleCurvePoints(stevensCreekCurve, 180);
 
+const vtaRailSamples = [];
+const otherCorridorsSamples = [];
+if (mvGisData) {
+  for (const r of [...(mvGisData.roads || []), ...(mvGisData.rail || [])]) {
+    const isMajor = r.name.includes('101') || r.name.includes('Caltrain') || r.name.includes('Camino');
+    const isVta = r.name.includes('VTA');
+    for (const seg of (r.segments || [])) {
+      const segPts = seg.map((p) => geoToScene(p[0], p[1]));
+      if (isVta) vtaRailSamples.push(...segPts);
+      else if (!isMajor) otherCorridorsSamples.push(...segPts);
+    }
+  }
+}
+
+const SPATIAL_CELL = 6.0;
+const corridorSpatialGrid = new Map();
+function addPtsToCorridorGrid(pts, type) {
+  for (let i = 0; i < pts.length; i++) {
+    const pt = pts[i];
+    const gx = Math.floor(pt.x / SPATIAL_CELL);
+    const gz = Math.floor(pt.z / SPATIAL_CELL);
+    const key = `${gx}_${gz}`;
+    let cell = corridorSpatialGrid.get(key);
+    if (!cell) {
+      cell = [];
+      corridorSpatialGrid.set(key, cell);
+    }
+    cell.push({ x: pt.x, z: pt.z, type });
+  }
+}
+addPtsToCorridorGrid(vtaRailSamples, 'vta');
+addPtsToCorridorGrid(otherCorridorsSamples, 'other');
+
+function checkGridClearance(minX, maxX, minZ, maxZ) {
+  const maxTh = 1.45;
+  const gMinX = Math.floor((minX - maxTh) / SPATIAL_CELL);
+  const gMaxX = Math.floor((maxX + maxTh) / SPATIAL_CELL);
+  const gMinZ = Math.floor((minZ - maxTh) / SPATIAL_CELL);
+  const gMaxZ = Math.floor((maxZ + maxTh) / SPATIAL_CELL);
+
+  for (let gx = gMinX; gx <= gMaxX; gx++) {
+    for (let gz = gMinZ; gz <= gMaxZ; gz++) {
+      const cell = corridorSpatialGrid.get(`${gx}_${gz}`);
+      if (!cell) continue;
+      for (let i = 0; i < cell.length; i++) {
+        const pt = cell[i];
+        const th = pt.type === 'vta' ? 1.45 : 1.25;
+        const dx = Math.max(minX - pt.x, 0, pt.x - maxX);
+        const dz = Math.max(minZ - pt.z, 0, pt.z - maxZ);
+        if (dx * dx + dz * dz < th * th) return false;
+      }
+    }
+  }
+  return true;
+}
+
 function minDistBoxToSamples(minX, maxX, minZ, maxZ, samples) {
   let best = Infinity;
   for (let i = 0; i < samples.length; i++) {
@@ -2736,9 +2673,9 @@ function buildStevensCreekTrees() {
   const rand = createSeededRandom(7731);
   const crownGeo = new THREE.DodecahedronGeometry(0.54, 1);
   const treeMats = [
-    new THREE.MeshStandardMaterial({ color: 0x0e331c, emissive: 0x04140a, emissiveIntensity: 0.16, roughness: 0.86 }),
-    new THREE.MeshStandardMaterial({ color: 0x164a29, emissive: 0x061d0f, emissiveIntensity: 0.18, roughness: 0.84 }),
-    new THREE.MeshStandardMaterial({ color: 0x206038, emissive: 0x082614, emissiveIntensity: 0.20, roughness: 0.82 })
+    new THREE.MeshStandardMaterial({ color: 0x0e331c, emissive: 0x04140a, emissiveIntensity: 0.16, roughness: 0.86, depthWrite: false }),
+    new THREE.MeshStandardMaterial({ color: 0x164a29, emissive: 0x061d0f, emissiveIntensity: 0.18, roughness: 0.84, depthWrite: false }),
+    new THREE.MeshStandardMaterial({ color: 0x206038, emissive: 0x082614, emissiveIntensity: 0.20, roughness: 0.82, depthWrite: false })
   ];
 
   for (let i = 0; i < 520; i++) {
@@ -2813,6 +2750,7 @@ function isInsideExclusionZone(x, z, halfW = 1.95, halfD = 1.95, allowNorthOf101
   if (minDistBoxToSamples(minX, maxX, minZ, maxZ, castroSamples) < 1.34) return true;
   if (minDistBoxToSamples(minX, maxX, minZ, maxZ, shorelineSamples) < 1.12) return true;
   if (minDistBoxToSamples(minX, maxX, minZ, maxZ, stevensCreekSamples) < 1.68) return true;
+  if (!checkGridClearance(minX, maxX, minZ, maxZ)) return true;
 
   return false;
 }
@@ -2829,7 +2767,7 @@ function classifyDistrict(x, z) {
     return {
       district: 'DT_CRA',
       districtName: 'Downtown Castro Street Precise Plan',
-      baseZone: 'TOD10'
+      baseZone: 'MU6'
     };
   }
   if (x < -18.0 || Math.abs(z - (0.62 * x + 21.0)) < 7.5) {
@@ -2850,6 +2788,72 @@ function classifyDistrict(x, z) {
     district: 'RES_SF',
     districtName: 'Old Mountain View / Residential Neighborhoods',
     baseZone: 'R1'
+  };
+}
+
+// Architectural Maquette Material Shader Injection (Procedural Floor Grooves & Ground-Floor Retail Glow)
+function applyMaquetteShader(mat, isStorefront = false) {
+  mat.userData = mat.userData || {};
+  mat.userData.uIsStorefront = { value: isStorefront ? 1.0 : 0.0 };
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uIsStorefront = mat.userData.uIsStorefront;
+
+    // Inject varying in vertex shader
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+varying vec3 vMaquetteWorldPos;
+varying vec3 vMaquetteNormal;`
+    );
+
+    // Compute world position and normal in vertex shader
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `#include <worldpos_vertex>
+vec4 maquetteWorldPos = vec4( transformed, 1.0 );
+#ifdef USE_BATCHING
+  maquetteWorldPos = batchingMatrix * maquetteWorldPos;
+#endif
+#ifdef USE_INSTANCING
+  maquetteWorldPos = instanceMatrix * maquetteWorldPos;
+#endif
+maquetteWorldPos = modelMatrix * maquetteWorldPos;
+vMaquetteWorldPos = maquetteWorldPos.xyz;
+vMaquetteNormal = normalize( normalMatrix * normal );`
+    );
+
+    // Inject varying and uniform in fragment shader
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+varying vec3 vMaquetteWorldPos;
+varying vec3 vMaquetteNormal;
+uniform float uIsStorefront;`
+    );
+
+    // Subtle horizontal story stratification / floor banding grooves across multi-story facades
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+if (abs(vMaquetteNormal.y) < 0.85) {
+  float storyHeight = 0.38;
+  float storyPhase = fract(vMaquetteWorldPos.y / storyHeight);
+  float storyGroove = smoothstep(0.0, 0.05, storyPhase) * smoothstep(1.0, 0.95, storyPhase);
+  diffuseColor.rgb *= (0.93 + 0.07 * storyGroove);
+}`
+    );
+
+    // Localize warm storefront retail illumination strictly to ground floors (y < 0.32 scene units) along Downtown Castro and ECR
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>
+if (uIsStorefront > 0.5) {
+  float storefrontMask = smoothstep(0.32, 0.12, vMaquetteWorldPos.y);
+  vec3 warmStorefront = vec3(0.96, 0.58, 0.16) * 0.85;
+  totalEmissiveRadiance += warmStorefront * storefrontMask;
+}`
+    );
   };
 }
 
@@ -2969,11 +2973,16 @@ function generateCityParcels() {
       const dCal = minDistBoxToSamples(minX, maxX, minZ, maxZ, caltrainSamples);
       const dEcr = minDistBoxToSamples(minX, maxX, minZ, maxZ, ecrSamples);
       const dCreek = minDistBoxToSamples(minX, maxX, minZ, maxZ, stevensCreekSamples);
+      const dCastro = minDistBoxToSamples(minX, maxX, minZ, maxZ, castroSamples);
 
-      const isCleared = (d101 >= 2.3 && dCal >= 1.6 && dEcr >= 1.5 && dCreek >= 1.7);
+      // Strict right-of-way clearance for BOTH interactive parcels and static merged buildings:
+      // Guarantees 0 buildings sitting inside road/rail tubes!
+      const isCleared = (d101 >= 2.25 && dCal >= 1.55 && dEcr >= 1.45 && dCreek >= 1.65 && dCastro >= 0.8 && checkGridClearance(minX, maxX, minZ, maxZ));
+      if (!isCleared) continue;
+
       const dist = mapGisDistrict(b.district);
 
-      if (isCleared && selectedCounts[dist] < targetCounts[dist]) {
+      if (selectedCounts[dist] < targetCounts[dist]) {
         selectedCounts[dist]++;
         const w = Math.max(maxX - minX, 2.6);
         const d = Math.max(maxZ - minZ, 2.6);
@@ -2995,13 +3004,22 @@ function generateCityParcels() {
 
         const nearAmberSpine = (dist === 'DT_CRA' || dist === 'ECR_MU') && (dEcr < 6.5 || Math.hypot(cx - 1.0, cz - 13.0) < 12.0);
 
+        const baseZone = dist === 'DT_CRA' ? 'MU6' :
+                         dist === 'ECR_MU' ? 'MU6' :
+                         dist === 'EW_TOD' ? 'MU6' :
+                         dist === 'NB_PP' ? 'MU6' :
+                         ((b.levels && b.levels >= 2) || (b.height_m && b.height_m > 7.0) ? 'R3' : 'R1');
+        const zDef = ZONE_DEFS[baseZone] || ZONE_DEFS.MU6;
+
+        // Warm architectural maquette aesthetic with floor banding grooves and ground-floor retail glow
         const mat = new THREE.MeshStandardMaterial({
-          color: nearAmberSpine ? 0xf7f0e4 : (dist === 'RES_SF' ? 0xeceae3 : 0xf3f0e8),
-          emissive: nearAmberSpine ? 0xd47c18 : 0x10161e,
-          emissiveIntensity: nearAmberSpine ? 0.28 : 0.025,
-          roughness: 0.40,
-          metalness: 0.08
+          color: zDef.colorHex,
+          emissive: 0x10161e,
+          emissiveIntensity: 0.025,
+          roughness: zDef.roughness || 0.78,
+          metalness: zDef.metalness || 0.03
         });
+        applyMaquetteShader(mat, nearAmberSpine);
 
         const mesh = new THREE.Group();
         mesh.position.set(cx, 0, cz);
@@ -3019,10 +3037,7 @@ function generateCityParcels() {
                         dist === 'EW_TOD' ? 'East Whisman & Middlefield TOD' :
                         dist === 'NB_PP' ? 'North Bayshore & Shoreline Gateway' :
                         'Old Mountain View / Residential Gentle Density',
-          baseZone: dist === 'DT_CRA' ? 'TOD10' :
-                    dist === 'ECR_MU' ? 'MU6' :
-                    dist === 'EW_TOD' ? 'MU6' :
-                    dist === 'NB_PP' ? 'MU6' : 'R1'
+          baseZone
         };
 
         const elevationThreshold = cz < -15 ? 0.35 + rand() * 0.65 : 0.95 + rand() * 0.9;
@@ -3089,14 +3104,18 @@ function generateCityParcels() {
       const geos = districtGeos[dKey];
       if (geos.length > 0) {
         const batchSize = 800;
-        const baseColorHex = dKey === 'RES_SF' ? 0xe4e1d8 : (dKey === 'DT_CRA' ? 0xf5f0e6 : 0xedeae2);
+        const dKeyZone = dKey === 'RES_SF' ? 'R1' : (dKey === 'DT_CRA' ? 'MU6' : (dKey === 'ECR_MU' ? 'MU6' : 'TOD10'));
+        const zDef = ZONE_DEFS[dKeyZone] || ZONE_DEFS.MU6;
+        const baseColorHex = zDef.colorHex;
+        const isStorefrontDistrict = (dKey === 'DT_CRA' || dKey === 'ECR_MU');
         const distMat = new THREE.MeshStandardMaterial({
           color: baseColorHex,
-          emissive: dKey === 'DT_CRA' ? 0x382008 : 0x10161e,
-          emissiveIntensity: dKey === 'DT_CRA' ? 0.12 : 0.025,
-          roughness: 0.44,
-          metalness: 0.08
+          emissive: 0x10161e,
+          emissiveIntensity: 0.025,
+          roughness: zDef.roughness || 0.78,
+          metalness: zDef.metalness || 0.03
         });
+        applyMaquetteShader(distMat, isStorefrontDistrict);
         for (let bi = 0; bi < geos.length; bi += batchSize) {
           const chunk = geos.slice(bi, bi + batchSize);
           const mergedGeo = BufferGeometryUtils.mergeGeometries(chunk, false);
@@ -3124,13 +3143,16 @@ function generateCityParcels() {
         let d = 3.25;
         if (isInsideExclusionZone(x, z, w * 0.52, d * 0.52)) continue;
         const origHeight = isResidential ? 0.65 + rand() * 0.35 : 1.35 + rand() * 1.15;
+        const zKey = isResidential ? 'R1' : 'MU6';
+        const zDef = ZONE_DEFS[zKey] || ZONE_DEFS.R1;
         const mat = new THREE.MeshStandardMaterial({
-          color: isResidential ? 0xeceae3 : 0xf3f0e8,
+          color: zDef.colorHex,
           emissive: 0x10161e,
           emissiveIntensity: 0.025,
-          roughness: 0.40,
-          metalness: 0.08
+          roughness: zDef.roughness || 0.78,
+          metalness: zDef.metalness || 0.03
         });
+        applyMaquetteShader(mat, false);
         const mesh = new THREE.Group();
         mesh.position.set(x, 0, z);
         mesh.scale.set(1, origHeight, 1);
@@ -3175,18 +3197,8 @@ const LANDMARK_CALLOUTS = [
     worldPos: new THREE.Vector3(6.8, 2.2, -31.0),
     offsetX: -225,
     offsetY: -12,
-    camKey: 'bayshore'
-  },
-  {
-    id: 'call-shoreline',
-    title: 'SHORELINE AMPHITHEATRE',
-    sub: 'BAYFRONT',
-    subColor: 'rgba(236, 232, 223, 0.82)',
-    styleType: 'top-left',
-    worldPos: new THREE.Vector3(-2.8, 3.2, -36.5),
-    offsetX: -265,
-    offsetY: -78,
-    camKey: 'bayshore'
+    camKey: 'bayshore',
+    priority: 100
   },
   {
     id: 'call-hangar',
@@ -3197,17 +3209,42 @@ const LANDMARK_CALLOUTS = [
     worldPos: new THREE.Vector3(30.5, 3.8, -22.5),
     offsetX: 28,
     offsetY: -48,
-    camKey: 'moffett'
+    camKey: 'moffett',
+    priority: 95
+  },
+  {
+    id: 'call-castro',
+    title: 'CASTRO ST. PROMENADE',
+    sub: 'DOWNTOWN // AMBER',
+    subColor: '#f2ae49',
+    styleType: 'bottom-left',
+    worldPos: new THREE.Vector3(0.6, 0.4, 13.2),
+    verticalDropVh: 0.86,
+    camKey: 'castro',
+    priority: 90
   },
   {
     id: 'call-caltrain',
-    title: 'CALTRAIN CORRIDOR',
-    sub: '(CYAN)',
+    title: 'MOUNTAIN VIEW TRANSIT CENTER',
+    sub: 'CALTRAIN CORRIDOR // CYAN',
     subColor: '#48ecff',
     styleType: 'bottom-left',
     worldPos: new THREE.Vector3(-26.6, 0.4, -8.0),
     verticalDropVh: 0.78,
-    camKey: 'sanantonio'
+    camKey: 'sanantonio',
+    priority: 85
+  },
+  {
+    id: 'call-shoreline',
+    title: 'SHORELINE AMPHITHEATRE',
+    sub: 'BAYFRONT',
+    subColor: 'rgba(236, 232, 223, 0.82)',
+    styleType: 'top-left',
+    worldPos: new THREE.Vector3(-2.8, 3.2, -36.5),
+    offsetX: -265,
+    offsetY: -78,
+    camKey: 'bayshore',
+    priority: 80
   },
   {
     id: 'call-creek',
@@ -3217,17 +3254,8 @@ const LANDMARK_CALLOUTS = [
     styleType: 'bottom-right',
     worldPos: new THREE.Vector3(12.3, 0.4, 33.1),
     verticalDropVh: 0.89,
-    camKey: 'overview'
-  },
-  {
-    id: 'call-castro',
-    title: 'CASTRO ST. PROMENADE',
-    sub: '(AMBER)',
-    subColor: '#f2ae49',
-    styleType: 'bottom-left',
-    worldPos: new THREE.Vector3(0.6, 0.4, 13.2),
-    verticalDropVh: 0.86,
-    camKey: 'castro'
+    camKey: 'overview',
+    priority: 70
   }
 ];
 
@@ -3265,6 +3293,47 @@ const calloutDomElements = LANDMARK_CALLOUTS.map((item) => {
   return { item, el, line };
 });
 
+// Cache DOM dimensions to completely eliminate per-frame layout thrashing at 60fps
+function cacheCalloutDimensions() {
+  calloutDomElements.forEach(({ item, el }) => {
+    const prevDisplay = el.style.display;
+    const prevVis = el.style.visibility;
+    el.style.visibility = 'hidden';
+    el.style.display = 'block';
+    const rect = el.getBoundingClientRect();
+    const w = Math.round(rect.width || el.offsetWidth || 195);
+    const h = Math.round(rect.height || el.offsetHeight || 32);
+    item.cachedWidth = w > 0 ? w : 195;
+    item.cachedHeight = h > 0 ? h : 32;
+    el.style.display = prevDisplay;
+    el.style.visibility = prevVis;
+  });
+
+  const prevBayDisplay = bayLabelEl.style.display;
+  const prevBayVis = bayLabelEl.style.visibility;
+  bayLabelEl.style.visibility = 'hidden';
+  bayLabelEl.style.display = 'block';
+  const bRect = bayLabelEl.getBoundingClientRect();
+  const bw = Math.round(bRect.width || bayLabelEl.offsetWidth || 140);
+  const bh = Math.round(bRect.height || bayLabelEl.offsetHeight || 18);
+  bayLabelEl._cachedWidth = bw > 0 ? bw : 140;
+  bayLabelEl._cachedHeight = bh > 0 ? bh : 18;
+  bayLabelEl.style.display = prevBayDisplay;
+  bayLabelEl.style.visibility = prevBayVis;
+}
+
+cacheCalloutDimensions();
+window.addEventListener('resize', cacheCalloutDimensions);
+
+function checkAABBOverlap(boxA, boxB, pad = 6) {
+  return !(
+    boxA.right + pad <= boxB.left ||
+    boxA.left >= boxB.right + pad ||
+    boxA.bottom + pad <= boxB.top ||
+    boxA.top >= boxB.bottom + pad
+  );
+}
+
 function updateCalloutProjections() {
   if (!pinsVisible || window.innerWidth <= 960) {
     calloutSvg.style.display = 'none';
@@ -3277,84 +3346,321 @@ function updateCalloutProjections() {
   const w = window.innerWidth;
   const h = window.innerHeight;
 
-  // Project SF Bay Wetlands label
+  // Build list of candidate callouts visible on screen
+  const candidates = [];
+
+  // 1. Water surface label candidate
   const bayProj = bayWaterWorldPos.clone().project(camera);
   const bx = (bayProj.x * 0.5 + 0.5) * w;
   const by = (-bayProj.y * 0.5 + 0.5) * h;
+  const bw = bayLabelEl._cachedWidth || 140;
+  const bh = bayLabelEl._cachedHeight || 18;
+
+  let waterCandidate = null;
   if (bayProj.z < 1 && bx > 240 && bx < w - 240 && by > 65 && by < h - 180) {
-    bayLabelEl.style.left = `${bx}px`;
-    bayLabelEl.style.top = `${by}px`;
-    bayLabelEl.style.display = 'block';
+    waterCandidate = {
+      id: 'water-label',
+      type: 'water',
+      priority: 50,
+      baseX: bx,
+      baseY: by,
+      w: bw,
+      h: bh,
+      placed: false
+    };
+    candidates.push(waterCandidate);
   } else {
     bayLabelEl.style.display = 'none';
   }
 
+  // 2. Projected landmark callout candidates
   calloutDomElements.forEach(({ item, el, line }) => {
     const proj = item.worldPos.clone().project(camera);
     const sx = (proj.x * 0.5 + 0.5) * w;
     const sy = (-proj.y * 0.5 + 0.5) * h;
+    const tw = item.cachedWidth || 195;
+    const th = item.cachedHeight || 32;
+
     if (proj.z > 1 || sx < 235 || sx > w - 235 || sy < 55 || sy > h - 55) {
       el.style.display = 'none';
       line.style.display = 'none';
       return;
     }
 
-    if (item.styleType === 'top-left') {
-      const lx = Math.max(235, Math.min(w - 280, sx + (item.offsetX || -245)));
-      const ly = Math.max(68, sy + (item.offsetY || -64));
-      if (ly > h - 190) {
-        el.style.display = 'none';
-        line.style.display = 'none';
-        return;
+    candidates.push({
+      id: item.id,
+      type: 'landmark',
+      item,
+      el,
+      line,
+      priority: item.priority || 70,
+      sx,
+      sy,
+      tw,
+      th,
+      styleType: item.styleType,
+      placed: false
+    });
+  });
+
+  // Sort descending by priority: Hero landmarks get placement preference
+  candidates.sort((a, b) => b.priority - a.priority);
+
+  const placedBoxes = [];
+  const pad = 6;
+  const activePlannerDrawer = document.getElementById('planner-drawer');
+  if (activePlannerDrawer && !activePlannerDrawer.classList.contains('collapsed')) {
+    const pRect = activePlannerDrawer.getBoundingClientRect();
+    if (pRect.width > 0 && pRect.height > 0) {
+      placedBoxes.push({
+        id: 'planner-drawer-guard',
+        left: pRect.left - 8,
+        right: pRect.right + 8,
+        top: pRect.top - 12,
+        bottom: pRect.bottom + 8
+      });
+    }
+  }
+
+  function overlapsAny(testBox) {
+    for (let i = 0; i < placedBoxes.length; i++) {
+      const p = placedBoxes[i];
+      if (checkAABBOverlap(testBox, p, pad)) {
+        return true;
       }
-      el.style.display = 'block';
-      line.style.display = 'block';
-      el.style.left = `${lx}px`;
-      el.style.top = `${ly}px`;
-      const textWidth = el.offsetWidth || 195;
-      const elbowX = lx + textWidth + 8;
-      const elbowY = ly;
-      line.setAttribute(
+    }
+    return false;
+  }
+
+  for (const c of candidates) {
+    if (c.type === 'water') {
+      const testBox = {
+        left: c.baseX - c.w * 0.5,
+        right: c.baseX + c.w * 0.5,
+        top: c.baseY - c.h * 0.5,
+        bottom: c.baseY + c.h * 0.5
+      };
+      if (!overlapsAny(testBox)) {
+        c.placed = true;
+        c.box = testBox;
+        placedBoxes.push({ id: c.id, ...testBox });
+      }
+      continue;
+    }
+
+    const sx = c.sx;
+    const sy = c.sy;
+    const tw = c.tw;
+    const th = c.th;
+
+    if (c.styleType === 'top-left') {
+      const baseLx = Math.max(235, Math.min(w - 280, sx + (c.item.offsetX || -245)));
+      const baseLy = Math.max(68, sy + (c.item.offsetY || -64));
+
+      // Try non-overlapping repulsion offsets
+      const vOffsets = [0, -22, 22, -44, 44, -66, 66, -88, 88];
+      const hOffsets = [0, -28, 28, -56, 56];
+      let bestPlacement = null;
+
+      for (const dy of vOffsets) {
+        for (const dx of hOffsets) {
+          const testLx = Math.max(235, Math.min(w - 280, baseLx + dx));
+          const testLy = Math.max(68, Math.min(h - 190, baseLy + dy));
+          const testBox = {
+            left: testLx,
+            right: testLx + tw,
+            top: testLy - th * 0.5,
+            bottom: testLy + th * 0.5
+          };
+          if (!overlapsAny(testBox)) {
+            bestPlacement = { lx: testLx, ly: testLy, box: testBox };
+            break;
+          }
+        }
+        if (bestPlacement) break;
+      }
+
+      if (bestPlacement) {
+        c.placed = true;
+        c.lx = bestPlacement.lx;
+        c.ly = bestPlacement.ly;
+        c.box = bestPlacement.box;
+        placedBoxes.push({ id: c.id, ...bestPlacement.box });
+      }
+    } else if (c.styleType === 'top-right') {
+      const baseLx = Math.max(235, Math.min(w - 430, sx + (c.item.offsetX || 34)));
+      const baseLy = Math.max(68, sy + (c.item.offsetY || -50));
+
+      const vOffsets = [0, -22, 22, -44, 44, -66, 66, -88, 88];
+      const hOffsets = [0, 28, -28, 56, -56];
+      let bestPlacement = null;
+
+      for (const dy of vOffsets) {
+        for (const dx of hOffsets) {
+          const testLx = Math.max(235, Math.min(w - 430, baseLx + dx));
+          const testLy = Math.max(68, Math.min(h - 190, baseLy + dy));
+          const testBox = {
+            left: testLx,
+            right: testLx + tw,
+            top: testLy - th * 0.5,
+            bottom: testLy + th * 0.5
+          };
+          if (!overlapsAny(testBox)) {
+            bestPlacement = { lx: testLx, ly: testLy, box: testBox };
+            break;
+          }
+        }
+        if (bestPlacement) break;
+      }
+
+      if (bestPlacement) {
+        c.placed = true;
+        c.lx = bestPlacement.lx;
+        c.ly = bestPlacement.ly;
+        c.box = bestPlacement.box;
+        placedBoxes.push({ id: c.id, ...bestPlacement.box });
+      }
+    } else if (c.styleType === 'bottom-left' || c.styleType === 'bottom-right') {
+      const isLeft = c.styleType === 'bottom-left';
+      const baseBottomY = Math.max(sy + 48, Math.min(h - 34, h * (c.item.verticalDropVh || 0.8)));
+
+      const yOffsets = [0, 20, -20, 40, -40, 60, -60];
+      let bestPlacement = null;
+      const alignmentOrder = [isLeft, !isLeft];
+
+      for (const tryLeft of alignmentOrder) {
+        for (const dy of yOffsets) {
+          const testBottomY = Math.max(sy + 40, Math.min(h - 30, baseBottomY + dy));
+          const testBox = tryLeft
+            ? { left: sx - tw, right: sx, top: testBottomY - th * 0.76, bottom: testBottomY + th * 0.24 }
+            : { left: sx, right: sx + tw, top: testBottomY - th * 0.76, bottom: testBottomY + th * 0.24 };
+
+          if (testBox.left >= 235 && testBox.right <= w - 235 && !overlapsAny(testBox)) {
+            bestPlacement = { bottomY: testBottomY, box: testBox, usedLeft: tryLeft };
+            break;
+          }
+        }
+        if (bestPlacement) break;
+      }
+
+      if (bestPlacement) {
+        c.placed = true;
+        c.bottomY = bestPlacement.bottomY;
+        c.usedLeft = bestPlacement.usedLeft;
+        c.box = bestPlacement.box;
+        placedBoxes.push({ id: c.id, ...bestPlacement.box });
+      }
+    }
+  }
+
+  // Apply collision-free coordinates to DOM and SVG leader lines
+  if (waterCandidate && waterCandidate.placed) {
+    bayLabelEl.style.left = `${waterCandidate.baseX}px`;
+    bayLabelEl.style.top = `${waterCandidate.baseY}px`;
+    bayLabelEl.style.display = 'block';
+  } else {
+    bayLabelEl.style.display = 'none';
+  }
+
+  for (const c of candidates) {
+    if (c.type === 'water') continue;
+
+    if (!c.placed) {
+      c.el.style.display = 'none';
+      c.line.style.display = 'none';
+      continue;
+    }
+
+    c.el.style.display = 'block';
+    c.line.style.display = 'block';
+
+    if (c.styleType === 'top-left') {
+      c.el.style.left = `${c.lx}px`;
+      c.el.style.top = `${c.ly}px`;
+      const elbowX = c.lx + c.tw + 8;
+      const elbowY = c.ly;
+      c.line.setAttribute(
         'points',
-        `${lx.toFixed(1)},${elbowY.toFixed(1)} ${elbowX.toFixed(1)},${elbowY.toFixed(1)} ${sx.toFixed(1)},${sy.toFixed(1)}`
+        `${c.lx.toFixed(1)},${elbowY.toFixed(1)} ${elbowX.toFixed(1)},${elbowY.toFixed(1)} ${c.sx.toFixed(1)},${c.sy.toFixed(1)}`
       );
-    } else if (item.styleType === 'top-right') {
-      const lx = Math.max(235, Math.min(w - 430, sx + (item.offsetX || 34)));
-      const ly = Math.max(68, sy + (item.offsetY || -50));
-      if (ly > h - 190) {
-        el.style.display = 'none';
-        line.style.display = 'none';
-        return;
-      }
-      el.style.display = 'block';
-      line.style.display = 'block';
-      el.style.left = `${lx}px`;
-      el.style.top = `${ly}px`;
-      const textWidth = el.offsetWidth || 195;
-      const elbowX = lx - 10;
-      const elbowY = ly;
-      const rightEnd = lx + textWidth;
-      line.setAttribute(
+    } else if (c.styleType === 'top-right') {
+      c.el.style.left = `${c.lx}px`;
+      c.el.style.top = `${c.ly}px`;
+      const elbowX = c.lx - 10;
+      const elbowY = c.ly;
+      const rightEnd = c.lx + c.tw;
+      c.line.setAttribute(
         'points',
-        `${rightEnd.toFixed(1)},${elbowY.toFixed(1)} ${elbowX.toFixed(1)},${elbowY.toFixed(1)} ${sx.toFixed(1)},${sy.toFixed(1)}`
+        `${rightEnd.toFixed(1)},${elbowY.toFixed(1)} ${elbowX.toFixed(1)},${elbowY.toFixed(1)} ${c.sx.toFixed(1)},${c.sy.toFixed(1)}`
       );
-    } else if (item.styleType === 'bottom-left' || item.styleType === 'bottom-right') {
-      const bottomY = Math.max(sy + 48, Math.min(h - 34, h * item.verticalDropVh));
-      if (sx < 265 || sx > w - 265) {
-        el.style.display = 'none';
-        line.style.display = 'none';
-        return;
+    } else if (c.styleType === 'bottom-left' || c.styleType === 'bottom-right') {
+      if (c.usedLeft !== (c.styleType === 'bottom-left')) {
+        c.el.className = `landmark-callout callout-${c.usedLeft ? 'bottom-left' : 'bottom-right'}`;
       }
-      el.style.display = 'block';
-      line.style.display = 'block';
-      el.style.left = `${sx}px`;
-      el.style.top = `${bottomY}px`;
-      line.setAttribute(
+      c.el.style.left = `${c.sx}px`;
+      c.el.style.top = `${c.bottomY}px`;
+      c.line.setAttribute(
         'points',
-        `${sx.toFixed(1)},${sy.toFixed(1)} ${sx.toFixed(1)},${bottomY.toFixed(1)}`
+        `${c.sx.toFixed(1)},${c.sy.toFixed(1)} ${c.sx.toFixed(1)},${c.bottomY.toFixed(1)}`
       );
     }
+  }
+}
+
+// 2D Screen-Space AABB Collision Verification Helper
+function checkCalloutCollisions() {
+  const visible = [];
+  calloutDomElements.forEach(({ item, el }) => {
+    if (el && el.style.display !== 'none' && window.getComputedStyle(el).display !== 'none') {
+      const rect = el.getBoundingClientRect();
+      visible.push({
+        id: item.id,
+        text: (el.innerText || '').split('\n').join(' '),
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        right: Math.round(rect.right),
+        bottom: Math.round(rect.bottom),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height)
+      });
+    }
   });
+
+  if (bayLabelEl && bayLabelEl.style.display !== 'none' && window.getComputedStyle(bayLabelEl).display !== 'none') {
+    const rect = bayLabelEl.getBoundingClientRect();
+    visible.push({
+      id: 'water-label',
+      text: (bayLabelEl.innerText || '').split('\n').join(' '),
+      left: Math.round(rect.left),
+      top: Math.round(rect.top),
+      right: Math.round(rect.right),
+      bottom: Math.round(rect.bottom),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    });
+  }
+
+  const collisions = [];
+  for (let i = 0; i < visible.length; i++) {
+    for (let j = i + 1; j < visible.length; j++) {
+      const b1 = visible[i];
+      const b2 = visible[j];
+      if (!(b1.right <= b2.left || b1.left >= b2.right || b1.bottom <= b2.top || b1.top >= b2.bottom)) {
+        collisions.push({
+          idA: b1.id,
+          idB: b2.id,
+          boxA: b1,
+          boxB: b2
+        });
+      }
+    }
+  }
+
+  return {
+    collisionCount: collisions.length,
+    collisions,
+    visibleCallouts: visible
+  };
 }
 
 // ============================================================================
@@ -3486,9 +3792,9 @@ function applyGisOverlayColors() {
     const mat = distMesh.material;
     if (!mat) continue;
     if (activeGisLayer === 'massing') {
-      mat.color.setHex(distMesh.userData.baseColorHex || 0xe4e1d8);
-      mat.emissive.setHex(dKey === 'DT_CRA' ? 0x382008 : 0x10161e);
-      mat.emissiveIntensity = dKey === 'DT_CRA' ? 0.12 : 0.025;
+      mat.color.setHex(distMesh.userData.baseColorHex || 0xf7f4eb);
+      mat.emissive.setHex(0x10161e);
+      mat.emissiveIntensity = 0.025;
     } else if (activeGisLayer === 'traffic') {
       const isHighTrip = dKey === 'DT_CRA' || dKey === 'ECR_MU' || dKey === 'NB_PP';
       mat.color.setHex(isHighTrip ? 0xf2b468 : 0x76d4dc);
@@ -3506,6 +3812,14 @@ function applyGisOverlayColors() {
       mat.emissiveIntensity = isFloodZone ? 0.36 : 0.06;
     }
   }
+}
+
+var plannerUtilityInstance = null;
+function getPlannerUtility() {
+  if (!plannerUtilityInstance && typeof window.createPlannerUtility === 'function') {
+    plannerUtilityInstance = window.createPlannerUtility(window.MountainViewTwin || null);
+  }
+  return plannerUtilityInstance;
 }
 
 function updateInspectorUI(parcel) {
@@ -3535,6 +3849,34 @@ function updateInspectorUI(parcel) {
   const heightFt = Math.round(heightM * 3.28084);
   if (statsEl) {
     statsEl.textContent = `FAR ${parcel.targetFar} · ${stories} Stories (${heightM}m / ${heightFt}ft) · ${parcel.units} Units · ${parcel.jobs} Jobs · ${ZONE_DEFS[parcel.currentZoneKey].label}`;
+  }
+
+  // Milestone 1 Pro-Forma Envelope Inspector Readouts
+  const util = window.MountainViewTwin?.plannerUtility || (typeof window.createPlannerUtility === 'function' ? getPlannerUtility() : null);
+  if (util) {
+    try {
+      const pf = util.getParcelProForma(parcel.id);
+      const pfFootprint = document.getElementById('pf-footprint');
+      const pfFarVal = document.getElementById('pf-far-val');
+      const pfGfa = document.getElementById('pf-gfa');
+      const pfYields = document.getElementById('pf-yields');
+      const pfTrips = document.getElementById('pf-trips');
+      const pfVmt = document.getElementById('pf-vmt');
+      const pfEco = document.getElementById('pf-eco');
+      const batchDistName = document.getElementById('batch-district-name');
+
+      if (pfFootprint) pfFootprint.textContent = `${pf.footprintSqm.toLocaleString()} m² (${pf.footprintSqft.toLocaleString()} sq ft)`;
+      if (pfFarVal) pfFarVal.textContent = pf.targetFar;
+      if (pfGfa) pfGfa.textContent = `${pf.gfaSqm.toLocaleString()} m² (${pf.gfaSqft.toLocaleString()} sq ft)`;
+      if (pfYields) pfYields.textContent = `${pf.dwellingUnits.toLocaleString()} DU · ${pf.commercialJobs.toLocaleString()} Jobs`;
+      if (pfTrips) pfTrips.textContent = `${pf.iteNetDailyTrips.toLocaleString()} trips/day`;
+      const stationShort = pf.nearestStation.includes('San Antonio') ? 'San Antonio' : 'Castro';
+      if (pfVmt) pfVmt.textContent = `-${pf.vmtReductionPercent}% VMT (${pf.transitProximityMeters}m to ${stationShort})`;
+      if (pfEco) pfEco.textContent = `${pf.solarPvPotentialKw} kW Solar (${pf.solarAnnualMwh} MWh/y) · ${pf.stormwaterRetentionM3} m³ Runoff`;
+      if (batchDistName) batchDistName.textContent = pf.districtName;
+    } catch (e) {
+      console.warn('Pro-forma calculation note:', e);
+    }
   }
 
   document.querySelectorAll('[data-rezone]').forEach((btn) => {
@@ -3605,6 +3947,9 @@ function runSimulationCycle(reason = 'update') {
   telemetryPipeline.publish(snapshot, reason);
   applyGisOverlayColors();
   updateInspectorUI(selectedParcel);
+  if (typeof refreshPlannerUtilityUI === 'function') {
+    refreshPlannerUtilityUI();
+  }
 
   // Astronomical Solar Physics Lighting
   const solar = simEngines.computeSolarPhysics();
@@ -4068,6 +4413,338 @@ function animate() {
 
 animate();
 
+// ============================================================================
+// 9. CITY PLANNER DECISION-SUPPORT SUITE UI & EVENT INTEGRATION (FEATURE F15)
+// ============================================================================
+let currentPlannerDistrict = 'NB_PP';
+let currentExportFormat = 'markdown';
+
+const plannerDrawer = document.getElementById('planner-drawer');
+const btnPlannerHeaderToggle = document.getElementById('btn-planner-header-toggle');
+const btnPlannerPill = document.getElementById('btn-planner-pill');
+const btnPlannerClose = document.getElementById('btn-planner-close');
+const btnPlannerRefresh = document.getElementById('btn-planner-refresh');
+
+function togglePlannerDrawer(forceState) {
+  if (!plannerDrawer) return;
+  const isCollapsed = plannerDrawer.classList.contains('collapsed');
+  const targetOpen = forceState !== undefined ? forceState : isCollapsed;
+  plannerDrawer.classList.toggle('collapsed', !targetOpen);
+  if (btnPlannerPill) {
+    btnPlannerPill.classList.toggle('active', targetOpen);
+  }
+  if (btnPlannerHeaderToggle) {
+    btnPlannerHeaderToggle.classList.toggle('active', targetOpen);
+  }
+  if (targetOpen) {
+    if (window.innerWidth <= 884 && simDrawer && !simDrawer.classList.contains('collapsed')) {
+      simDrawer.classList.add('collapsed');
+    }
+    updatePlannerUI();
+  }
+}
+
+if (btnPlannerHeaderToggle) {
+  btnPlannerHeaderToggle.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePlannerDrawer();
+  });
+}
+if (btnPlannerPill) {
+  btnPlannerPill.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePlannerDrawer();
+  });
+}
+if (btnPlannerClose) {
+  btnPlannerClose.addEventListener('click', (e) => {
+    e.stopPropagation();
+    togglePlannerDrawer(false);
+  });
+}
+if (btnPlannerRefresh) {
+  btnPlannerRefresh.addEventListener('click', () => {
+    runSimulationCycle('planner-refresh');
+    updatePlannerUI();
+  });
+}
+
+// Tab Switching
+document.querySelectorAll('.planner-tab').forEach((tabBtn) => {
+  tabBtn.addEventListener('click', () => {
+    const tabKey = tabBtn.dataset.tab;
+    document.querySelectorAll('.planner-tab').forEach((b) => {
+      const isActive = (b === tabBtn);
+      b.classList.toggle('active', isActive);
+      b.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    });
+    document.querySelectorAll('.planner-panel').forEach((p) => {
+      p.classList.toggle('active', p.id === `tab-panel-${tabKey}`);
+    });
+    updatePlannerUI();
+  });
+});
+
+// District Selection
+document.querySelectorAll('.district-pills [data-district]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.district-pills [data-district]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentPlannerDistrict = btn.dataset.district;
+    updatePlannerUI();
+  });
+});
+
+// District Orbit Button
+const btnDistOrbit = document.getElementById('btn-dist-orbit');
+if (btnDistOrbit) {
+  btnDistOrbit.addEventListener('click', () => {
+    const camMap = {
+      NB_PP: 'bayshore',
+      EW_TOD: 'moffett',
+      ECR_MU: 'overview',
+      SA_PP: 'sanantonio',
+      DT_CRA: 'castro'
+    };
+    const preset = camMap[currentPlannerDistrict] || 'overview';
+    flyToCameraPreset(preset);
+  });
+}
+
+// District Rezone Button in District Tab
+const btnDistRezoneAction = document.getElementById('btn-dist-rezone-action');
+if (btnDistRezoneAction) {
+  btnDistRezoneAction.addEventListener('click', () => {
+    const util = getPlannerUtility();
+    if (!util) return;
+    const res = util.batchRezoneDistrict(currentPlannerDistrict, 'TOD10');
+    if (res && res.success) {
+      updatePlannerUI();
+      if (selectedParcel) updateInspectorUI(selectedParcel);
+      if (audioEngine && typeof audioEngine.playTelemetryChime === 'function') {
+        audioEngine.playTelemetryChime(880.0);
+      }
+    }
+  });
+}
+
+// Batch Rezone in Parcel Inspector
+const btnBatchRezone = document.getElementById('btn-batch-rezone');
+if (btnBatchRezone) {
+  btnBatchRezone.addEventListener('click', () => {
+    if (!selectedParcel) return;
+    const util = getPlannerUtility();
+    if (!util) return;
+    const targetZone = selectedParcel.currentZoneKey;
+    const dist = selectedParcel.district;
+    const res = util.batchRezoneDistrict(dist, targetZone);
+    if (res && res.success) {
+      updateInspectorUI(selectedParcel);
+      updatePlannerUI();
+      if (audioEngine && typeof audioEngine.playTelemetryChime === 'function') {
+        audioEngine.playTelemetryChime(880.0);
+      }
+    }
+  });
+}
+
+// Export Format Pills
+const btnFmtMd = document.getElementById('btn-fmt-md');
+const btnFmtJson = document.getElementById('btn-fmt-json');
+if (btnFmtMd && btnFmtJson) {
+  btnFmtMd.addEventListener('click', () => {
+    btnFmtMd.classList.add('active');
+    btnFmtJson.classList.remove('active');
+    currentExportFormat = 'markdown';
+    updatePlannerUI();
+  });
+  btnFmtJson.addEventListener('click', () => {
+    btnFmtJson.classList.add('active');
+    btnFmtMd.classList.remove('active');
+    currentExportFormat = 'json';
+    updatePlannerUI();
+  });
+}
+
+// Export Copy Button
+const btnCopyReport = document.getElementById('btn-copy-report');
+if (btnCopyReport) {
+  btnCopyReport.addEventListener('click', async () => {
+    const codeEl = document.getElementById('export-preview-code');
+    if (codeEl && navigator.clipboard) {
+      try {
+        await navigator.clipboard.writeText(codeEl.textContent);
+        const origText = btnCopyReport.textContent;
+        btnCopyReport.textContent = '✓ Copied!';
+        setTimeout(() => { btnCopyReport.textContent = origText; }, 1800);
+      } catch (e) {
+        console.warn('Clipboard copy note:', e);
+      }
+    }
+  });
+}
+
+// Export Download Button
+const btnDownloadReport = document.getElementById('btn-download-report');
+if (btnDownloadReport) {
+  btnDownloadReport.addEventListener('click', () => {
+    const util = getPlannerUtility();
+    if (!util) return;
+    const rep = util.exportPlanningReport(currentExportFormat);
+    const content = typeof rep === 'string' ? rep : JSON.stringify(rep, null, 2);
+    const ext = currentExportFormat === 'json' ? 'json' : 'md';
+    const mime = currentExportFormat === 'json' ? 'application/json' : 'text/markdown';
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `MountainView_PlanReport_${Date.now()}.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+function updatePlannerUI() {
+  const util = getPlannerUtility();
+  if (!util) return;
+
+  // 1. Update RHNA Tab
+  try {
+    const rhna = util.getRhnaTierBreakdown();
+    const netEl = document.getElementById('rhna-net-units');
+    const pctEl = document.getElementById('rhna-master-pct');
+    const barFill = document.getElementById('rhna-bar-fill');
+    const badgeEl = document.getElementById('rhna-stat-badge');
+    const inclEl = document.getElementById('rhna-inclusionary-rate');
+
+    if (netEl) netEl.textContent = rhna.currentNetUnits.toLocaleString();
+    if (pctEl) pctEl.textContent = `${rhna.percentComplete}%`;
+    if (barFill) barFill.style.width = `${Math.min(100, Math.max(0, rhna.percentComplete))}%`;
+    if (inclEl) inclEl.textContent = `${rhna.effectiveInclusionaryRate}%`;
+    if (badgeEl) {
+      if (rhna.percentComplete >= 100) {
+        badgeEl.textContent = 'MANDATE MET';
+        badgeEl.style.color = 'var(--emerald)';
+        badgeEl.style.borderColor = 'rgba(70, 224, 148, 0.4)';
+      } else {
+        badgeEl.textContent = 'IN PROGRESS';
+        badgeEl.style.color = 'var(--amber)';
+        badgeEl.style.borderColor = 'rgba(242, 174, 73, 0.35)';
+      }
+    }
+
+    const tiers = rhna.tiers;
+    if (tiers) {
+      const vliVal = document.getElementById('tier-vli-val');
+      const vliFill = document.getElementById('tier-vli-fill');
+      const vliPct = document.getElementById('tier-vli-pct');
+      if (vliVal) vliVal.textContent = `${tiers.veryLow.units.toLocaleString()} / ${tiers.veryLow.target.toLocaleString()}`;
+      if (vliFill) vliFill.style.width = `${Math.min(100, Math.max(0, tiers.veryLow.percent))}%`;
+      if (vliPct) vliPct.textContent = `${tiers.veryLow.percent}% met`;
+
+      const liVal = document.getElementById('tier-li-val');
+      const liFill = document.getElementById('tier-li-fill');
+      const liPct = document.getElementById('tier-li-pct');
+      if (liVal) liVal.textContent = `${tiers.low.units.toLocaleString()} / ${tiers.low.target.toLocaleString()}`;
+      if (liFill) liFill.style.width = `${Math.min(100, Math.max(0, tiers.low.percent))}%`;
+      if (liPct) liPct.textContent = `${tiers.low.percent}% met`;
+
+      const modVal = document.getElementById('tier-mod-val');
+      const modFill = document.getElementById('tier-mod-fill');
+      const modPct = document.getElementById('tier-mod-pct');
+      if (modVal) modVal.textContent = `${tiers.moderate.units.toLocaleString()} / ${tiers.moderate.target.toLocaleString()}`;
+      if (modFill) modFill.style.width = `${Math.min(100, Math.max(0, tiers.moderate.percent))}%`;
+      if (modPct) modPct.textContent = `${tiers.moderate.percent}% met`;
+
+      const amodVal = document.getElementById('tier-amod-val');
+      const amodFill = document.getElementById('tier-amod-fill');
+      const amodPct = document.getElementById('tier-amod-pct');
+      if (amodVal) amodVal.textContent = `${tiers.aboveModerate.units.toLocaleString()} / ${tiers.aboveModerate.target.toLocaleString()}`;
+      if (amodFill) amodFill.style.width = `${Math.min(100, Math.max(0, tiers.aboveModerate.percent))}%`;
+      if (amodPct) amodPct.textContent = `${tiers.aboveModerate.percent}% met`;
+    }
+  } catch (err) {
+    console.warn('Error updating RHNA UI:', err);
+  }
+
+  // 2. Update Districts Tab
+  try {
+    const scorecards = util.getDistrictScorecards();
+    const sc = scorecards[currentPlannerDistrict] || scorecards.NB_PP;
+    if (sc) {
+      const nameEl = document.getElementById('dist-card-name');
+      const codeEl = document.getElementById('dist-card-code');
+      const parcelsEl = document.getElementById('dist-stat-parcels');
+      const areaEl = document.getElementById('dist-stat-area');
+      const farEl = document.getElementById('dist-stat-far');
+      const unitsEl = document.getElementById('dist-stat-units');
+      const jobsEl = document.getElementById('dist-stat-jobs');
+      const jhEl = document.getElementById('dist-stat-jh');
+      const rhnaPctEl = document.getElementById('dist-stat-rhna-pct');
+
+      if (nameEl) nameEl.textContent = sc.name;
+      if (codeEl) codeEl.textContent = sc.code;
+      if (parcelsEl) parcelsEl.textContent = sc.parcelCount.toLocaleString();
+      if (areaEl) areaEl.textContent = `${sc.totalFootprintSqm.toLocaleString()} m² (${sc.totalFootprintAcres} ac)`;
+      if (farEl) farEl.textContent = `${sc.currentFar.toFixed(2)} / ${sc.targetFar.toFixed(2)}`;
+      if (unitsEl) unitsEl.textContent = `+${sc.netAddedUnits.toLocaleString()} DU`;
+      if (jobsEl) jobsEl.textContent = `+${sc.netAddedJobs.toLocaleString()} Jobs`;
+      if (jhEl) jhEl.textContent = `${sc.jobsHousingRatio}:1`;
+      if (rhnaPctEl) rhnaPctEl.textContent = `${sc.rhnaContributionPercent}% of Mandate`;
+    }
+  } catch (err) {
+    console.warn('Error updating District UI:', err);
+  }
+
+  // 3. Update Scenario Comparator Tab
+  try {
+    const comp = util.getScenarioComparison();
+    const badge = document.getElementById('comparator-active-badge');
+    if (badge) badge.textContent = `ACTIVE: ${comp.activeScenarioName.toUpperCase()}`;
+
+    const tbody = document.getElementById('comparator-tbody');
+    if (tbody && Array.isArray(comp.indicators)) {
+      tbody.innerHTML = '';
+      for (const ind of comp.indicators) {
+        const tr = document.createElement('tr');
+        const isPos = String(ind.delta).startsWith('+');
+        const isNeg = String(ind.delta).startsWith('-');
+        let cls = 'delta-zero';
+        if (ind.key === 'us101_vc_los' || ind.key === 'ecr_vc_los') {
+          cls = isNeg ? 'delta-pos' : (isPos ? 'delta-neg' : 'delta-zero');
+        } else if (ind.key === 'flood_exposed_parcels') {
+          cls = isPos ? 'delta-neg' : 'delta-pos';
+        } else {
+          cls = isPos ? 'delta-pos' : (isNeg ? 'delta-neg' : 'delta-zero');
+        }
+
+        tr.innerHTML = `
+          <td><strong>${ind.label}</strong></td>
+          <td align="right">${ind.baseline}</td>
+          <td align="right">${ind.active}</td>
+          <td align="right" class="${cls}">${ind.delta}</td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+  } catch (err) {
+    console.warn('Error updating Comparator UI:', err);
+  }
+
+  // 4. Update Report Export Tab
+  try {
+    const previewEl = document.getElementById('export-preview-code');
+    if (previewEl) {
+      const rep = util.exportPlanningReport(currentExportFormat);
+      previewEl.textContent = typeof rep === 'string' ? rep : JSON.stringify(rep, null, 2);
+    }
+  } catch (err) {
+    console.warn('Error updating Export UI:', err);
+  }
+}
+
 // Automated 3D Bounding-Box, Self-Intersection & Corridor Clearance Verification Helper
 function checkCorridorClearance() {
   landmarksGroup.updateMatrixWorld(true);
@@ -4140,20 +4817,86 @@ function checkCorridorClearance() {
     const dCal = minDistBoxToSamples(box.min.x, box.max.x, box.min.z, box.max.z, caltrainSamples);
     const dEcr = minDistBoxToSamples(box.min.x, box.max.x, box.min.z, box.max.z, ecrSamples);
     const dCreek = minDistBoxToSamples(box.min.x, box.max.x, box.min.z, box.max.z, stevensCreekSamples);
+    const dVta = vtaRailSamples.length ? minDistBoxToSamples(box.min.x, box.max.x, box.min.z, box.max.z, vtaRailSamples) : Infinity;
+    const dOther = otherCorridorsSamples.length ? minDistBoxToSamples(box.min.x, box.max.x, box.min.z, box.max.z, otherCorridorsSamples) : Infinity;
 
     if (d101 < minParcelClearance101) minParcelClearance101 = d101;
     if (dCal < minParcelClearanceCaltrain) minParcelClearanceCaltrain = dCal;
     if (dEcr < minParcelClearanceEcr) minParcelClearanceEcr = dEcr;
 
-    if (d101 < 2.2 || dCal < 1.5 || dEcr < 1.4 || dCreek < 1.6) {
+    if (d101 < 2.2 || dCal < 1.5 || dEcr < 1.4 || dCreek < 1.6 || dVta < 1.4 || dOther < 1.2) {
       parcelViolations.push({
         id: p.id,
         d101: +d101.toFixed(2),
         dCal: +dCal.toFixed(2),
         dEcr: +dEcr.toFixed(2),
-        dCreek: +dCreek.toFixed(2)
+        dCreek: +dCreek.toFixed(2),
+        dVta: +dVta.toFixed(2),
+        dOther: +dOther.toFixed(2)
       });
     }
+  }
+
+  const staticViolations = [];
+  if (staticBuildingsGroup) {
+    staticBuildingsGroup.children.forEach((m) => {
+      if (!m.geometry || !m.geometry.attributes.position) return;
+      const arr = m.geometry.attributes.position.array;
+      for (let i = 0; i < arr.length; i += 9) {
+        const vx = arr[i];
+        const vz = arr[i + 2];
+        if (us101Samples.length) {
+          for (let j = 0; j < us101Samples.length; j++) {
+            const dx = vx - us101Samples[j].x;
+            const dz = vz - us101Samples[j].z;
+            if (dx * dx + dz * dz < 2.1 * 2.1) {
+              staticViolations.push({ type: 'us101', vx, vz });
+              return;
+            }
+          }
+        }
+        if (caltrainSamples.length) {
+          for (let j = 0; j < caltrainSamples.length; j++) {
+            const dx = vx - caltrainSamples[j].x;
+            const dz = vz - caltrainSamples[j].z;
+            if (dx * dx + dz * dz < 1.5 * 1.5) {
+              staticViolations.push({ type: 'caltrain', vx, vz });
+              return;
+            }
+          }
+        }
+        if (ecrSamples.length) {
+          for (let j = 0; j < ecrSamples.length; j++) {
+            const dx = vx - ecrSamples[j].x;
+            const dz = vz - ecrSamples[j].z;
+            if (dx * dx + dz * dz < 1.4 * 1.4) {
+              staticViolations.push({ type: 'ecr', vx, vz });
+              return;
+            }
+          }
+        }
+        if (vtaRailSamples.length) {
+          for (let j = 0; j < vtaRailSamples.length; j++) {
+            const dx = vx - vtaRailSamples[j].x;
+            const dz = vz - vtaRailSamples[j].z;
+            if (dx * dx + dz * dz < 1.3 * 1.3) {
+              staticViolations.push({ type: 'vta', vx, vz });
+              return;
+            }
+          }
+        }
+        if (otherCorridorsSamples.length) {
+          for (let j = 0; j < otherCorridorsSamples.length; j += 3) {
+            const dx = vx - otherCorridorsSamples[j].x;
+            const dz = vz - otherCorridorsSamples[j].z;
+            if (dx * dx + dz * dz < 1.2 * 1.2) {
+              staticViolations.push({ type: 'other', vx, vz });
+              return;
+            }
+          }
+        }
+      }
+    });
   }
 
   const corridorDepthWriteViolations = corridorsGroup.children.filter((m) => m.material && m.material.depthWrite !== false).length;
@@ -4167,6 +4910,9 @@ function checkCorridorClearance() {
     landmarkViolations,
     landmarkSiblingViolations,
     parcelViolations,
+    totalStaticMeshesChecked: staticBuildingsGroup ? staticBuildingsGroup.children.length : 0,
+    staticViolations,
+    totalViolations: landmarkViolations.length + parcelViolations.length + staticViolations.length,
     corridorDepthWriteViolations,
     surgeOcclusionRisk,
     minLandmarkClearance101: +minLandmarkClearance101.toFixed(2),
@@ -4209,8 +4955,12 @@ window.MountainViewTwin = {
     camera,
     renderer,
     controls,
+    surfaceMesh,
+    tableTexture: surfaceMat.map,
     parcelRecords,
     interactableMeshes,
+    staticBuildingsGroup,
+    corridorsGroup,
     landmarksGroup,
     districtLandmarksGroup,
     allLandmarks: [...landmarksGroup.children, ...districtLandmarksGroup.children],
@@ -4218,13 +4968,19 @@ window.MountainViewTwin = {
     mvGisData,
     geoToScene,
     sceneToGeo,
+    stevensCreekSamples,
     corridors: {
       us101: us101Samples,
       caltrain: caltrainSamples,
       ecr: ecrSamples,
-      castro: castroSamples
+      castro: castroSamples,
+      shoreline: shorelineSamples,
+      vta: vtaRailSamples,
+      other: otherCorridorsSamples,
+      stevensCreek: stevensCreekSamples
     },
     checkCorridorClearance,
+    checkCalloutCollisions,
     flyToCameraPreset,
     getActiveLayer: () => activeGisLayer,
     setActiveLayer: (layer) => {
@@ -4253,8 +5009,19 @@ window.MountainViewTwin = {
   simulation: simEngines,
   geminiBridge,
   activateScenarioPreset,
-  runSimulationCycle
+  runSimulationCycle,
+  get plannerUtility() {
+    return getPlannerUtility();
+  },
+  set plannerUtility(val) {
+    plannerUtilityInstance = val;
+  }
 };
+
+// Auto-initialize planner utility on MountainViewTwin
+if (typeof window.createPlannerUtility === 'function') {
+  window.MountainViewTwin.plannerUtility = window.createPlannerUtility(window.MountainViewTwin);
+}
 
 // Top-Level Public Interface Contracts (PROJECT.md)
 window.TelemetryPipeline = telemetryPipeline;
