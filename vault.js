@@ -60,6 +60,20 @@ const TAPES = [
     ribColor: 0x0e1c1a,
     hubColor: 0xefe9dc,
     artStyle: 'mountainview'
+  },
+  {
+    id: '05',
+    indexMeta: 'No. 05 — Rhythm Arena Brawler, Lyria 3.5 Score',
+    title: 'DJ Kronos',
+    desc: 'A cel-shaded 3D rhythm brawler. Punch, kick and weave on the beat of a 92 BPM Lyria 3.5 boss track, clear three waves of the Hype Crew, then face DJ Kronos in the cypher.',
+    unlocked: true,
+    url: './kronos.html',
+    ctaLabel: 'Enter the Cypher',
+    shellColor: 0x1a1210,
+    shellAttenuation: 0x090504,
+    ribColor: 0x120c0a,
+    hubColor: 0xffe042,
+    artStyle: 'kronos'
   }
 ];
 
@@ -644,6 +658,162 @@ function drawMountainViewArtwork(ctx) {
   ctx.stroke();
 }
 
+function drawKronosArtwork(ctx) {
+  // 1. Ink-black backdrop with a warm stage-light wash from the upper right
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#0a0608');
+  bg.addColorStop(0.6, '#140b0c');
+  bg.addColorStop(1, '#1d0f0a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  const stageGlow = ctx.createRadialGradient(850, 120, 10, 850, 120, 240);
+  stageGlow.addColorStop(0, 'rgba(255, 123, 25, 0.34)');
+  stageGlow.addColorStop(0.5, 'rgba(224, 36, 36, 0.12)');
+  stageGlow.addColorStop(1, 'rgba(10, 6, 8, 0)');
+  ctx.fillStyle = stageGlow;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // 2. Ben-Day halftone screen on the right half (comic-book print texture)
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 224, 66, 0.10)';
+  for (let gy = 36; gy < 392; gy += 14) {
+    for (let gx = 500; gx < 1000; gx += 14) {
+      const r = 1.2 + ((gx + gy) % 42) / 42 * 2.4;
+      ctx.beginPath();
+      ctx.arc(gx + ((gy / 14) % 2) * 7, gy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  // 3. Boombox silhouette: chassis, twin speaker cones, cassette deck and handle
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = '#120a0c';
+  ctx.strokeStyle = '#ffe042';
+  ctx.lineWidth = 4;
+  roundedRectPath(ctx, 776, 112, 206, 118, 14);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(812, 112);
+  ctx.quadraticCurveTo(879, 72, 946, 112);
+  ctx.stroke();
+
+  [818, 940].forEach((cx) => {
+    ctx.fillStyle = '#e02424';
+    ctx.beginPath();
+    ctx.arc(cx, 171, 36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffe042';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.fillStyle = '#0a0608';
+    ctx.beginPath();
+    ctx.arc(cx, 171, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ff7b19';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, 171, 25, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  ctx.fillStyle = '#24e5ff';
+  roundedRectPath(ctx, 858, 150, 42, 30, 5);
+  ctx.fill();
+  ctx.fillStyle = '#0a0608';
+  ctx.beginPath();
+  ctx.arc(869, 165, 5, 0, Math.PI * 2);
+  ctx.arc(889, 165, 5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // LED equaliser bars across the deck face
+  for (let i = 0; i < 9; i++) {
+    const bx = 858 + i * 5;
+    const bh = 4 + Math.round(Math.abs(Math.sin(i * 1.3)) * 10);
+    ctx.fillStyle = i % 3 === 0 ? '#ffe042' : (i % 2 === 0 ? '#ff7b19' : '#24e5ff');
+    ctx.fillRect(bx, 206 - bh, 3, bh);
+  }
+  ctx.restore();
+
+  // 4. Comic impact burst with the title call-out
+  ctx.save();
+  ctx.translate(870, 300);
+  ctx.rotate(-0.12);
+  ctx.fillStyle = '#ffe042';
+  ctx.strokeStyle = '#0a0608';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  const spikes = 14;
+  for (let i = 0; i < spikes * 2; i++) {
+    const rad = i % 2 === 0 ? 74 : 46;
+    const a = (i / (spikes * 2)) * Math.PI * 2;
+    const px = Math.cos(a) * rad * 1.35;
+    const py = Math.sin(a) * rad * 0.78;
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#e02424';
+  ctx.font = '900 30px "Bangers", "Impact", sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('KRA-KOOM!', 0, 11);
+  ctx.restore();
+
+  // 5. Lower frieze: beat grid at 92 BPM
+  ctx.fillStyle = '#05030a';
+  ctx.fillRect(16, 396, 992, 68);
+  ctx.strokeStyle = '#ffe042';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  for (let i = 0; i < 28; i++) {
+    const bx = 280 + i * 16;
+    const onBeat = i % 4 === 0;
+    const bh = onBeat ? 30 : 8 + Math.round(Math.abs(Math.sin(i * 0.9)) * 14);
+    ctx.fillStyle = onBeat ? '#ffe042' : (i % 2 === 0 ? '#e02424' : '#ff7b19');
+    ctx.fillRect(bx, 442 - bh, 8, bh);
+  }
+
+  // 6. Editorial typography (left column, clear of the tape window)
+  ctx.fillStyle = '#24e5ff';
+  ctx.font = '500 16px "JetBrains Mono", monospace';
+  ctx.fillText('92 BPM  ·  3D CEL-SHADED RHYTHM BRAWLER', 56, 62);
+
+  ctx.fillStyle = '#fff6d6';
+  ctx.font = 'italic 600 64px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillText('DJ Kronos', 54, 130);
+
+  ctx.fillStyle = '#ffe042';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('BOOMBOX BATTLE', 56, 242);
+  ctx.fillStyle = 'rgba(255, 246, 214, 0.74)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('A · DODGE', 56, 268);
+  ctx.fillText('S · PUNCH', 56, 292);
+  ctx.fillText('D · KICK', 56, 316);
+
+  ctx.fillStyle = '#ffe042';
+  ctx.font = '400 15px "JetBrains Mono", monospace';
+  ctx.fillText('NO. 05', 56, 436);
+  ctx.textAlign = 'right';
+  ctx.fillText('LYRIA 3.5 · BOSS TRACK', 968, 436);
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = 'rgba(255, 224, 66, 0.55)';
+  ctx.lineWidth = 3;
+  roundedRectPath(ctx, 26, 24, 972, 432, 20);
+  ctx.stroke();
+}
+
 function createCassetteStickerTexture(tape) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -660,6 +830,8 @@ function createCassetteStickerTexture(tape) {
     drawPassacagliaArtwork(ctx);
   } else if (tape.artStyle === 'drive') {
     drawNightDriveArtwork(ctx);
+  } else if (tape.artStyle === 'kronos') {
+    drawKronosArtwork(ctx);
   } else {
     drawMountainViewArtwork(ctx);
   }
