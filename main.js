@@ -14,9 +14,18 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x04010c);
 scene.fog = new THREE.FogExp2(0x09021c, 0.0042);
 
+// Never size the renderer or its targets to 0x0 (a tab that has not been laid out yet):
+// the bloom mip chain halves the size five times, so keep a floor that survives that.
+function viewportSize() {
+  return {
+    width: Math.max(64, window.innerWidth),
+    height: Math.max(64, window.innerHeight)
+  };
+}
+
 const camera = new THREE.PerspectiveCamera(
   60,
-  window.innerWidth / window.innerHeight,
+  viewportSize().width / viewportSize().height,
   0.1,
   600
 );
@@ -25,7 +34,7 @@ const renderer = new THREE.WebGLRenderer({
   antialias: true,
   powerPreference: 'high-performance'
 });
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(viewportSize().width, viewportSize().height);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -49,7 +58,7 @@ const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
 
 const renderScene = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  new THREE.Vector2(viewportSize().width, viewportSize().height),
   0.38, // strength
   0.28, // radius
   1.05  // threshold (HDR: only neon / sun / emissive windows cross it)
@@ -110,12 +119,12 @@ const NightGradeShader = {
 };
 const gradePass = new ShaderPass(NightGradeShader);
 gradePass.uniforms.uResolution.value.set(
-  window.innerWidth * renderer.getPixelRatio(),
-  window.innerHeight * renderer.getPixelRatio()
+  viewportSize().width * renderer.getPixelRatio(),
+  viewportSize().height * renderer.getPixelRatio()
 );
 
 const composer = new EffectComposer(renderer, composerTarget);
-composer.setSize(window.innerWidth, window.innerHeight);
+composer.setSize(viewportSize().width, viewportSize().height);
 composer.addPass(renderScene);
 composer.addPass(bloomPass);
 composer.addPass(outputPass);
@@ -1016,12 +1025,13 @@ animate();
 // 10. RESPONSIVE RESIZE HANDLER
 // ============================================================================
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const { width, height } = viewportSize();
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(width, height);
+  composer.setSize(width, height);
   gradePass.uniforms.uResolution.value.set(
-    window.innerWidth * renderer.getPixelRatio(),
-    window.innerHeight * renderer.getPixelRatio()
+    width * renderer.getPixelRatio(),
+    height * renderer.getPixelRatio()
   );
 });

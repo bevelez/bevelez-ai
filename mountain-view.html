@@ -1477,6 +1477,87 @@
         max-height: 160px;
       }
     }
+
+    /* Section 4: Focus-visible & Reduced-Motion Accessibility */
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    a:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 2px solid var(--cyan) !important;
+      outline-offset: 2px !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    /* Section 3: Non-Blocking Loading & Error Banners */
+    .mv-status-banner {
+      position: fixed;
+      top: 48px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 20;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.05em;
+      padding: 6px 14px;
+      border-radius: 4px;
+      background: rgba(11, 15, 21, 0.92);
+      border: 1px solid var(--cyan);
+      color: var(--ivory);
+      pointer-events: auto;
+    }
+
+    .mv-status-banner.error {
+      border-color: var(--crimson);
+      color: #ffb3ae;
+      background: rgba(28, 10, 12, 0.95);
+    }
+
+    .mv-status-banner.hidden {
+      display: none !important;
+    }
+
+    /* Section 4: Mobile Landmark Quick-Select Bar (shown <= 960px when floating pins hide) */
+    .mobile-landmark-bar {
+      display: none;
+      pointer-events: auto;
+      gap: 4px;
+      overflow-x: auto;
+      padding: 4px 0;
+      width: 100%;
+    }
+
+    @media (max-width: 960px) {
+      .mobile-landmark-bar {
+        display: flex;
+      }
+    }
+
+    /* Section 4: Visible OpenStreetMap ODbL & Data Attribution Strip */
+    .osm-attribution-bar {
+      pointer-events: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.48rem;
+      letter-spacing: 0.04em;
+      color: rgba(212, 218, 224, 0.68);
+      text-align: center;
+      margin-top: 2px;
+    }
+
+    .osm-attribution-bar a {
+      color: rgba(236, 232, 223, 0.85);
+      text-decoration: underline;
+    }
   </style>
 
   <script type="importmap">
@@ -1489,25 +1570,32 @@
   </script>
 </head>
 <body>
-  <!-- Layer 1 & 2: PostGIS/OSM & 3D Tiles GIS + Three.js/Deck.gl 3D Spatial Viewport -->
+  <!-- 3D Spatial Viewport (Three.js + OpenStreetMap GIS Extrusions) -->
   <div id="canvas-container" aria-label="3D Spatial Digital Twin of Mountain View, California"></div>
   <div class="vignette" aria-hidden="true"></div>
+
+  <!-- Non-blocking loading & error banners -->
+  <div id="mv-loading-banner" class="mv-status-banner hidden" role="status" aria-live="polite">Loading Mountain View OpenStreetMap GIS bundle…</div>
+  <div id="mv-error-banner" class="mv-status-banner error hidden" role="alert"></div>
 
   <!-- 3D Projected Landmark Callout Leader Lines & Pins -->
   <svg id="callout-svg" aria-hidden="true"></svg>
   <div id="callout-pins"></div>
 
-  <!-- Minimalist Architectural Studio UI Overlay matching Visual North Star 1:1 -->
+  <!-- Minimalist Architectural Studio UI Overlay -->
   <div class="ui-shell">
     <header class="top-header">
       <div class="top-hairline-row">
-        <div class="title-cluster" id="header-title-trigger" title="Click to toggle Simulation &amp; Gemini Studio Controls">
+        <div class="title-cluster" id="header-title-trigger" title="Click to toggle Simulation Controls">
           <h1 class="twin-title">DIGITAL TWIN: MOUNTAIN VIEW, CA</h1>
           <span class="title-pipe">|</span>
           <span class="twin-subtitle">EPSILON CITYSCOPE</span>
         </div>
 
-        <button class="arch-pill" id="btn-planner-header-toggle" type="button" style="pointer-events: auto; font-size: 0.58rem; padding: 2px 8px; margin: 0 4px;" title="Open City Planner Decision-Support Suite">📋 Decision Support</button>
+        <div style="display: flex; align-items: center; gap: 6px; pointer-events: auto;">
+          <button class="arch-pill" id="btn-controls-hud" type="button" aria-expanded="false" aria-controls="sim-drawer" style="font-size: 0.58rem; padding: 2px 8px;" title="Toggle Simulation &amp; Zoning Controls">⚙ Controls</button>
+          <button class="arch-pill" id="btn-planner-header-toggle" type="button" aria-expanded="false" aria-controls="planner-drawer" style="font-size: 0.58rem; padding: 2px 8px;" title="Open City Planner Decision-Support Suite">📋 Decision Support</button>
+        </div>
 
         <div class="coord-cluster" id="header-coord-trigger" title="Click to reset 360° Isometric Orbital View">
           <span id="view-mode-label">360° ISOMETRIC ORBITAL VIEW</span>
@@ -1515,15 +1603,24 @@
           <span class="coord-mono" id="cursor-coords">[LAT: 37.42N, LON: 122.08W]</span>
         </div>
       </div>
+
+      <!-- Mobile Landmark Selector (accessible on viewports <= 960px where floating 3D callouts hide) -->
+      <nav class="mobile-landmark-bar" id="mobile-landmark-bar" aria-label="Jump to Mountain View Landmarks">
+        <button class="arch-pill" data-cam="bayshore" type="button">Shoreline &amp; Bay View</button>
+        <button class="arch-pill" data-cam="castro" type="button">Transit Center &amp; City Hall</button>
+        <button class="arch-pill" data-cam="sanantonio" type="button">San Antonio Center</button>
+        <button class="arch-pill" data-cam="moffett" type="button">NASA Hangar One</button>
+        <button class="arch-pill" data-cam="overview" type="button">Full City</button>
+      </nav>
     </header>
 
-    <!-- Bottom HUD: Left Traffic Telemetry | Center Expandable Sim Drawer | Right Greenspace & Population -->
+    <!-- Bottom HUD: Left Traffic Model | Center Expandable Sim & Planner Drawers | Right Greenspace & Population -->
     <footer class="bottom-hud">
-      <!-- Layer 3: Live Ingestion & State (Matches North Star LIVE TRAFFIC FLOW 1:1) -->
-      <section class="telemetry-box" id="telemetry-left-card" aria-label="Live Traffic and Transit Telemetry" title="Click to open Simulation &amp; Gemini Controls">
+      <!-- Left Telemetry Card (Illustrative BPR Traffic Model + Live/Cached/Fallback Environmental Provenance) -->
+      <section class="telemetry-box" id="telemetry-left-card" aria-label="Traffic Model and Environmental Telemetry" title="Click to toggle Simulation Controls">
         <div class="telemetry-box-header">
-          <button class="sr-drawer-trigger" id="btn-drawer-toggle" type="button">LIVE TRAFFIC FLOW</button>
-          <span class="prov-badge model" id="prov-badge-traffic" title="Bureau of Public Roads Traffic Model">BPR MODEL</span>
+          <button class="sr-drawer-trigger" id="btn-drawer-toggle" type="button" aria-expanded="false" aria-controls="sim-drawer">TRAFFIC MODEL (BPR, illustrative)</button>
+          <span class="prov-badge model" id="prov-badge-traffic" title="Illustrative Bureau of Public Roads (1964) Volume-Delay Formula: T = T0 * (1 + 0.15 * (V/C)^4)">MODELED</span>
         </div>
         <div class="traffic-row">
           <span class="traffic-corridor">101:</span>
@@ -1534,41 +1631,41 @@
           <span id="los-ecr" class="status-moderate">Moderate</span>
         </div>
         <div class="telemetry-provenance-footer" id="telemetry-provenance-footer">
-          <span class="prov-tag" id="prov-weather" title="Weather: 21.5°C / 70.7°F | DNI: 780 W/m² | GHI: 650 W/m² | Wind: 12 km/h (PUBLISHED BASELINE)"><span class="prov-dot baseline">●</span> PUBLISHED BASELINE</span>
-          <span class="prov-tag" id="prov-tide" title="Tide Water Level: 1.72 m NAVD88 | Station: 9414523 (Redwood City SF Bay) (PUBLISHED BASELINE)"><span class="prov-dot baseline">●</span> PUBLISHED BASELINE</span>
+          <span class="prov-tag" id="prov-weather" title="Weather fallback constant until Open-Meteo responds"><span class="prov-dot baseline">●</span> FALLBACK CONSTANT</span>
+          <span class="prov-tag" id="prov-tide" title="Tide fallback constant (1.12m NAVD88) until NOAA 9414523 responds"><span class="prov-dot baseline">●</span> FALLBACK CONSTANT</span>
         </div>
       </section>
 
-      <!-- Layer 4 & 5: SUMO / WebGPU Physics Simulation & Gemini 4 Argon / MCP Orchestration Drawer -->
-      <section class="center-dock" id="scenario-dock" aria-label="Simulation Scenarios and Gemini Urban Planner">
-        <!-- Planner Decision-Support Suite Drawer (Milestone 1, Feature F15) -->
-        <div class="planner-drawer collapsed" id="planner-drawer" role="dialog" aria-label="City Planner Decision-Support Suite">
+      <!-- Center Simulation & Planner Decision-Support Dock -->
+      <section class="center-dock" id="scenario-dock" aria-label="Simulation Scenarios and Urban Planner">
+        <!-- Planner Decision-Support Suite Drawer -->
+        <div class="planner-drawer collapsed" id="planner-drawer" role="dialog" aria-modal="false" aria-hidden="true" aria-label="City Planner Decision-Support Suite">
           <!-- Drawer Header -->
           <div class="planner-header-bar">
             <div class="planner-title-group">
               <span class="planner-title">PLANNER DECISION-SUPPORT SUITE</span>
               <span class="title-pipe">|</span>
-              <span class="planner-subtitle">RHNA · PRECISE PLANS · IMPACTS</span>
+              <span class="planner-subtitle">RHNA · PRECISE PLANS · IMPACTS (MODELED)</span>
             </div>
             <div class="planner-actions">
               <button class="arch-pill" id="btn-planner-refresh" type="button" title="Recalculate metrics">↻ Sync</button>
-              <button class="arch-pill" id="btn-planner-close" type="button" title="Close Decision-Support Suite">✕</button>
+              <button class="arch-pill" id="btn-planner-close" type="button" title="Close Decision-Support Suite (Esc)">✕</button>
             </div>
           </div>
 
           <!-- Tab Navigation -->
-          <div class="planner-nav-tabs" role="tablist">
-            <button class="planner-tab active" id="tab-btn-rhna" data-tab="rhna" role="tab" aria-selected="true" type="button">RHNA Progress</button>
-            <button class="planner-tab" id="tab-btn-districts" data-tab="districts" role="tab" aria-selected="false" type="button">Precise Plan Districts</button>
-            <button class="planner-tab" id="tab-btn-scenarios" data-tab="scenarios" role="tab" aria-selected="false" type="button">Scenario Comparator</button>
-            <button class="planner-tab" id="tab-btn-export" data-tab="export" role="tab" aria-selected="false" type="button">1-Click Report Export</button>
+          <div class="planner-nav-tabs planner-tabs" role="tablist" aria-label="Planner Suite Views">
+            <button class="planner-tab active" id="tab-btn-rhna" data-tab="rhna" role="tab" aria-selected="true" aria-controls="tab-panel-rhna" type="button">RHNA Progress</button>
+            <button class="planner-tab" id="tab-btn-districts" data-tab="districts" role="tab" aria-selected="false" aria-controls="tab-panel-districts" type="button">Precise Plan Districts</button>
+            <button class="planner-tab" id="tab-btn-scenarios" data-tab="scenarios" role="tab" aria-selected="false" aria-controls="tab-panel-scenarios" type="button">Scenario Comparator</button>
+            <button class="planner-tab" id="tab-btn-export" data-tab="export" role="tab" aria-selected="false" aria-controls="tab-panel-export" type="button">1-Click Report Export</button>
           </div>
 
           <!-- Tab 1: RHNA Progress -->
-          <div class="planner-panel active" id="tab-panel-rhna" role="tabpanel">
+          <div class="planner-panel active" id="tab-panel-rhna" role="tabpanel" aria-labelledby="tab-btn-rhna">
             <div class="rhna-summary-card">
               <div class="rhna-summary-header">
-                <span>6TH CYCLE RHNA MANDATE (2023–2031)</span>
+                <span>6TH CYCLE RHNA ALLOCATION (2023–2031) · <span class="prov-badge model">MODELED</span></span>
                 <span class="rhna-stat-badge" id="rhna-stat-badge">IN PROGRESS</span>
               </div>
               <div class="rhna-master-row">
@@ -1582,8 +1679,8 @@
                 <div class="rhna-bar-fill" id="rhna-bar-fill" style="width: 0%;"></div>
               </div>
               <div class="rhna-footnote">
-                <span>Effective Inclusionary Rate: <strong id="rhna-inclusionary-rate">15.0%</strong></span>
-                <span>Target Balance: 40% Lower Income Mandate</span>
+                <span>Modeled Inclusionary Share: <strong id="rhna-inclusionary-rate">15.0%</strong></span>
+                <span>ABAG 6th-Cycle Target: 11,135 Total Units</span>
               </div>
             </div>
 
@@ -1601,7 +1698,7 @@
               <div class="rhna-tier-card">
                 <div class="tier-card-header">
                   <span class="tier-label">LOW (50–80% AMI)</span>
-                  <span class="tier-val" id="tier-li-val">0 / 1,599</span>
+                  <span class="tier-val" id="tier-li-val">0 / 1,597</span>
                 </div>
                 <div class="rhna-tier-track"><div class="rhna-tier-fill li-fill" id="tier-li-fill" style="width: 0%;"></div></div>
                 <div class="tier-card-sub"><span id="tier-li-pct">0.0% met</span></div>
@@ -1619,7 +1716,7 @@
               <div class="rhna-tier-card">
                 <div class="tier-card-header">
                   <span class="tier-label">ABOVE MODERATE (&gt;120% AMI)</span>
-                  <span class="tier-val" id="tier-amod-val">0 / 4,878</span>
+                  <span class="tier-val" id="tier-amod-val">0 / 4,880</span>
                 </div>
                 <div class="rhna-tier-track"><div class="rhna-tier-fill amod-fill" id="tier-amod-fill" style="width: 0%;"></div></div>
                 <div class="tier-card-sub"><span id="tier-amod-pct">0.0% met</span></div>
@@ -1628,7 +1725,7 @@
           </div>
 
           <!-- Tab 2: Precise Plan Districts -->
-          <div class="planner-panel" id="tab-panel-districts" role="tabpanel">
+          <div class="planner-panel" id="tab-panel-districts" role="tabpanel" aria-labelledby="tab-btn-districts">
             <div class="district-pills" role="group" aria-label="Select Precise Plan District">
               <button class="arch-pill active" data-district="NB_PP" type="button">North Bayshore</button>
               <button class="arch-pill" data-district="EW_TOD" type="button">East Whisman</button>
@@ -1643,15 +1740,15 @@
                 <span class="dist-code-badge" id="dist-card-code">NB_PP</span>
               </div>
               <div class="dist-metric-grid">
-                <div class="dist-stat"><span class="dist-stat-label">PARCELS</span><span class="dist-stat-val" id="dist-stat-parcels">0</span></div>
+                <div class="dist-stat"><span class="dist-stat-label">OSM BUILDINGS</span><span class="dist-stat-val" id="dist-stat-parcels">0</span></div>
                 <div class="dist-stat"><span class="dist-stat-label">FOOTPRINT AREA</span><span class="dist-stat-val" id="dist-stat-area">0 m² (0 ac)</span></div>
-                <div class="dist-stat"><span class="dist-stat-label">CURRENT / TARGET FAR</span><span class="dist-stat-val" id="dist-stat-far">1.0 / 2.4</span></div>
+                <div class="dist-stat"><span class="dist-stat-label">BASE / TARGET FAR</span><span class="dist-stat-val" id="dist-stat-far">0.4 / 2.4</span></div>
                 <div class="dist-stat"><span class="dist-stat-label">NET ADDED UNITS</span><span class="dist-stat-val" id="dist-stat-units">0 DU</span></div>
                 <div class="dist-stat"><span class="dist-stat-label">NET ADDED JOBS</span><span class="dist-stat-val" id="dist-stat-jobs">0</span></div>
                 <div class="dist-stat"><span class="dist-stat-label">JOBS/HOUSING RATIO</span><span class="dist-stat-val" id="dist-stat-jh">0.0:1</span></div>
               </div>
               <div class="dist-card-footer">
-                <span class="dist-rhna-tag">RHNA Contribution: <strong id="dist-stat-rhna-pct">0.0%</strong></span>
+                <span class="dist-rhna-tag">RHNA Share: <strong id="dist-stat-rhna-pct">0.0%</strong> · <span class="prov-badge model">MODELED</span></span>
                 <div class="dist-footer-actions">
                   <button class="arch-pill" id="btn-dist-orbit" type="button">🎥 Orbit District</button>
                   <button class="arch-pill amber-active" id="btn-dist-rezone-action" type="button">⚡ Rezone District</button>
@@ -1661,9 +1758,9 @@
           </div>
 
           <!-- Tab 3: Scenario Comparator -->
-          <div class="planner-panel" id="tab-panel-scenarios" role="tabpanel">
+          <div class="planner-panel" id="tab-panel-scenarios" role="tabpanel" aria-labelledby="tab-btn-scenarios">
             <div class="comparator-header">
-              <span class="comparator-title">ACTIVE VS 2026 BASELINE DELTA</span>
+              <span class="comparator-title">ACTIVE VS 2026 BASELINE DELTA (<span class="prov-badge model">MODELED</span>)</span>
               <span class="comparator-scenario-badge" id="comparator-active-badge">ACTIVE: 2026 BASELINE</span>
             </div>
             <div class="comparator-table-wrap">
@@ -1684,7 +1781,7 @@
           </div>
 
           <!-- Tab 4: 1-Click Report Export -->
-          <div class="planner-panel" id="tab-panel-export" role="tabpanel">
+          <div class="planner-panel" id="tab-panel-export" role="tabpanel" aria-labelledby="tab-btn-export">
             <div class="export-controls-bar">
               <div class="export-format-pills">
                 <button class="arch-pill active" id="btn-fmt-md" data-fmt="markdown" type="button">Markdown (.md)</button>
@@ -1701,7 +1798,7 @@
           </div>
         </div>
 
-        <div class="sim-drawer collapsed" id="sim-drawer">
+        <div class="sim-drawer collapsed" id="sim-drawer" aria-hidden="true">
           <!-- Top Bar inside Drawer: GIS Layers & Camera Presets -->
           <div class="drawer-nav-bar">
             <div class="layer-pills" role="group" aria-label="3D Spatial GIS Layers">
@@ -1712,16 +1809,15 @@
               <button class="arch-pill" data-layer="flood" type="button">Bay Surge</button>
             </div>
 
-            <div class="camera-pills" role="group" aria-label="Viewport & Camera Controls">
+            <div class="camera-pills" role="group" aria-label="Viewport &amp; Camera Controls">
               <button class="arch-pill active" data-cam="overview" type="button">City Table</button>
               <button class="arch-pill" data-cam="bayshore" type="button">North Bayshore</button>
               <button class="arch-pill" data-cam="castro" type="button">Castro &amp; Rail</button>
               <button class="arch-pill" data-cam="sanantonio" type="button">San Antonio</button>
               <button class="arch-pill" data-cam="moffett" type="button">Hangar One</button>
               <button class="arch-pill" data-cam="southmv" type="button">South MV</button>
-              <button class="arch-pill" id="btn-planner-pill" type="button">📋 Planner</button>
-              <button class="arch-pill" id="btn-tiles-toggle" type="button">3D Tiles</button>
-              <button class="arch-pill" id="btn-gemini-toggle" type="button">✦ Gemini Key</button>
+              <button class="arch-pill" id="btn-planner-pill" type="button" aria-expanded="false" aria-controls="planner-drawer">📋 Planner</button>
+              <button class="arch-pill" id="btn-gemini-toggle" type="button" aria-expanded="false" aria-controls="gemini-settings-card">✦ Gemini Key</button>
               <button class="arch-pill" id="btn-orbit-toggle" type="button">360° Orbit</button>
               <button class="arch-pill" id="btn-pins-toggle" type="button">Pins: On</button>
               <button class="arch-pill" id="btn-audio-toggle" type="button">♪ Audio</button>
@@ -1729,32 +1825,18 @@
             </div>
           </div>
 
-          <!-- Optional Google Photorealistic 3D Tiles Settings Drawer -->
-          <div class="tiles-settings-card collapsed" id="tiles-settings-card">
-            <div class="tiles-settings-header">
-              <span>GOOGLE 3D TILES (OPTIONAL)</span>
-              <button class="arch-pill" id="btn-close-tiles-settings" type="button">✕ Close</button>
-            </div>
-            <div class="tiles-settings-row">
-              <input type="text" id="tiles-key-input" class="nl-input" placeholder="Google Photorealistic 3D Tiles API Key (Optional — 100% functional without key)" aria-label="Google 3D Tiles Key" />
-              <button class="arch-pill active" id="btn-save-tiles-key" type="button">Save</button>
-              <button class="arch-pill" id="btn-clear-tiles-key" type="button">Clear</button>
-            </div>
-            <div class="tiles-settings-status" id="tiles-status-label">Status: Vector GIS Active (Zero keys required)</div>
-          </div>
-
-          <!-- Optional Gemini 2.5 Flash API Settings Drawer -->
+          <!-- Optional Gemini 2.5 Flash API Settings Drawer (x-goog-api-key header only) -->
           <div class="tiles-settings-card collapsed" id="gemini-settings-card">
             <div class="tiles-settings-header">
-              <span>GEMINI 2.5 FLASH API (OPTIONAL)</span>
+              <span>GEMINI 2.5 FLASH STRUCTURED PLANNER (OPTIONAL)</span>
               <button class="arch-pill" id="btn-close-gemini-settings" type="button">✕ Close</button>
             </div>
             <div class="tiles-settings-row">
-              <input type="password" id="gemini-key-input" class="nl-input" placeholder="Gemini API Key (AIza... Optional — Local NL Compiler active by default)" aria-label="Gemini API Key" />
+              <input type="password" id="gemini-key-input" class="nl-input" placeholder="Gemini API Key (sent via x-goog-api-key header — restrict key by HTTP referrer in Cloud Console)" aria-label="Gemini API Key" />
               <button class="arch-pill active" id="btn-save-gemini-key" type="button">Save</button>
               <button class="arch-pill" id="btn-clear-gemini-key" type="button">Clear</button>
             </div>
-            <div class="tiles-settings-status" id="gemini-status-label">Status: [LOCAL NL-TO-GIS COMPILER] Active (Zero keys required)</div>
+            <div class="tiles-settings-status" id="gemini-status-label">Status: Word-Boundary NL Compiler Active (Zero keys required; if key provided, sent via x-goog-api-key header &amp; stored in sessionStorage)</div>
           </div>
 
           <!-- Preset What-If Scenario Buttons -->
@@ -1799,22 +1881,33 @@
                 </div>
                 <input id="slider-surge" class="twin-slider" type="range" min="0.0" max="2.0" step="0.1" value="0.0" />
               </label>
+
+              <label class="slider-group" style="grid-column: 1 / -1;">
+                <div class="slider-header">
+                  <span>Solar Time (Spencer 1971 · America/Los_Angeles)</span>
+                  <span style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span class="slider-val" id="val-solar-hour">Live Time</span>
+                    <button class="arch-pill" id="btn-solar-now" type="button" style="padding: 1px 5px; font-size: 0.48rem;">Now</button>
+                  </span>
+                </div>
+                <input id="slider-solar-hour" class="twin-slider" type="range" min="5.0" max="20.5" step="0.25" value="13.5" />
+              </label>
             </div>
 
-            <!-- Interactive 3D Parcel Inspector -->
+            <!-- Interactive 3D Parcel & OSM Building Inspector -->
             <div class="parcel-inspector" id="parcel-inspector">
               <div class="inspector-title">
                 <span id="parcel-id-label">PARCEL: MV-DT-104 (CASTRO TOD)</span>
                 <span id="parcel-zone-badge">CRA-MU</span>
               </div>
               <div class="inspector-meta" id="parcel-desc-label">
-                Click any 3D city block to inspect or re-zone its envelope.
+                Click any 3D parcel or OpenStreetMap building to inspect its envelope.
               </div>
               <div class="inspector-stats" id="parcel-stats-label">
-                FAR 2.8 · 4 Stories · 142 Units · 310 Jobs
+                FAR 2.8 · 4 Stories · 142 Units · 310 Jobs (MODELED)
               </div>
 
-              <!-- Pro-Forma Envelope Grid (Milestone 1, Feature F6-F11) -->
+              <!-- Pro-Forma Envelope Grid (MODELED) -->
               <div class="parcel-proforma-grid" id="parcel-proforma-grid">
                 <div class="pf-stat-item">
                   <span class="pf-label">FOOTPRINT:</span>
@@ -1837,7 +1930,7 @@
                   <span class="pf-val" id="pf-vmt">-24.5% VMT (280m to Caltrain)</span>
                 </div>
                 <div class="pf-stat-item">
-                  <span class="pf-label">ECO-PHYSICS:</span>
+                  <span class="pf-label">ECO-MODEL:</span>
                   <span class="pf-val" id="pf-eco">130 kW Solar · 45 m³ Runoff</span>
                 </div>
               </div>
@@ -1850,70 +1943,80 @@
                 <button class="rezone-btn" data-rezone="PARK" type="button">Eco-Park</button>
               </div>
 
-              <!-- District Batch-Rezoning Action (Milestone 1, Feature F12) -->
+              <!-- District Batch-Rezoning Action with Confirmation & Undo -->
               <div class="batch-rezone-row">
                 <button class="arch-pill amber-active" id="btn-batch-rezone" type="button" title="Apply active zoning to all parcels in this district">
                   ⚡ Apply Zone to Entire District
+                </button>
+                <button class="arch-pill" id="btn-batch-rezone-undo" type="button" style="display: none;" title="Undo last batch district rezone">
+                  ↶ Undo Rezone
                 </button>
                 <span class="batch-rezone-hint" id="batch-rezone-hint">Apply to all parcels in <span id="batch-district-name">Downtown Castro</span></span>
               </div>
             </div>
           </div>
 
-          <!-- Gemini Natural Language Scenario Input -->
+          <!-- Natural Language Scenario Input -->
           <form class="nl-command-bar" id="gemini-form" autocomplete="off">
-            <span class="nl-badge">✦ GEMINI PLANNER</span>
+            <span class="nl-badge">✦ NL PLANNER</span>
             <input
               id="gemini-prompt-input"
               class="nl-input"
               type="text"
-              placeholder="What-if: &quot;Upzone El Camino to 6 stories + BRT&quot;"
-              aria-label="Gemini What-If Urban Planning Prompt"
+              placeholder="Command: &quot;Rezone Downtown Castro to TOD10 and set FAR to 3.5&quot;"
+              aria-label="Urban Planning Natural Language Command"
             />
             <button class="arch-pill active" id="btn-run-gemini" type="submit">Simulate</button>
           </form>
 
           <div class="gemini-synthesis" id="gemini-synthesis">
-            <span class="gemini-tag">GEMINI SIM //</span>
-            <span id="gemini-synthesis-text">[LOCAL NL-TO-GIS COMPILER] Baseline 2026 loaded: US-101 V/C 0.88 (High), ECR 0.64 (Moderate).</span>
+            <span class="gemini-tag">MODEL LOG //</span>
+            <span id="gemini-synthesis-text">Client-side deterministic models initialized: BPR traffic (US-101 V/C 0.88, ECR 0.64), Spencer solar geometry, SRTM bilinear flood grid, ABAG 6th-Cycle RHNA.</span>
           </div>
 
-          <!-- Layer 3 Extended Telemetry Readouts -->
+          <!-- Extended Telemetry Readouts -->
           <div class="drawer-telemetry-strip">
             <div class="telemetry-micro-row">
-              <span>CALTRAIN EMU</span>
-              <span class="telemetry-micro-val" id="metric-caltrain">12 min · 36.2k/d</span>
+              <span>CALTRAIN MV STA</span>
+              <span class="telemetry-micro-val" id="metric-caltrain" title="Caltrain 2024 Annual Passenger Counts Report (~3,020 weekday boardings at Mountain View Station), scaled by transit mode share">12 min · 3,020/wkd (MODELED)</span>
             </div>
             <div class="telemetry-micro-row">
               <span>TRANSIT SHARE</span>
-              <span class="telemetry-micro-val" id="metric-mode-share">25.0%</span>
+              <span class="telemetry-micro-val" id="metric-mode-share">25.0% (MODELED)</span>
             </div>
             <div class="telemetry-micro-row">
-              <span>HEAT / SURGE</span>
-              <span class="telemetry-micro-val" id="metric-climate">0.0°C · 0.0m</span>
+              <span>UHI / SURGE</span>
+              <span class="telemetry-micro-val" id="metric-climate">0.0°C · 0.0m (MODELED)</span>
             </div>
           </div>
 
           <div class="drawer-sub-metrics">
             <span class="metric-delta" id="delta-greenspace">BASELINE</span>
-            <span class="metric-sub" id="metric-solar-sub">SOLAR PV: 48 MW · RUNOFF CAPTURE: 62%</span>
+            <span class="metric-sub" id="metric-solar-sub">ROOFTOP PV: 212.3 MW (CLEAR-SKY REF) · LIVE: 212.3 MW</span>
             <span class="metric-delta" id="delta-population">RHNA +0</span>
-            <span class="metric-sub" id="metric-housing-sub">37,800 UNITS · JOBS/HOUSING 2.9:1</span>
+            <span class="metric-sub" id="metric-housing-sub">37,800 UNITS · JOBS/HOUSING 2.9:1 (MODELED)</span>
           </div>
+        </div>
+
+        <!-- Visible OpenStreetMap ODbL Attribution -->
+        <div class="osm-attribution-bar" id="osm-attribution-bar">
+          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Elevation: Copernicus DEM / SRTM (Open-Meteo) · Telemetry: Open-Meteo &amp; NOAA CO-OPS 9414523
         </div>
       </section>
 
-      <!-- Right Metric Stack matching North Star 1:1 -->
-      <section class="right-metrics-stack" id="telemetry-right-card" aria-label="City Greenspace and Population Metrics" title="Click to open Simulation &amp; Gemini Controls">
+      <!-- Right Metric Stack -->
+      <section class="right-metrics-stack" id="telemetry-right-card" aria-label="City Greenspace and Population Metrics" title="Click to toggle Simulation Controls">
         <div class="metric-card greenspace-card">
-          <div class="metric-label emerald-text">
+          <div class="metric-label emerald-text" style="justify-content: space-between; gap: 6px;">
+            <span class="prov-badge model">MODELED</span>
             <span>GREENSPACE %</span>
           </div>
           <div class="metric-value emerald-val" id="metric-greenspace">16.4</div>
         </div>
 
         <div class="metric-card">
-          <div class="metric-label">
+          <div class="metric-label" style="justify-content: space-between; gap: 6px;">
+            <span class="prov-badge model">MODELED</span>
             <span>POPULATION</span>
           </div>
           <div class="metric-value" id="metric-population">81,500</div>
@@ -1922,8 +2025,6 @@
     </footer>
   </div>
 
-  <script src="./mv-graphics-fidelity.js"></script>
-  <script src="./mv-planner-utility.js"></script>
-  <script type="module" src="./mountain-view.js?v=7"></script>
+  <script type="module" src="./mountain-view.js?v=8"></script>
 </body>
 </html>
