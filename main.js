@@ -287,13 +287,14 @@ const highwayProps = [];
 const NUM_PYLON_PAIRS = 18;
 const PYLON_SPACING = 16;
 
-const pylonPostGeo = new THREE.BoxGeometry(0.28, 6.5, 0.28);
+// Pylons top out at 4.6 so the overhead arches pass under the HELI WIDE camera (y 6.5)
+const pylonPostGeo = new THREE.BoxGeometry(0.28, 4.6, 0.28);
 const pylonPostMat = new THREE.MeshStandardMaterial({
   color: 0x120d26,
   metalness: 0.8,
   roughness: 0.3
 });
-const neonStripGeo = new THREE.BoxGeometry(0.12, 5.8, 0.14);
+const neonStripGeo = new THREE.BoxGeometry(0.12, 4.1, 0.14);
 const neonCyanMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff) });
 const neonPinkMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff007f) });
 
@@ -305,21 +306,21 @@ for (let i = 0; i < NUM_PYLON_PAIRS; i++) {
   [-1, 1].forEach((side) => {
     const xBase = side * (ROAD_WIDTH / 2 + 0.8);
     const post = new THREE.Mesh(pylonPostGeo, pylonPostMat);
-    post.position.set(xBase, 3.25, 0);
+    post.position.set(xBase, 2.3, 0);
     pairGroup.add(post);
 
     const strip = new THREE.Mesh(
       neonStripGeo,
       i % 2 === 0 ? neonCyanMat : neonPinkMat
     );
-    strip.position.set(xBase - side * 0.16, 3.25, 0);
+    strip.position.set(xBase - side * 0.16, 2.3, 0);
     pairGroup.add(strip);
   });
 
   if (isArch) {
     const archBeamGeo = new THREE.BoxGeometry(ROAD_WIDTH + 2.0, 0.22, 0.22);
     const archBeam = new THREE.Mesh(archBeamGeo, i % 2 === 0 ? neonPinkMat : neonCyanMat);
-    archBeam.position.set(0, 6.5, 0);
+    archBeam.position.set(0, 4.6, 0);
     pairGroup.add(archBeam);
   }
 
