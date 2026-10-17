@@ -856,3 +856,143 @@ body.is-steering .hero-wrapper {
     font-size: 1.02rem;
   }
 }
+
+/* ============================================================================
+   LANDING (index.html) — static bio card, no WebGL, no audio.
+   Reuses the Night Drive hero-card language; Night Drive lives at night-drive.html.
+   ============================================================================ */
+html.landing,
+html.landing body {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  touch-action: auto;
+  user-select: text;
+}
+
+html.landing body {
+  background:
+    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 0, 127, 0.26), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 243, 255, 0.07), transparent 70%),
+    var(--bg-deep);
+}
+
+.landing-shell {
+  position: relative;
+  z-index: 3;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 20px 28px;
+}
+
+.landing-main {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 0 12px;
+}
+
+.landing .hero-card {
+  max-width: 560px;
+  padding: 18px 22px 20px;
+}
+
+.landing .hero-title {
+  cursor: default;
+  margin-bottom: 10px;
+}
+
+.landing .badge-row {
+  margin-bottom: 10px;
+}
+
+.landing .role-box,
+.landing .archive-box {
+  margin-bottom: 14px;
+}
+
+/* Vertical works list: No. / title on one line, one-line description beneath */
+.archive-stack {
+  grid-template-columns: 1fr;
+  gap: 7px 0;
+  margin-top: 3px;
+}
+
+.archive-stack a {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 9px;
+  row-gap: 1px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 0.86rem;
+}
+
+.archive-stack .archive-no {
+  grid-row: 1;
+}
+
+.archive-stack .archive-name {
+  grid-column: 2;
+  transition: color 0.2s ease;
+}
+
+.archive-stack .archive-desc {
+  grid-column: 2;
+  font-size: 0.74rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.archive-stack a:hover {
+  color: var(--text-main);
+}
+
+.archive-stack a:hover .archive-name {
+  color: var(--neon-cyan);
+}
+
+a.brand-domain {
+  text-decoration: none;
+}
+
+a.brand-domain:hover {
+  color: #ffffff;
+}
+
+@media (max-width: 1024px) {
+  .landing .hero-card {
+    padding: 14px 16px 16px;
+  }
+
+  .landing .hero-title {
+    font-size: clamp(1.05rem, 5.2vw, 1.4rem);
+  }
+
+  .landing .hero-bio {
+    font-size: 0.84rem;
+  }
+
+  .archive-stack a {
+    font-size: 0.82rem;
+  }
+}
+
+@media (max-width: 540px) {
+  .landing-shell {
+    padding: 10px 12px 24px;
+  }
+
+  .landing-main {
+    padding: 18px 0 6px;
+  }
+
+  .landing .badge-row {
+    flex-wrap: wrap;
+  }
+}
