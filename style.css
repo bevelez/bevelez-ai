@@ -140,56 +140,6 @@ html, body {
   flex-wrap: nowrap;
 }
 
-/* Secret Easter Egg Cyber-Cassette Button */
-.secret-shard-btn {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-height: 31px;
-  padding: 5px 10px;
-  background: linear-gradient(135deg, rgba(255, 0, 127, 0.28), rgba(0, 243, 255, 0.2));
-  border: 1px solid rgba(255, 42, 133, 0.85);
-  border-radius: 6px;
-  color: #ffffff;
-  text-decoration: none;
-  cursor: pointer;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 0 14px rgba(255, 0, 127, 0.45), inset 0 0 8px rgba(0, 243, 255, 0.22);
-  transition: all 0.22s ease;
-  animation: shardGlitchPulse 3.5s infinite ease-in-out;
-}
-
-.shard-label {
-  font-family: var(--font-display);
-  font-size: 0.66rem;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  color: #ffffff;
-  text-shadow: 0 0 8px rgba(255, 42, 133, 0.8);
-}
-
-.secret-shard-btn:hover,
-.secret-shard-btn:active {
-  color: #ffffff;
-  background: linear-gradient(135deg, rgba(255, 0, 127, 0.52), rgba(0, 243, 255, 0.36));
-  border-color: #00f3ff;
-  box-shadow: 0 0 22px rgba(255, 0, 127, 0.8), 0 0 14px rgba(0, 243, 255, 0.65);
-  transform: translateY(-1px) scale(1.06);
-}
-
-@keyframes shardGlitchPulse {
-  0%, 100% {
-    box-shadow: 0 0 12px rgba(255, 0, 127, 0.42), inset 0 0 6px rgba(0, 243, 255, 0.2);
-    transform: translateY(0);
-  }
-  50% {
-    box-shadow: 0 0 20px rgba(255, 0, 127, 0.72), 0 0 10px rgba(0, 243, 255, 0.48);
-    transform: translateY(-1px);
-  }
-}
-
 body.warping-to-vault {
   animation: warpFlash 0.65s forwards ease-in;
 }
@@ -332,8 +282,53 @@ body.is-steering .hero-wrapper {
   font-size: 1.02rem;
 }
 
-.hero-card.collapsed .badge-row {
-  margin-bottom: 4px;
+.card-corner {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--neon-cyan);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.corner-tl { top: -1px; left: -1px; border-width: 2px 0 0 2px; border-top-left-radius: 10px; }
+.corner-tr { top: -1px; right: -1px; border-width: 2px 2px 0 0; border-top-right-radius: 10px; }
+.corner-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-bottom-left-radius: 10px; }
+.corner-br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; border-bottom-right-radius: 10px; }
+
+.title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 22px;
+  border-radius: 4px;
+  background: rgba(0, 243, 255, 0.1);
+  border: 1px solid rgba(0, 243, 255, 0.35);
+  color: var(--neon-cyan);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.card-collapse-btn:hover {
+  background: rgba(0, 243, 255, 0.25);
+  color: #fff;
+}
+
+.hero-title {
+  margin-bottom: 0;
+  font-size: 1.02rem;
 }
 
 .card-corner {
@@ -350,19 +345,11 @@ body.is-steering .hero-wrapper {
 .corner-bl { bottom: -1px; left: -1px; border-width: 0 0 2px 2px; border-bottom-left-radius: 10px; }
 .corner-br { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; border-bottom-right-radius: 10px; }
 
-.badge-row {
+.title-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.badge-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .card-collapse-btn {
@@ -400,14 +387,6 @@ body.is-steering .hero-wrapper {
   border: 1px solid rgba(255, 0, 127, 0.6);
   color: #ff7ab8;
   text-shadow: 0 0 8px rgba(255, 0, 127, 0.5);
-}
-
-.audio-source-pill {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
-  letter-spacing: 0.05em;
-  color: var(--neon-cyan);
-  opacity: 0.9;
 }
 
 .hero-title {
@@ -460,71 +439,60 @@ body.is-steering .hero-wrapper {
   color: #ffffff;
 }
 
-.archive-box {
+/* Single callout to the cassette archive (the only link to the works on this page) */
+.tape-callout {
   display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 8px 11px;
-  background: rgba(255, 0, 127, 0.05);
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  background: rgba(255, 0, 127, 0.06);
   border-left: 2px solid var(--neon-magenta);
   border-radius: 0 5px 5px 0;
   margin-bottom: 13px;
+  color: var(--text-main);
+  text-decoration: none;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.archive-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+.tape-callout:hover {
+  background: rgba(255, 0, 127, 0.14);
+  box-shadow: 0 0 18px rgba(255, 0, 127, 0.18);
+}
+
+.tape-callout-icon {
+  flex-shrink: 0;
+  filter: drop-shadow(0 0 6px rgba(255, 42, 133, 0.55));
+}
+
+.tape-callout-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tape-callout-label {
   font-family: var(--font-mono);
   font-size: 0.6rem;
   letter-spacing: 0.14em;
   color: #ff7ab8;
-  text-decoration: none;
-  width: fit-content;
 }
 
-.archive-label:hover {
+.tape-callout-title {
+  font-size: 0.82rem;
+  font-weight: 500;
   color: #ffffff;
 }
 
 .archive-arrow {
+  margin-left: auto;
+  color: #ff7ab8;
+  font-family: var(--font-mono);
   transition: transform 0.2s ease;
 }
 
-.archive-label:hover .archive-arrow {
+.tape-callout:hover .archive-arrow {
   transform: translateX(3px);
-}
-
-.archive-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 12px;
-}
-
-.archive-list a {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 7px;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--text-main);
-  text-decoration: none;
-  line-height: 1.5;
-  transition: color 0.2s ease;
-}
-
-.archive-list a:hover {
-  color: var(--neon-cyan);
-}
-
-.archive-no {
-  font-family: var(--font-mono);
-  font-size: 0.6rem;
-  color: var(--text-muted);
-  letter-spacing: 0.08em;
 }
 
 .links-row {
@@ -664,6 +632,20 @@ body.is-steering .hero-wrapper {
   margin-bottom: 10px;
 }
 
+.cyber-badge {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 0, 127, 0.18);
+  border: 1px solid rgba(255, 0, 127, 0.6);
+  color: #ff7ab8;
+  text-shadow: 0 0 8px rgba(255, 0, 127, 0.5);
+}
+
 .modal-header h2 {
   font-family: var(--font-display);
   font-size: 1.05rem;
@@ -798,18 +780,13 @@ body.is-steering .hero-wrapper {
     font-size: 0.75rem;
   }
 
-  .archive-box {
-    padding: 6px 9px;
+  .tape-callout {
+    padding: 7px 9px;
     margin-bottom: 9px;
   }
 
-  .archive-list {
-    grid-template-columns: 1fr;
-    gap: 1px 0;
-  }
-
-  .archive-list a {
-    font-size: 0.74rem;
+  .tape-callout-title {
+    font-size: 0.76rem;
   }
 
   .social-link {
@@ -820,17 +797,12 @@ body.is-steering .hero-wrapper {
 
 @media (max-width: 540px) {
   #audio-visualizer,
-  #btn-cinema,
-  .shard-label {
+  #btn-cinema {
     display: none;
   }
 
   .audio-cluster {
     gap: 5px;
-  }
-
-  .secret-shard-btn {
-    padding: 5px 7px;
   }
 
   .brand-cluster {
@@ -848,151 +820,7 @@ body.is-steering .hero-wrapper {
     max-width: 100%;
   }
 
-  .audio-source-pill {
-    display: none;
-  }
-
   .speed-value {
     font-size: 1.02rem;
-  }
-}
-
-/* ============================================================================
-   LANDING (index.html) — static bio card, no WebGL, no audio.
-   Reuses the Night Drive hero-card language; Night Drive lives at night-drive.html.
-   ============================================================================ */
-html.landing,
-html.landing body {
-  height: auto;
-  min-height: 100%;
-  overflow-x: hidden;
-  overflow-y: auto;
-  touch-action: auto;
-  user-select: text;
-}
-
-html.landing body {
-  background:
-    radial-gradient(ellipse 70% 45% at 50% 108%, rgba(255, 0, 127, 0.26), transparent 70%),
-    radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 243, 255, 0.07), transparent 70%),
-    var(--bg-deep);
-}
-
-.landing-shell {
-  position: relative;
-  z-index: 3;
-  min-height: 100vh;
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  padding: 14px 20px 28px;
-}
-
-.landing-main {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 28px 0 12px;
-}
-
-.landing .hero-card {
-  max-width: 560px;
-  padding: 18px 22px 20px;
-}
-
-.landing .hero-title {
-  cursor: default;
-  margin-bottom: 10px;
-}
-
-.landing .badge-row {
-  margin-bottom: 10px;
-}
-
-.landing .role-box,
-.landing .archive-box {
-  margin-bottom: 14px;
-}
-
-/* Vertical works list: No. / title on one line, one-line description beneath */
-.archive-stack {
-  grid-template-columns: 1fr;
-  gap: 7px 0;
-  margin-top: 3px;
-}
-
-.archive-stack a {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  column-gap: 9px;
-  row-gap: 1px;
-  align-items: baseline;
-  padding: 3px 0;
-  font-size: 0.86rem;
-}
-
-.archive-stack .archive-no {
-  grid-row: 1;
-}
-
-.archive-stack .archive-name {
-  grid-column: 2;
-  transition: color 0.2s ease;
-}
-
-.archive-stack .archive-desc {
-  grid-column: 2;
-  font-size: 0.74rem;
-  font-weight: 400;
-  line-height: 1.4;
-  color: var(--text-muted);
-}
-
-.archive-stack a:hover {
-  color: var(--text-main);
-}
-
-.archive-stack a:hover .archive-name {
-  color: var(--neon-cyan);
-}
-
-a.brand-domain {
-  text-decoration: none;
-}
-
-a.brand-domain:hover {
-  color: #ffffff;
-}
-
-@media (max-width: 1024px) {
-  .landing .hero-card {
-    padding: 14px 16px 16px;
-  }
-
-  .landing .hero-title {
-    font-size: clamp(1.05rem, 5.2vw, 1.4rem);
-  }
-
-  .landing .hero-bio {
-    font-size: 0.84rem;
-  }
-
-  .archive-stack a {
-    font-size: 0.82rem;
-  }
-}
-
-@media (max-width: 540px) {
-  .landing-shell {
-    padding: 10px 12px 24px;
-  }
-
-  .landing-main {
-    padding: 18px 0 6px;
-  }
-
-  .landing .badge-row {
-    flex-wrap: wrap;
   }
 }

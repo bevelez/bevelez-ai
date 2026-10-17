@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="landing">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -25,125 +25,193 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css?v=9" />
+  <link rel="stylesheet" href="./style.css?v=10" />
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
 </head>
-<body class="landing">
-  <!-- Subtle CRT Scanline & Vignette Overlay (shared with Night Drive) -->
+<body>
+  <!-- 3D WebGL Canvas Container -->
+  <div id="canvas-container" aria-hidden="true"></div>
+
+  <!-- Subtle CRT Scanline & Vignette Overlay -->
   <div class="crt-overlay" aria-hidden="true"></div>
 
-  <div class="landing-shell">
+  <!-- Main UI Overlay -->
+  <div class="ui-layer" id="ui-layer">
+    <!-- Top Telemetry & Audio Bar -->
     <header class="top-bar">
       <div class="brand-cluster">
         <span class="status-dot"></span>
         <span class="brand-domain">BEVELEZ.AI</span>
         <span class="brand-divider">//</span>
-        <span class="brand-status">MOUNTAIN VIEW, CA</span>
+        <span class="brand-status">NIGHT_CITY_LINK: ACTIVE</span>
       </div>
 
-      <a href="./vault.html" class="secret-shard-btn" aria-label="Enter the 3D Cassette Archive" title="Open the 3D Cassette Archive">
-        <svg class="shard-svg" viewBox="0 0 28 19" width="24" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="1" y="1" width="26" height="17" rx="3" fill="rgba(255, 42, 133, 0.25)" stroke="#ff2a85" stroke-width="1.6"/>
-          <rect x="3.5" y="3" width="21" height="9.5" rx="1.5" fill="rgba(0, 243, 255, 0.16)" stroke="#00f3ff" stroke-width="1.1"/>
-          <path d="M6 18L8.2 14H19.8L22 18" fill="rgba(255, 42, 133, 0.35)" stroke="#ff2a85" stroke-width="1.3"/>
-          <circle cx="9.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
-          <circle cx="18.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
-          <line x1="11.9" y1="7.8" x2="16.1" y2="7.8" stroke="#00f3ff" stroke-width="1.2"/>
-        </svg>
-        <span class="shard-label">TAPES</span>
-      </a>
+      <div class="audio-cluster">
+        <canvas id="audio-visualizer" width="76" height="24" title="Real-time Audio Spectrum"></canvas>
+        <button id="btn-audio-toggle" class="cyber-btn cyber-btn-primary" type="button">
+          <span class="btn-icon" id="audio-icon">▶</span>
+          <span id="audio-label">AUDIO</span>
+        </button>
+        <button id="btn-lyria-modal" class="cyber-btn cyber-btn-accent" type="button" title="Generate or configure Lyria 3.5 AI soundtrack">
+          <span>✦ LYRIA 3.5</span>
+        </button>
+        <button id="btn-cinema" class="cyber-btn cyber-btn-ghost" type="button" title="Toggle HUD Card (Drive Mode)">
+          <span id="cinema-label">HIDE HUD</span>
+        </button>
+      </div>
     </header>
 
-    <main class="landing-main">
-      <section class="hero-card" aria-label="Introduction and archive">
+    <!-- Compact Docked Hero Card (Collapsible) -->
+    <main class="hero-wrapper" id="hero-wrapper">
+      <section class="hero-card" id="hero-card" aria-label="Introduction and archive">
         <div class="card-corner corner-tl"></div>
         <div class="card-corner corner-tr"></div>
         <div class="card-corner corner-bl"></div>
         <div class="card-corner corner-br"></div>
 
-        <div class="badge-row">
-          <span class="cyber-badge">05 INTERACTIVE WORKS</span>
-          <a href="./night-drive.html" class="cyber-btn cyber-btn-primary" title="Night Drive — endless neon highway with live synthwave">
-            <span class="btn-icon">▶</span>
-            <span>DRIVE</span>
-          </a>
+        <div class="title-row">
+          <h1 class="hero-title" id="hero-title-bar">
+            <span class="title-glitch" data-text="BRANDON EDWARD VELEZ">BRANDON EDWARD VELEZ</span>
+          </h1>
+          <button id="btn-card-collapse" class="card-collapse-btn" type="button" title="Minimize / Expand Card" aria-label="Minimize or Expand Bio Card">
+            <span id="collapse-icon">−</span>
+          </button>
         </div>
 
-        <h1 class="hero-title">
-          <span class="title-glitch" data-text="BRANDON EDWARD VELEZ">BRANDON EDWARD VELEZ</span>
-        </h1>
+        <div class="card-collapsible-body" id="card-body">
+          <p class="hero-bio">
+            Technology leader specializing in <strong>product strategy</strong> and <strong>technical program management</strong>.
+          </p>
 
-        <p class="hero-bio">
-          Technology leader specializing in <strong>product strategy</strong> and <strong>technical program management</strong>.
-        </p>
+          <div class="role-box">
+            <span class="role-label">CURRENTLY</span>
+            <span class="role-value">Technical Program Manager @ Google Labs | Gemini Notebook</span>
+          </div>
 
-        <div class="role-box">
-          <span class="role-label">CURRENTLY</span>
-          <span class="role-value">Technical Program Manager @ Google Labs | Gemini Notebook</span>
-        </div>
-
-        <nav class="archive-box" aria-label="Interactive works">
-          <a class="archive-label" href="./vault.html">ARCHIVE <span class="archive-arrow">→</span></a>
-          <ol class="archive-list archive-stack">
-            <li>
-              <a href="./clair-de-lune.html">
-                <span class="archive-no">01</span>
-                <span class="archive-name">Clair de Lune</span>
-                <span class="archive-desc">An intimate nocturne for dark felt grand piano. Listen, or play the keys yourself.</span>
-              </a>
-            </li>
-            <li>
-              <a href="./passacaglia.html">
-                <span class="archive-no">02</span>
-                <span class="archive-name">Passacaglia</span>
-                <span class="archive-desc">A life in eight movements, drawn by 3D Fourier line sculptures to Handel’s HWV 432.</span>
-              </a>
-            </li>
-            <li>
-              <a href="./night-drive.html">
-                <span class="archive-no">03</span>
-                <span class="archive-name">Night Drive</span>
-                <span class="archive-desc">Endless midnight highway cruiser with procedural synthwave and Lyria 3.5 soundtracks.</span>
-              </a>
-            </li>
-            <li>
-              <a href="./mountain-view.html">
-                <span class="archive-no">04</span>
-                <span class="archive-name">Mountain View Digital Twin</span>
-                <span class="archive-desc">A 3D city twin of Mountain View. Zoning what-ifs, US-101 traffic and live telemetry.</span>
-              </a>
-            </li>
-            <li>
-              <a href="./kronos.html">
-                <span class="archive-no">05</span>
-                <span class="archive-name">DJ Kronos</span>
-                <span class="archive-desc">Cel-shaded rhythm brawler. Punch, kick and weave on the beat of a Lyria 3.5 boss track.</span>
-              </a>
-            </li>
-          </ol>
-        </nav>
-
-        <div class="links-row">
-          <a href="https://www.linkedin.com/in/bevelez/" target="_blank" rel="noopener" class="social-link social-primary">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/></svg>
-            <span>LinkedIn</span>
+          <a class="tape-callout" id="btn-secret-vault" href="./vault.html" title="Open the 3D Cassette Archive">
+            <svg class="tape-callout-icon" viewBox="0 0 28 19" width="30" height="20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <rect x="1" y="1" width="26" height="17" rx="3" fill="rgba(255, 42, 133, 0.22)" stroke="#ff2a85" stroke-width="1.6"/>
+              <rect x="3.5" y="3" width="21" height="9.5" rx="1.5" fill="rgba(0, 243, 255, 0.14)" stroke="#00f3ff" stroke-width="1.1"/>
+              <path d="M6 18L8.2 14H19.8L22 18" fill="rgba(255, 42, 133, 0.32)" stroke="#ff2a85" stroke-width="1.3"/>
+              <circle cx="9.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
+              <circle cx="18.5" cy="7.8" r="2.4" fill="#05020d" stroke="#ffffff" stroke-width="1.4"/>
+              <line x1="11.9" y1="7.8" x2="16.1" y2="7.8" stroke="#00f3ff" stroke-width="1.2"/>
+            </svg>
+            <span class="tape-callout-text">
+              <span class="tape-callout-label">THE ARCHIVE</span>
+              <span class="tape-callout-title">Five interactive works, on cassette</span>
+            </span>
+            <span class="archive-arrow" aria-hidden="true">→</span>
           </a>
 
-          <a href="https://x.com/bevelez" target="_blank" rel="noopener" class="social-link" aria-label="X (Twitter)">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-            <span>@bevelez</span>
-          </a>
+          <div class="links-row">
+            <a href="https://www.linkedin.com/in/bevelez/" target="_blank" rel="noopener" class="social-link social-primary">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.88 8.56a1.68 1.68 0 0 0 1.68-1.68c0-.93-.75-1.69-1.68-1.69a1.69 1.69 0 0 0-1.69 1.69c0 .93.76 1.68 1.69 1.68m1.39 9.94v-8.37H5.5v8.37h2.77z"/></svg>
+              <span>LinkedIn</span>
+            </a>
 
-          <a href="https://github.com/bevelez" target="_blank" rel="noopener" class="social-link" aria-label="GitHub">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
-            <span>GitHub</span>
-          </a>
+            <a href="https://x.com/bevelez" target="_blank" rel="noopener" class="social-link" aria-label="X (Twitter)">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+              <span>@bevelez</span>
+            </a>
 
-          <a href="https://bevelez.me/Home" target="_blank" rel="noopener" class="social-link" aria-label="bevelez.me">
-            <span>bevelez.me ↗</span>
-          </a>
+            <a href="https://github.com/bevelez" target="_blank" rel="noopener" class="social-link" aria-label="GitHub">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2z"/></svg>
+              <span>GitHub</span>
+            </a>
+
+            <a href="https://bevelez.me/Home" target="_blank" rel="noopener" class="social-link" aria-label="bevelez.me">
+              <span>bevelez.me ↗</span>
+            </a>
+          </div>
         </div>
       </section>
     </main>
+
+    <!-- Bottom Driving & Camera Telemetry Bar -->
+    <footer class="bottom-bar">
+      <div class="telemetry-group">
+        <div class="speed-readout">
+          <span class="speed-value" id="speed-value">142</span>
+          <span class="speed-unit">MPH</span>
+        </div>
+        <div class="drive-hint">
+          <span>STEER: <kbd>DRAG</kbd> / <kbd>MOUSE</kbd> / <kbd>A</kbd><kbd>D</kbd></span>
+          <span class="hint-sep">•</span>
+          <span>BOOST: <kbd>SHIFT</kbd></span>
+        </div>
+      </div>
+
+      <div class="controls-group">
+        <button id="btn-turbo" class="cyber-btn cyber-btn-small" type="button">
+          <span>⚡ BOOST</span>
+        </button>
+        <button id="btn-camera" class="cyber-btn cyber-btn-small" type="button">
+          <span id="camera-label">CAM: CHASE</span>
+        </button>
+      </div>
+    </footer>
   </div>
+
+  <!-- Lyria 3.5 Soundtrack Studio Modal -->
+  <div class="modal-backdrop hidden" id="lyria-modal" role="dialog" aria-modal="true" aria-labelledby="lyria-modal-title">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div>
+          <span class="cyber-badge">GEMINI API // MUSIC GENERATION</span>
+          <h2 id="lyria-modal-title">Lyria 3.5 Cyberpunk Soundtrack Studio</h2>
+        </div>
+        <button id="btn-close-modal" class="modal-close" type="button" aria-label="Close">&times;</button>
+      </div>
+
+      <p class="modal-desc">
+        Generate a custom 44.1 kHz stereo cyberpunk chill track using Google's <code>lyria-3.5</code> model via the Gemini Interactions API, or drop a pre-generated file at <code>assets/lyria-cyberpunk.mp3</code> and set <code>PREBAKED_TRACK</code> in <code>audio.js</code>. While generating or when no API key is set, the built-in Web Audio synthwave engine plays automatically.
+      </p>
+
+      <div class="form-group">
+        <label for="lyria-model-select">Lyria Model</label>
+        <select id="lyria-model-select" class="cyber-input">
+          <option value="lyria-3.5" selected>lyria-3.5 (Full-length structured track, ~2 min)</option>
+          <option value="lyria-3-clip-preview">lyria-3-clip-preview (Fast 30-second loop)</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="lyria-prompt">Soundtrack Prompt</label>
+        <textarea id="lyria-prompt" class="cyber-input" rows="3">Instrumental chill cyberpunk synthwave soundtrack for driving down a neon highway toward a futuristic megacity at midnight. Warm analog Juno pads, deep rolling sub-bass arpeggio, dreamy atmospheric synth lead, nostalgic and cinematic, 92 BPM.</textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="lyria-api-key">Gemini API Key <span class="label-sub">(Stored only in your browser's localStorage)</span></label>
+        <input type="password" id="lyria-api-key" class="cyber-input" placeholder="AIzaSy..." autocomplete="off" />
+      </div>
+
+      <div id="lyria-status" class="lyria-status">
+        Ready. Currently using the built-in Cyberpunk Chill Web Audio Synth (92 BPM).
+      </div>
+
+      <div class="modal-actions">
+        <button id="btn-generate-lyria" class="cyber-btn cyber-btn-primary" type="button">
+          <span>✦ Generate with Lyria 3.5</span>
+        </button>
+        <a id="btn-download-lyria" class="cyber-btn cyber-btn-ghost hidden" download="lyria-cyberpunk.mp3">
+          <span>⬇ Save MP3 to Disk</span>
+        </a>
+        <button id="btn-use-synth" class="cyber-btn cyber-btn-ghost" type="button">
+          <span>Switch to WebAudio Synth</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./main.js?v=11"></script>
 </body>
 </html>

@@ -1,30 +1,95 @@
-// audio.js — Dual-engine Audio System for BEVELEZ.AI
+// audio.js — Night Drive audio for BEVELEZ.AI
 // 1. Google Gemini API Lyria 3.5 (lyria-3.5 / lyria-3-clip-preview) MP3 playback & live generation
-// 2. Built-in Real-Time Cyberpunk Chill Synthwave Web Audio Synthesizer (92 BPM)
+// 2. Built-in Cyberpunk Chill Synthwave engine (92 BPM): scheduled on the AudioContext clock with a
+//    lookahead (no setInterval drift), stereo-chorused Juno-style pads, rolling saturated bass under a
+//    real sidechain pump, detuned pluck arpeggio, a sparse lead across the back half of the 8-bar loop,
+//    80s gated drums, and a glue-compressed, brick-wall-limited master.
+
+// Point this at a pre-generated Lyria file (e.g. './assets/lyria-cyberpunk.mp3') once it exists in the repo.
+export const PREBAKED_TRACK = null;
+
+const BPM = 92;
+const STEPS_PER_BAR = 16;
+const LOOP_BARS = 8;
+const LOOP_STEPS = STEPS_PER_BAR * LOOP_BARS;
+const STEP_DUR = (60 / BPM) / 4;
+
+const SCHEDULER_INTERVAL_MS = 25;
+const LOOKAHEAD_VISIBLE = 0.12;
+const LOOKAHEAD_HIDDEN = 1.4; // background tabs throttle timers to ~1 Hz
+
+// Am9 -> Fmaj9 -> Dm9 -> Em7 (vi – IV – ii – iii in C), four bars, played twice per loop
+const CHORDS = [
+  [57, 60, 64, 67, 71],
+  [53, 57, 60, 64, 67],
+  [50, 53, 57, 60, 64],
+  [52, 55, 59, 62, 67]
+];
+const BASS_ROOTS = [33, 29, 38, 28]; // A1, F1, D2, E1
+const BASS_VELOCITY = [1.0, 0.5, 0.68, 0.5, 0.86, 0.5, 0.7, 0.55, 0.95, 0.5, 0.68, 0.5, 0.86, 0.55, 0.72, 0.6];
+const ARP_A = [0, null, 2, 4, null, 3, 1, null, 4, null, 2, 0, null, 3, 4, null];
+const ARP_B = [4, null, 2, null, 3, 4, null, 1, 4, null, 0, 2, null, 4, 3, null];
+// Sparse lead phrase over bars 5–8: [bar, step, midi, length in steps] — chord tones and 7ths/9ths only
+const LEAD_PHRASE = [
+  [4, 0, 76, 8], [4, 8, 79, 7],
+  [5, 0, 81, 10], [5, 10, 79, 6],
+  [6, 0, 77, 8], [6, 8, 76, 8],
+  [7, 0, 74, 6], [7, 6, 71, 10]
+];
+
+function midiToFreq(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function makeSoftClipCurve(drive = 1.7, samples = 1024) {
+  const curve = new Float32Array(samples);
+  const norm = Math.tanh(drive);
+  for (let i = 0; i < samples; i++) {
+    const x = (i / (samples - 1)) * 2 - 1;
+    curve[i] = Math.tanh(drive * x) / norm;
+  }
+  return curve;
+}
 
 export class CyberAudioEngine {
   constructor() {
     this.ctx = null;
     this.analyser = null;
     this.masterGain = null;
+    this.masterLevel = 0.72;
+    this.duckBus = null;
+    this.padBus = null;
+    this.bassDrive = null;
+    this.reverbSend = null;
     this.reverbNode = null;
     this.delayNode = null;
-    this.freqData = new Uint8Array(64);
+    this.noiseBuffer = null;
+    this.freqData = new Uint8Array(128);
 
     this.isPlaying = false;
     this.mode = 'standby'; // 'standby' | 'synth' | 'lyria'
-    this.stepTimer = null;
+    this.bpm = BPM;
+    this.schedulerTimer = null;
     this.currentStep = 0;
-    this.bpm = 92;
+    this.nextStepTime = 0;
+    this.lookahead = LOOKAHEAD_VISIBLE;
+    this.lastLeadFreq = null;
 
     // HTML5 Audio element for Lyria 3.5 MP3 playback
     this.audioEl = new Audio();
     this.audioEl.loop = true;
     this.audioEl.crossOrigin = 'anonymous';
     this.mediaSourceNode = null;
-    this.hasPrebakedLyria = false;
+    if (PREBAKED_TRACK) {
+      this.audioEl.src = PREBAKED_TRACK;
+    }
 
     this.onStatusChange = null;
+
+    document.addEventListener('visibilitychange', () => {
+      this.lookahead = document.hidden ? LOOKAHEAD_HIDDEN : LOOKAHEAD_VISIBLE;
+      if (this.schedulerTimer) this.schedulerTick();
+    });
   }
 
   notify(label) {
@@ -33,53 +98,154 @@ export class CyberAudioEngine {
     }
   }
 
+  // ==========================================================================
+  // Context & master chain
+  // ==========================================================================
   initContext() {
     if (this.ctx) return;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    this.ctx = new AudioCtx();
+    const ctx = new AudioCtx({ latencyHint: 'interactive' });
+    this.ctx = ctx;
 
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.75;
+    // Master: gain -> 28 Hz high-pass -> air shelf -> glue compressor -> brick-wall limiter -> analyser -> out
+    this.masterGain = ctx.createGain();
+    this.masterGain.gain.value = this.masterLevel;
 
-    this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 128;
-    this.analyser.smoothingTimeConstant = 0.82;
+    const rumbleCut = ctx.createBiquadFilter();
+    rumbleCut.type = 'highpass';
+    rumbleCut.frequency.value = 28;
+    rumbleCut.Q.value = 0.7;
+
+    const airShelf = ctx.createBiquadFilter();
+    airShelf.type = 'highshelf';
+    airShelf.frequency.value = 6500;
+    airShelf.gain.value = 2.0;
+
+    const glue = ctx.createDynamicsCompressor();
+    glue.threshold.value = -20;
+    glue.knee.value = 14;
+    glue.ratio.value = 2.6;
+    glue.attack.value = 0.012;
+    glue.release.value = 0.26;
+
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -3.5;
+    limiter.knee.value = 0;
+    limiter.ratio.value = 20;
+    limiter.attack.value = 0.001;
+    limiter.release.value = 0.09;
+
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.8;
     this.freqData = new Uint8Array(this.analyser.frequencyBinCount);
 
-    // Stereo algorithmic reverb impulse for lush cyberpunk chill atmosphere
-    this.reverbNode = this.createReverb(2.8, 2.2);
-    const reverbGain = this.ctx.createGain();
-    reverbGain.gain.value = 0.38;
+    this.masterGain.connect(rumbleCut);
+    rumbleCut.connect(airShelf);
+    airShelf.connect(glue);
+    glue.connect(limiter);
+    limiter.connect(this.analyser);
+    this.analyser.connect(ctx.destination);
 
-    // Dub/synthwave dotted-eighth stereo delay
-    this.delayNode = this.ctx.createDelay(2.0);
-    this.delayNode.delayTime.value = (60 / this.bpm) * 0.75;
-    const delayFeedback = this.ctx.createGain();
-    delayFeedback.gain.value = 0.36;
-    const delayFilter = this.ctx.createBiquadFilter();
-    delayFilter.type = 'lowpass';
-    delayFilter.frequency.value = 2100;
+    // Sidechain bus: pads, bass and arp pump under every kick
+    this.duckBus = ctx.createGain();
+    this.duckBus.connect(this.masterGain);
 
-    this.delayNode.connect(delayFilter);
-    delayFilter.connect(delayFeedback);
-    delayFeedback.connect(this.delayNode);
-    delayFilter.connect(this.masterGain);
+    // Bass saturation (gentle tanh) for analog weight
+    this.bassDrive = ctx.createWaveShaper();
+    this.bassDrive.curve = makeSoftClipCurve(1.7);
+    this.bassDrive.oversample = '2x';
+    this.bassDrive.connect(this.duckBus);
 
+    // Pad stereo chorus: dry centre + two LFO-modulated delay taps panned hard left / right
+    this.padBus = ctx.createGain();
+    const padDry = ctx.createGain();
+    padDry.gain.value = 0.62;
+    this.padBus.connect(padDry);
+    padDry.connect(this.duckBus);
+
+    const chorusTaps = [
+      { base: 0.011, depth: 0.0022, rate: 0.31, pan: -0.72 },
+      { base: 0.017, depth: 0.0019, rate: 0.27, pan: 0.72 }
+    ];
+    for (const tap of chorusTaps) {
+      const delay = ctx.createDelay(0.05);
+      delay.delayTime.value = tap.base;
+      const lfo = ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = tap.rate;
+      const lfoDepth = ctx.createGain();
+      lfoDepth.gain.value = tap.depth;
+      lfo.connect(lfoDepth);
+      lfoDepth.connect(delay.delayTime);
+      lfo.start();
+
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = tap.pan;
+      const wet = ctx.createGain();
+      wet.gain.value = 0.5;
+
+      this.padBus.connect(delay);
+      delay.connect(panner);
+      panner.connect(wet);
+      wet.connect(this.duckBus);
+    }
+
+    // Reverb: 18 ms pre-delay into a darkening stereo tail
+    this.reverbSend = ctx.createDelay(0.1);
+    this.reverbSend.delayTime.value = 0.018;
+    this.reverbNode = this.createReverb(2.8, 2.4);
+    const reverbGain = ctx.createGain();
+    reverbGain.gain.value = 0.3;
+    this.reverbSend.connect(this.reverbNode);
     this.reverbNode.connect(reverbGain);
     reverbGain.connect(this.masterGain);
 
-    this.masterGain.connect(this.analyser);
-    this.analyser.connect(this.ctx.destination);
+    // Dotted-eighth stereo-ish delay, band-limited feedback so it never muddies the lows
+    this.delayNode = ctx.createDelay(2.0);
+    this.delayNode.delayTime.value = (60 / this.bpm) * 0.75;
+    const delayFeedback = ctx.createGain();
+    delayFeedback.gain.value = 0.34;
+    const delayLow = ctx.createBiquadFilter();
+    delayLow.type = 'highpass';
+    delayLow.frequency.value = 320;
+    const delayHigh = ctx.createBiquadFilter();
+    delayHigh.type = 'lowpass';
+    delayHigh.frequency.value = 2600;
+    const delayOut = ctx.createGain();
+    delayOut.gain.value = 0.55;
+    const delayPan = ctx.createStereoPanner();
+    delayPan.pan.value = 0.45;
+    this.delayNode.connect(delayLow);
+    delayLow.connect(delayHigh);
+    delayHigh.connect(delayFeedback);
+    delayFeedback.connect(this.delayNode);
+    delayHigh.connect(delayOut);
+    delayOut.connect(delayPan);
+    delayPan.connect(this.masterGain);
+
+    // One shared noise bed for hats, snare and kick click
+    const noiseLength = ctx.sampleRate * 2;
+    this.noiseBuffer = ctx.createBuffer(1, noiseLength, ctx.sampleRate);
+    const noise = this.noiseBuffer.getChannelData(0);
+    for (let i = 0; i < noiseLength; i++) {
+      noise[i] = Math.random() * 2 - 1;
+    }
   }
 
-  createReverb(duration = 2.6, decay = 2.0) {
+  createReverb(duration = 2.8, decay = 2.4) {
     const rate = this.ctx.sampleRate;
-    const length = rate * duration;
+    const length = Math.floor(rate * duration);
     const impulse = this.ctx.createBuffer(2, length, rate);
     for (let ch = 0; ch < 2; ch++) {
       const data = impulse.getChannelData(ch);
+      let lp = 0;
       for (let i = 0; i < length; i++) {
-        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        const t = i / length;
+        // one-pole low-pass whose cutoff closes as the tail decays: bright early reflections, dark tail
+        const coeff = 0.18 + 0.72 * t;
+        lp += (Math.random() * 2 - 1 - lp) * (1 - coeff);
+        data[i] = lp * Math.pow(1 - t, decay);
       }
     }
     const convolver = this.ctx.createConvolver();
@@ -87,6 +253,17 @@ export class CyberAudioEngine {
     return convolver;
   }
 
+  fadeMaster(target, seconds) {
+    const g = this.masterGain.gain;
+    const now = this.ctx.currentTime;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(Math.max(g.value, 0.0001), now);
+    g.linearRampToValueAtTime(target, now + seconds);
+  }
+
+  // ==========================================================================
+  // Transport
+  // ==========================================================================
   async toggle() {
     this.initContext();
     if (this.ctx.state === 'suspended') {
@@ -96,14 +273,17 @@ export class CyberAudioEngine {
     if (this.isPlaying) {
       this.stop();
       return false;
-    } else {
-      if (this.audioEl.src) {
-        await this.startLyriaPlayback();
-      } else {
-        this.startSynth();
-      }
-      return true;
     }
+    if (this.audioEl.src) {
+      try {
+        await this.startLyriaPlayback();
+        return true;
+      } catch {
+        // Missing or blocked file: fall through to the synth
+      }
+    }
+    this.startSynth();
+    return true;
   }
 
   startSynth() {
@@ -112,19 +292,35 @@ export class CyberAudioEngine {
       this.ctx.resume();
     }
     this.audioEl.pause();
+    this.stopScheduler();
     this.isPlaying = true;
     this.mode = 'synth';
+    this.lastLeadFreq = null;
 
-    if (this.stepTimer) clearInterval(this.stepTimer);
-    const stepMs = ((60 / this.bpm) / 4) * 1000; // 16th note
+    this.fadeMaster(this.masterLevel, 0.35);
     this.currentStep = 0;
-    this.scheduleStep(this.currentStep);
-    this.stepTimer = setInterval(() => {
-      this.currentStep = (this.currentStep + 1) % 64;
-      this.scheduleStep(this.currentStep);
-    }, stepMs);
+    this.nextStepTime = this.ctx.currentTime + 0.06;
+    this.schedulerTick();
+    this.schedulerTimer = setInterval(() => this.schedulerTick(), SCHEDULER_INTERVAL_MS);
 
     this.notify('AUDIO: CYBERPUNK CHILL SYNTH (92 BPM)');
+  }
+
+  schedulerTick() {
+    if (!this.isPlaying || !this.ctx || this.mode !== 'synth') return;
+    const horizon = this.ctx.currentTime + this.lookahead;
+    while (this.nextStepTime < horizon) {
+      this.scheduleStep(this.currentStep, this.nextStepTime);
+      this.nextStepTime += STEP_DUR;
+      this.currentStep = (this.currentStep + 1) % LOOP_STEPS;
+    }
+  }
+
+  stopScheduler() {
+    if (this.schedulerTimer) {
+      clearInterval(this.schedulerTimer);
+      this.schedulerTimer = null;
+    }
   }
 
   async startLyriaPlayback(customSrc = null) {
@@ -132,10 +328,7 @@ export class CyberAudioEngine {
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
-    if (this.stepTimer) {
-      clearInterval(this.stepTimer);
-      this.stepTimer = null;
-    }
+    this.stopScheduler();
     if (customSrc) {
       this.audioEl.src = customSrc;
     }
@@ -145,6 +338,7 @@ export class CyberAudioEngine {
     }
 
     await this.audioEl.play();
+    this.fadeMaster(this.masterLevel, 0.3);
     this.isPlaying = true;
     this.mode = 'lyria';
     this.notify('AUDIO: LYRIA 3.5 AI SOUNDTRACK');
@@ -152,120 +346,166 @@ export class CyberAudioEngine {
 
   stop() {
     this.isPlaying = false;
-    if (this.stepTimer) {
-      clearInterval(this.stepTimer);
-      this.stepTimer = null;
+    this.stopScheduler();
+    if (this.masterGain) {
+      this.fadeMaster(0.0001, 0.22);
     }
     this.audioEl.pause();
     this.notify('AUDIO: PAUSED');
   }
 
-  // --- Procedural Cyberpunk Chill Synthwave Sequencer ---
-  midiToFreq(midi) {
-    return 440 * Math.pow(2, (midi - 69) / 12);
-  }
-
-  scheduleStep(step) {
+  // ==========================================================================
+  // Sequencer — one 16th-note step at an exact AudioContext time
+  // ==========================================================================
+  scheduleStep(step, time) {
     if (!this.isPlaying || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    const stepDur = (60 / this.bpm) / 4;
+    const bar = Math.floor(step / STEPS_PER_BAR);
+    const sib = step % STEPS_PER_BAR;
+    const chord = CHORDS[bar % 4];
+    const secondHalf = bar >= LOOP_BARS / 2;
+    const lastBar = bar === LOOP_BARS - 1;
 
-    // 4-bar chord progression (16 steps per bar): Am9 -> Fmaj9 -> Dm9 -> Em7
-    const chords = [
-      [57, 60, 64, 67, 71], // Am9
-      [53, 57, 60, 64, 67], // Fmaj9
-      [50, 53, 57, 60, 64], // Dm9
-      [52, 55, 59, 62, 67]  // Em7
-    ];
-    const bassRoots = [33, 29, 38, 28]; // A1, F1, D2, E1
-
-    const bar = Math.floor(step / 16);
-    const stepInBar = step % 16;
-
-    // 1. Lush Warm Juno Pad on beat 1 of each bar
-    if (stepInBar === 0) {
-      this.triggerPadChord(chords[bar], now, stepDur * 15.5);
+    // 1. Chorused pad on the downbeat, a touch brighter in the back half
+    if (sib === 0) {
+      this.triggerPad(chord, time, STEP_DUR * 15.6, secondHalf ? 1.1 : 1.0);
     }
 
-    // 2. Rolling Analog Sub-Bass on 16th notes (with sidechain ducking on kick)
-    const root = bassRoots[bar];
-    const octaveJump = (stepInBar % 4 === 2) ? 12 : 0;
-    const velocity = (stepInBar % 8 === 0) ? 0.35 : 0.65; // sidechain feel
-    this.triggerBass(this.midiToFreq(root + octaveJump), now, stepDur * 0.85, velocity);
+    // 2. Rolling 16th bass with an octave hop on the "e" of each beat
+    const root = BASS_ROOTS[bar % 4];
+    const hop = sib % 4 === 2 ? 12 : 0;
+    const bassVel = BASS_VELOCITY[sib] * (hop ? 0.85 : 1);
+    this.triggerBass(midiToFreq(root + hop), time, STEP_DUR * 0.88, bassVel);
 
-    // 3. Dreamy Cyberpunk Arpeggio / Pluck Lead
-    const arpPattern = [0, null, 2, 4, null, 3, 1, null, 4, null, 2, 0, null, 3, 4, null];
-    const noteIdx = arpPattern[stepInBar];
+    // 3. Pluck arpeggio: pattern A for bars 1–4, pattern B (with octave shimmer) for bars 5–8
+    const pattern = secondHalf ? ARP_B : ARP_A;
+    const noteIdx = pattern[sib];
     if (noteIdx !== null) {
-      const midiNote = chords[bar][noteIdx] + 12;
-      this.triggerLeadPluck(this.midiToFreq(midiNote), now, stepDur * 1.4);
+      const octave = secondHalf && sib % 8 === 0 ? 24 : 12;
+      const pan = ((sib >> 1) % 2 === 0 ? -1 : 1) * 0.38;
+      this.triggerPluck(midiToFreq(chord[noteIdx] + octave), time, STEP_DUR * 1.5, sib % 4 === 0 ? 1 : 0.78, pan);
     }
 
-    // 4. Chill 80s Synthwave Drums
-    if (stepInBar === 0 || stepInBar === 8 || (bar % 2 === 1 && stepInBar === 10)) {
-      this.triggerKick(now);
+    // 4. Sparse lead phrase, bars 5–8 only
+    for (const [leadBar, leadStep, midi, len] of LEAD_PHRASE) {
+      if (leadBar === bar && leadStep === sib) {
+        this.triggerLead(midiToFreq(midi), time, STEP_DUR * len);
+      }
     }
-    if (stepInBar === 4 || stepInBar === 12) {
-      this.triggerGatedSnare(now);
+
+    // 5. Drums: kick 1 & 3 (+ pickup on odd bars), gated snare 2 & 4, 8th hats, open hat into each 4-bar turn
+    if (sib === 0 || sib === 8 || (bar % 2 === 1 && sib === 10)) {
+      this.triggerKick(time);
+      this.duck(time);
     }
-    if (stepInBar % 2 === 0) {
-      this.triggerHat(now, stepInBar % 4 === 2 ? 0.08 : 0.04);
+    if (sib === 4 || sib === 12) {
+      this.triggerSnare(time, 1);
+    }
+    if (lastBar && sib >= 13) {
+      this.triggerSnare(time, 0.5 + (sib - 13) * 0.2); // three-hit fill into the loop restart
+    }
+    if (sib % 2 === 0) {
+      const accent = sib % 4 === 2 ? 0.85 : 0.5;
+      this.triggerHat(time + (Math.random() - 0.5) * 0.004, accent, false);
+    }
+    if (sib === 14 && bar % 4 === 3) {
+      this.triggerHat(time, 0.75, true);
     }
   }
 
-  triggerPadChord(midiNotes, time, duration) {
-    const chordGain = this.ctx.createGain();
-    chordGain.gain.setValueAtTime(0.001, time);
-    chordGain.gain.linearRampToValueAtTime(0.085, time + 0.6);
-    chordGain.gain.setValueAtTime(0.075, time + duration - 0.8);
-    chordGain.gain.exponentialRampToValueAtTime(0.0008, time + duration);
+  duck(time) {
+    const g = this.duckBus.gain;
+    g.cancelScheduledValues(time);
+    g.setValueAtTime(1, time);
+    g.linearRampToValueAtTime(0.5, time + 0.014);
+    g.setTargetAtTime(1, time + 0.05, 0.11);
+  }
 
-    const filter = this.ctx.createBiquadFilter();
+  // ==========================================================================
+  // Voices
+  // ==========================================================================
+  noiseSource(time, duration) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.start(time, Math.random() * 1.5, duration);
+    return src;
+  }
+
+  triggerPad(midiNotes, time, duration, brightness = 1) {
+    const ctx = this.ctx;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, time);
+    env.gain.linearRampToValueAtTime(0.05, time + 0.55);
+    env.gain.setValueAtTime(0.046, time + duration - 0.9);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.1);
+
+    const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(650, time);
-    filter.frequency.linearRampToValueAtTime(1450, time + duration * 0.5);
-    filter.frequency.linearRampToValueAtTime(700, time + duration);
-    filter.Q.value = 1.5;
+    filter.frequency.setValueAtTime(480, time);
+    filter.frequency.linearRampToValueAtTime(1500 * brightness, time + duration * 0.5);
+    filter.frequency.linearRampToValueAtTime(620, time + duration);
+    filter.Q.value = 1.2;
 
-    chordGain.connect(filter);
-    filter.connect(this.masterGain);
-    filter.connect(this.reverbNode);
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.6;
 
+    env.connect(filter);
+    filter.connect(this.padBus);
+    filter.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+
+    const subLevel = ctx.createGain();
+    subLevel.gain.value = 0.45;
+    subLevel.connect(env);
+
+    const stopAt = time + duration + 0.15;
     midiNotes.forEach((note) => {
-      [-9, 9].forEach((detune) => {
-        const osc = this.ctx.createOscillator();
-        osc.type = detune < 0 ? 'sawtooth' : 'triangle';
-        osc.frequency.setValueAtTime(this.midiToFreq(note), time);
+      const freq = midiToFreq(note);
+      [-8, 8].forEach((detune) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(freq, time);
         osc.detune.value = detune;
-        osc.connect(chordGain);
+        osc.connect(env);
         osc.start(time);
-        osc.stop(time + duration + 0.05);
+        osc.stop(stopAt);
       });
+      const under = ctx.createOscillator();
+      under.type = 'triangle';
+      under.frequency.setValueAtTime(freq / 2, time);
+      under.connect(subLevel);
+      under.start(time);
+      under.stop(stopAt);
     });
   }
 
-  triggerBass(freq, time, duration, vel = 0.6) {
-    const osc = this.ctx.createOscillator();
-    const sub = this.ctx.createOscillator();
+  triggerBass(freq, time, duration, vel = 0.7) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const sub = ctx.createOscillator();
     osc.type = 'sawtooth';
     sub.type = 'sine';
     osc.frequency.setValueAtTime(freq, time);
     sub.frequency.setValueAtTime(freq, time);
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(520, time);
+    filter.frequency.setValueAtTime(190 + vel * 560, time);
     filter.frequency.exponentialRampToValueAtTime(110, time + duration);
-    filter.Q.value = 4.2;
+    filter.Q.value = 3.2;
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.24 * vel, time);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(0.26 * vel, time + 0.004);
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
 
+    const subGain = ctx.createGain();
+    subGain.gain.value = 0.3;
+
     osc.connect(filter);
-    sub.connect(filter);
+    sub.connect(subGain);
+    subGain.connect(filter);
     filter.connect(gain);
-    gain.connect(this.masterGain);
+    gain.connect(this.bassDrive);
 
     osc.start(time);
     sub.start(time);
@@ -273,100 +513,211 @@ export class CyberAudioEngine {
     sub.stop(time + duration + 0.02);
   }
 
-  triggerLeadPluck(freq, time, duration) {
-    const osc = this.ctx.createOscillator();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(freq, time);
+  triggerPluck(freq, time, duration, vel = 1, pan = 0) {
+    const ctx = this.ctx;
+    const saw = ctx.createOscillator();
+    saw.type = 'sawtooth';
+    saw.frequency.setValueAtTime(freq, time);
+    saw.detune.value = -5;
+    const square = ctx.createOscillator();
+    square.type = 'square';
+    square.frequency.setValueAtTime(freq, time);
+    square.detune.value = 5;
+    const squareLevel = ctx.createGain();
+    squareLevel.gain.value = 0.35;
 
-    const filter = this.ctx.createBiquadFilter();
+    const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(2800, time);
-    filter.frequency.exponentialRampToValueAtTime(450, time + duration);
+    filter.frequency.setValueAtTime(2200 + 1400 * vel, time);
+    filter.frequency.exponentialRampToValueAtTime(420, time + duration);
+    filter.Q.value = 0.9;
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.001, time);
-    gain.gain.linearRampToValueAtTime(0.09, time + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.0008, time + duration);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(0.07 * vel, time + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0005, time + duration);
 
-    osc.connect(filter);
+    const delayAmt = ctx.createGain();
+    delayAmt.gain.value = 0.45;
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.35;
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+
+    saw.connect(filter);
+    square.connect(squareLevel);
+    squareLevel.connect(filter);
+    filter.connect(gain);
+    gain.connect(panner);
+    panner.connect(this.duckBus);
+    gain.connect(delayAmt);
+    delayAmt.connect(this.delayNode);
+    gain.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+
+    saw.start(time);
+    square.start(time);
+    saw.stop(time + duration + 0.02);
+    square.stop(time + duration + 0.02);
+  }
+
+  triggerLead(freq, time, duration) {
+    const ctx = this.ctx;
+    const glideFrom = this.lastLeadFreq || freq;
+    this.lastLeadFreq = freq;
+
+    const vibrato = ctx.createOscillator();
+    vibrato.type = 'sine';
+    vibrato.frequency.value = 5.2;
+    const vibratoDepth = ctx.createGain();
+    vibratoDepth.gain.setValueAtTime(0, time);
+    vibratoDepth.gain.linearRampToValueAtTime(7, time + 0.5); // cents, swells in like a player would
+    vibrato.connect(vibratoDepth);
+
+    const voices = [-6, 6].map((detune) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(glideFrom, time);
+      osc.frequency.exponentialRampToValueAtTime(freq, time + 0.07);
+      osc.detune.value = detune;
+      vibratoDepth.connect(osc.detune);
+      return osc;
+    });
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1700, time);
+    filter.frequency.exponentialRampToValueAtTime(1100, time + duration);
+    filter.Q.value = 1.4;
+
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(0.032, time + 0.09);
+    gain.gain.setValueAtTime(0.03, time + duration - 0.2);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.05);
+
+    const delayAmt = ctx.createGain();
+    delayAmt.gain.value = 0.4;
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.55;
+
+    voices.forEach((osc) => osc.connect(filter));
     filter.connect(gain);
     gain.connect(this.masterGain);
-    gain.connect(this.delayNode);
-    gain.connect(this.reverbNode);
+    gain.connect(delayAmt);
+    delayAmt.connect(this.delayNode);
+    gain.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
 
-    osc.start(time);
-    osc.stop(time + duration + 0.02);
+    const stopAt = time + duration + 0.1;
+    vibrato.start(time);
+    vibrato.stop(stopAt);
+    voices.forEach((osc) => {
+      osc.start(time);
+      osc.stop(stopAt);
+    });
   }
 
   triggerKick(time) {
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.frequency.setValueAtTime(135, time);
-    osc.frequency.exponentialRampToValueAtTime(36, time + 0.12);
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(160, time);
+    osc.frequency.exponentialRampToValueAtTime(48, time + 0.085);
 
-    gain.gain.setValueAtTime(0.55, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.28);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(0.55, time + 0.002);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.27);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
     osc.start(time);
     osc.stop(time + 0.3);
+
+    // Beater click so the kick reads on phone speakers that cannot reproduce 44 Hz
+    const click = this.noiseSource(time, 0.015);
+    const clickFilter = ctx.createBiquadFilter();
+    clickFilter.type = 'highpass';
+    clickFilter.frequency.value = 2600;
+    const clickGain = ctx.createGain();
+    clickGain.gain.setValueAtTime(0.11, time);
+    clickGain.gain.exponentialRampToValueAtTime(0.001, time + 0.014);
+    click.connect(clickFilter);
+    clickFilter.connect(clickGain);
+    clickGain.connect(this.masterGain);
   }
 
-  triggerGatedSnare(time) {
-    // 80s gated noise burst + body tone
-    const bufferSize = this.ctx.sampleRate * 0.22;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
+  triggerSnare(time, vel = 1) {
+    const ctx = this.ctx;
+    // 80s gated noise burst: holds flat for 90 ms, then is cut
+    const noise = this.noiseSource(time, 0.24);
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.setValueAtTime(1900, time);
+    band.Q.value = 0.75;
 
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+    const gate = ctx.createGain();
+    gate.gain.setValueAtTime(0.2 * vel, time);
+    gate.gain.setValueAtTime(0.17 * vel, time + 0.09);
+    gate.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
 
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(1600, time);
-    filter.Q.value = 0.8;
+    noise.connect(band);
+    band.connect(gate);
+    gate.connect(this.masterGain);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.18, time);
-    gain.gain.setValueAtTime(0.14, time + 0.11);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.21);
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.5;
+    gate.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
 
-    noise.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.masterGain);
-    gain.connect(this.reverbNode);
-    noise.start(time);
+    // Body tone underneath the noise
+    const body = ctx.createOscillator();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(205, time);
+    body.frequency.exponentialRampToValueAtTime(160, time + 0.09);
+    const bodyGain = ctx.createGain();
+    bodyGain.gain.setValueAtTime(0.17 * vel, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+    body.connect(bodyGain);
+    bodyGain.connect(this.masterGain);
+    body.start(time);
+    body.stop(time + 0.14);
   }
 
-  triggerHat(time, level = 0.05) {
-    const bufferSize = this.ctx.sampleRate * 0.05;
-    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = Math.random() * 2 - 1;
-    }
-    const noise = this.ctx.createBufferSource();
-    noise.buffer = buffer;
+  triggerHat(time, vel = 0.6, open = false) {
+    const ctx = this.ctx;
+    const decay = open ? 0.26 : 0.045;
+    const noise = this.noiseSource(time, decay + 0.02);
 
-    const hp = this.ctx.createBiquadFilter();
+    const hp = ctx.createBiquadFilter();
     hp.type = 'highpass';
-    hp.frequency.setValueAtTime(7500, time);
+    hp.frequency.setValueAtTime(8200, time);
 
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(level, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.045);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.085 * vel, time);
+    gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = open ? -0.3 : 0.22;
 
     noise.connect(hp);
     hp.connect(gain);
-    gain.connect(this.masterGain);
-    noise.start(time);
+    gain.connect(panner);
+    panner.connect(this.masterGain);
+
+    if (open) {
+      const reverbAmt = ctx.createGain();
+      reverbAmt.gain.value = 0.3;
+      gain.connect(reverbAmt);
+      reverbAmt.connect(this.reverbSend);
+    }
   }
 
-  // --- Google Gemini API Lyria 3.5 Integration ---
+  // ==========================================================================
+  // Google Gemini API — Lyria 3.5
+  // ==========================================================================
   async generateWithLyria({ apiKey, model = 'lyria-3.5', prompt }) {
     const response = await fetch('https://generativelanguage.googleapis.com/v1beta/interactions', {
       method: 'POST',
@@ -419,24 +770,27 @@ export class CyberAudioEngine {
     return blobUrl;
   }
 
-  // Real-time audio metrics for 3D scene & HUD visualizer
+  // ==========================================================================
+  // Real-time metrics for the 3D scene & HUD visualizer
+  // ==========================================================================
   getMetrics() {
     if (!this.analyser || !this.isPlaying) {
       return { bass: 0, mid: 0, high: 0, spectrum: this.freqData };
     }
     this.analyser.getByteFrequencyData(this.freqData);
 
+    // 128 bins at ~172 Hz each: bass 0–690 Hz, mid 690 Hz–4.1 kHz, high 4.1–13.8 kHz
     let bassSum = 0;
     let midSum = 0;
     let highSum = 0;
-    for (let i = 0; i < 8; i++) bassSum += this.freqData[i];
-    for (let i = 8; i < 24; i++) midSum += this.freqData[i];
-    for (let i = 24; i < 48; i++) highSum += this.freqData[i];
+    for (let i = 0; i < 4; i++) bassSum += this.freqData[i];
+    for (let i = 4; i < 24; i++) midSum += this.freqData[i];
+    for (let i = 24; i < 80; i++) highSum += this.freqData[i];
 
     return {
-      bass: (bassSum / (8 * 255)),
-      mid: (midSum / (16 * 255)),
-      high: (highSum / (24 * 255)),
+      bass: bassSum / (4 * 255),
+      mid: midSum / (20 * 255),
+      high: highSum / (56 * 255),
       spectrum: this.freqData
     };
   }

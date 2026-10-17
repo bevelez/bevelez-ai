@@ -4,7 +4,6 @@ import * as THREE from 'three';
 // 1. HI-FI RUSH / DEAD AS DISCO CEL-SHADER + HALFTONE + INVERSE-HULL OUTLINES
 // ============================================================================
 function createSteppedGradientMap() {
-  // 3 distinct stepped tonal quantization bands: [Shadow (46), Midtone (158), Highlight (255)]
   const data = new Uint8Array([46, 158, 255]);
   const tex = new THREE.DataTexture(data, 3, 1, THREE.RedFormat);
   tex.minFilter = THREE.NearestFilter;
@@ -15,14 +14,8 @@ function createSteppedGradientMap() {
 
 export const toonGradientMap = createSteppedGradientMap();
 
-// Cache for inverted-hull outline materials by thickness and color
 const outlineMaterialCache = new Map();
 
-/**
- * Creates or retrieves a cached inverted-hull outline ShaderMaterial using
- * view-space normal-displacement vertex extrusion and BackSide culling.
- * Eliminates non-uniform scaling distortions across elongated limbs.
- */
 export function createOutlineMaterial(thickness = 0.038, colorHex = 0x060508) {
   const metricThickness = thickness * 0.16;
   const cacheKey = `${Number(metricThickness).toFixed(4)}_${colorHex}`;
@@ -38,9 +31,14 @@ export function createOutlineMaterial(thickness = 0.038, colorHex = 0x060508) {
     vertexShader: `
       uniform float uThickness;
       void main() {
-        // Displace vertices along vertex normal in view space
-        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
-        vec3 mvNormal = normalize( normalMatrix * normal );
+        vec4 localPos = vec4( position, 1.0 );
+        vec3 localNormal = normal;
+        #ifdef USE_INSTANCING
+          localPos = instanceMatrix * localPos;
+          localNormal = mat3( instanceMatrix ) * localNormal;
+        #endif
+        vec4 mvPosition = modelViewMatrix * localPos;
+        vec3 mvNormal = normalize( normalMatrix * localNormal );
         mvPosition.xyz += mvNormal * uThickness;
         gl_Position = projectionMatrix * mvPosition;
       }
@@ -60,49 +58,148 @@ export function createOutlineMaterial(thickness = 0.038, colorHex = 0x060508) {
   return mat;
 }
 
-/**
- * Creates a high-fidelity cel-shaded material with 3-tier stepped toon lighting,
- * 45° rotated Ben-Day halftone screen dot dithering in the shadow-to-midtone transition,
- * and optional specular cel glints for metallic/gloss surfaces.
- */
+const basicMaterialCache = new Map();
+
+export function getSharedBasicMaterial(colorHex, options = {}) {
+  const transparent = Boolean(options.transparent);
+  const opacity = options.opacity !== undefined ? Number(options.opacity) : 1.0;
+  const side = options.side || THREE.FrontSide;
+  const depthWrite = options.depthWrite !== undefined ? Boolean(options.depthWrite) : true;
+  const mapKey = options.map ? (options.map.uuid || options.map.id || 'tex') : 'none';
+  const cacheKey = `${colorHex}_${mapKey}_${transparent}_${opacity}_${side}_${depthWrite}`;
+  let mat = basicMaterialCache.get(cacheKey);
+  if (!mat) {
+    mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      transparent,
+      opacity,
+      side,
+      depthWrite,
+      ...(options.map ? { map: options.map } : {})
+    });
+    basicMaterialCache.set(cacheKey, mat);
+  }
+  return mat;
+}
+
 const celMaterialCache = new Map();
 
 export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x000000, options = {}) {
+  if (mapTex && typeof mapTex === 'object' && !mapTex.isTexture && !(typeof THREE !== 'undefined' && THREE.Texture && mapTex instanceof THREE.Texture)) {
+    options = mapTex;
+    mapTex = options.map ?? null;
+    emissiveHex = options.emissive ?? 0x000000;
+  }
+
   const isMetallic = typeof options === 'boolean' ? options : !!options.isMetallic;
   const glintThreshold = options.glintThreshold ?? 0.88;
   const glintIntensity = options.glintIntensity ?? (isMetallic ? 1.5 : 0.0);
-  const creviceAO = options.creviceAO ?? (options.isArchitectural ? 1.0 : 0.0);
+  const creviceAO = options.creviceAO ? 1.0 : 0.0;
   const rimIntensity = options.rimIntensity ?? (options.isCharacter ? 0.85 : 0.0);
 
+  const bumpMap = options.bumpMap ?? null;
+  const bumpScale = options.bumpScale ?? 0.03;
+  const normalMap = options.normalMap ?? null;
+  const normalScale = options.normalScale ?? new THREE.Vector2(1, 1);
+  const anisotropy = options.anisotropy ?? 4;
+
+  if (mapTex && typeof mapTex === 'object') {
+    mapTex.anisotropy = Math.max(mapTex.anisotropy || 1, anisotropy);
+  }
+  if (bumpMap && typeof bumpMap === 'object') {
+    bumpMap.anisotropy = Math.max(bumpMap.anisotropy || 1, anisotropy);
+  }
+  if (normalMap && typeof normalMap === 'object') {
+    normalMap.anisotropy = Math.max(normalMap.anisotropy || 1, anisotropy);
+  }
+  if (options.aoMap && typeof options.aoMap === 'object') {
+    options.aoMap.anisotropy = Math.max(options.aoMap.anisotropy || 1, anisotropy);
+  }
+  if (options.lightMap && typeof options.lightMap === 'object') {
+    options.lightMap.anisotropy = Math.max(options.lightMap.anisotropy || 1, anisotropy);
+  }
+
   const texKey = mapTex ? (mapTex.uuid || mapTex.id || 'tex') : '0';
-  const cacheKey = `${colorHex}_${texKey}_${emissiveHex}_${isMetallic}_${glintThreshold}_${glintIntensity}_${creviceAO}_${rimIntensity}`;
+  const bumpKey = bumpMap ? (bumpMap.uuid || bumpMap.id || 'bump') : '0';
+  const normKey = normalMap ? (normalMap.uuid || normalMap.id || 'norm') : '0';
+  const aoKey = options.aoMap ? (options.aoMap.uuid || options.aoMap.id || 'ao') : '0';
+  const lightKey = options.lightMap ? (options.lightMap.uuid || options.lightMap.id || 'lm') : '0';
+  const sideVal = options.side ?? THREE.FrontSide;
+  const vertexColors = Boolean(options.vertexColors);
+  const cacheKey = `${colorHex}_${texKey}_${emissiveHex}_${isMetallic}_${glintThreshold}_${glintIntensity}_${creviceAO}_${rimIntensity}_${bumpKey}_${bumpScale}_${normKey}_${anisotropy}_${aoKey}_${lightKey}_${sideVal}_${vertexColors ? 1 : 0}`;
   if (celMaterialCache.has(cacheKey)) {
     return celMaterialCache.get(cacheKey);
   }
 
-  const mat = new THREE.MeshToonMaterial({
+  const matConfig = {
     color: colorHex,
     gradientMap: toonGradientMap,
     map: mapTex,
-    emissive: emissiveHex
-  });
+    emissive: emissiveHex,
+    side: sideVal,
+    vertexColors
+  };
+  if (bumpMap) {
+    matConfig.bumpMap = bumpMap;
+    matConfig.bumpScale = bumpScale;
+  }
+  if (normalMap) {
+    matConfig.normalMap = normalMap;
+    matConfig.normalScale = normalScale;
+  }
+  if (options.aoMap) {
+    matConfig.aoMap = options.aoMap;
+    matConfig.aoMapIntensity = options.aoMapIntensity ?? 1.0;
+  }
+  if (options.lightMap) {
+    matConfig.lightMap = options.lightMap;
+    matConfig.lightMapIntensity = options.lightMapIntensity ?? 1.0;
+  }
+
+  const mat = new THREE.MeshToonMaterial(matConfig);
+  mat.userData.celParams = {
+    emissiveHex,
+    isMetallic,
+    glintThreshold,
+    glintIntensity,
+    creviceAO,
+    rimIntensity,
+    sideVal
+  };
+  if (bumpMap) {
+    mat.bumpMap = bumpMap;
+    mat.bumpScale = bumpScale;
+  }
+  if (normalMap) {
+    mat.normalMap = normalMap;
+    mat.normalScale = normalScale;
+  }
+  if (options.aoMap) {
+    mat.aoMap = options.aoMap;
+    mat.aoMapIntensity = options.aoMapIntensity ?? 1.0;
+  }
+  if (options.lightMap) {
+    mat.lightMap = options.lightMap;
+    mat.lightMapIntensity = options.lightMapIntensity ?? 1.0;
+  }
 
   mat.customProgramCacheKey = () => {
     let key = isMetallic ? 'cel_glint_metallic' : 'cel_matte';
     if (creviceAO > 0.0) key += '_crevice';
     if (rimIntensity > 0.0) key += '_rim';
+    if (bumpMap) key += '_bump';
+    if (normalMap) key += '_norm';
+    if (vertexColors) key += '_vc';
     return key;
   };
 
   mat.onBeforeCompile = (shader) => {
-    // Inject specular glint, crevice AO & rim uniforms
     shader.uniforms.uGlintIntensity = { value: glintIntensity };
     shader.uniforms.uGlintThreshold = { value: glintThreshold };
     shader.uniforms.uCreviceAO = { value: creviceAO };
     shader.uniforms.uRimIntensity = { value: rimIntensity };
     mat.userData.shader = shader;
 
-    // Inject varying vWorldPos into vertex shader
     shader.vertexShader = shader.vertexShader.replace(
       '#include <common>',
       `#include <common>
@@ -112,11 +209,14 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
     shader.vertexShader = shader.vertexShader.replace(
       '#include <worldpos_vertex>',
       `#include <worldpos_vertex>
-      vWorldPos = (modelMatrix * vec4( transformed, 1.0 )).xyz;
+      #ifdef USE_INSTANCING
+        vWorldPos = (modelMatrix * instanceMatrix * vec4( transformed, 1.0 )).xyz;
+      #else
+        vWorldPos = (modelMatrix * vec4( transformed, 1.0 )).xyz;
+      #endif
       `
     );
 
-    // Inject varying & uniforms into fragment shader
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <common>',
       `#include <common>
@@ -126,7 +226,6 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
       `
     );
 
-    // 1. Replace gradientmap_pars_fragment with 3-tier stepped lighting + 45° Ben-Day halftone dither
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <gradientmap_pars_fragment>',
       `
@@ -137,18 +236,15 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
       vec3 getGradientIrradiance( vec3 normal, vec3 lightDirection ) {
         float NdotL = clamp( dot( normal, lightDirection ), 0.0, 1.0 );
 
-        // 1. 3-Tier Stepped Cel Lighting Quantization
         float celFactor;
         if ( NdotL < 0.25 ) {
-          celFactor = 0.28; // Deep shadow tier
+          celFactor = 0.28;
         } else if ( NdotL < 0.65 ) {
-          celFactor = 0.62; // Midtone tier
+          celFactor = 0.62;
         } else {
-          celFactor = 1.00; // Highlight tier
+          celFactor = 1.00;
         }
 
-        // 2. 45-degree rotated Ben-Day halftone screen dot dithering in the shadow-to-midtone transition zone
-        // Condition: NdotL between 0.18 and 0.42, cell distance < 1.65, multiplier 0.65
         vec2 rotCoord = vec2(
           gl_FragCoord.x * 0.70710678 - gl_FragCoord.y * 0.70710678,
           gl_FragCoord.x * 0.70710678 + gl_FragCoord.y * 0.70710678
@@ -157,7 +253,7 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
         float dotDist = length( cell );
 
         if ( NdotL >= 0.18 && NdotL <= 0.42 && dotDist < 1.65 ) {
-          celFactor *= 0.65; // Printed comic ink stipple
+          celFactor *= 0.65;
         }
 
         return vec3( celFactor );
@@ -165,7 +261,6 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
       `
     );
 
-    // 2. Replace lights_toon_pars_fragment to add hard-edged specular cel glints for metallic assets
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <lights_toon_pars_fragment>',
       `
@@ -201,20 +296,17 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
       `
     );
 
-    // 3. Inject height-based vertical crevice AO and stylized cel Fresnel rim hook
     shader.fragmentShader = shader.fragmentShader.replace(
       '#include <lights_fragment>',
       `
       #include <lights_fragment>
 
-      // Stylized Height-Based Crevice AO for vertical ground contact
       if ( uCreviceAO > 0.0 ) {
         float creviceAO = clamp( smoothstep( -0.1, 1.25, vWorldPos.y ) * 0.45 + 0.55, 0.45, 1.0 );
         reflectedLight.directDiffuse *= creviceAO;
         reflectedLight.indirectDiffuse *= creviceAO;
       }
 
-      // Stylized Cel Fresnel Silhouette Rim Hook
       if ( uRimIntensity > 0.0 ) {
         vec3 viewDir = normalize( -vViewPosition );
         float rimDot = 1.0 - max( 0.0, dot( normal, viewDir ) );
@@ -230,9 +322,6 @@ export function createCelMaterial(colorHex, mapTex = null, emissiveHex = 0x00000
   return mat;
 }
 
-/**
- * Convenience helper to create a metallic cel material with hard specular cel glints.
- */
 export function createMetallicCelMaterial(colorHex, mapTex = null, emissiveHex = 0x000000, options = {}) {
   return createCelMaterial(colorHex, mapTex, emissiveHex, {
     isMetallic: true,
@@ -242,25 +331,370 @@ export function createMetallicCelMaterial(colorHex, mapTex = null, emissiveHex =
   });
 }
 
-/**
- * Wraps a geometry with cel material and an inverted-hull normal-displaced outline mesh.
- */
+let _fighterShadowScope = false;
+
 export function createHiFiMesh(geometry, colorHex, outlineThickness = 0.038, mapTex = null, emissiveHex = 0x000000, options = {}) {
   const mat = createCelMaterial(colorHex, mapTex, emissiveHex, options);
   const mesh = new THREE.Mesh(geometry, mat);
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
 
-  if (outlineThickness > 0) {
+  if (options && options.castShadow !== undefined) {
+    mesh.castShadow = Boolean(options.castShadow);
+  } else if (_fighterShadowScope) {
+    if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+    const r = geometry.boundingSphere ? geometry.boundingSphere.radius : 0;
+    mesh.castShadow = r >= 0.095;
+  } else {
+    mesh.castShadow = false;
+  }
+  mesh.receiveShadow = (options && options.receiveShadow !== undefined) ? Boolean(options.receiveShadow) : false;
+
+  const enableOutline = (options && (options.noOutline || options.outline === false)) || outlineThickness <= 0 ? false : true;
+  if (enableOutline) {
     const outlineMat = createOutlineMaterial(outlineThickness, (options && options.outlineColor) || 0x060508);
     const outline = new THREE.Mesh(geometry, outlineMat);
     outline.castShadow = false;
     outline.receiveShadow = false;
     outline.renderOrder = 1;
-    // Note: Do not scale outline! The vertex shader displaces vertices along view-space normals.
     mesh.add(outline);
   }
   return mesh;
+}
+
+export function mergeStaticGroupMeshes(rootGroup, preservePredicate = null) {
+  if (!rootGroup) return rootGroup;
+  rootGroup.updateMatrixWorld(true);
+  const rootInv = rootGroup.matrixWorld.clone().invert();
+
+  const preservedObjects = new Set();
+  if (preservePredicate) {
+    rootGroup.traverse((obj) => {
+      if (obj !== rootGroup && preservePredicate(obj)) {
+        obj.traverse((sub) => preservedObjects.add(sub));
+      }
+    });
+  }
+
+  function isVisibleFromRoot(node) {
+    let cur = node;
+    while (cur && cur !== rootGroup) {
+      if (!cur.visible) return false;
+      cur = cur.parent;
+    }
+    return true;
+  }
+
+  function isUntexturedSolid(mat) {
+    if (!mat || !mat.color) return false;
+    if (mat.map || mat.bumpMap || mat.normalMap || mat.aoMap || mat.lightMap) return false;
+    if (mat.transparent && (mat.opacity ?? 1) < 0.99) return false;
+    const hex = mat.color.getHex();
+    if (hex === 0x11aa22 || hex === 0x2233cc || hex === 0xcc7744) return false;
+    return true;
+  }
+
+  function getStructuralMatKey(mat) {
+    if (!mat) return 'null';
+    const canVColor = isUntexturedSolid(mat);
+    const col = canVColor ? 'VCOLOR' : (mat.color ? mat.color.getHexString() : 'nc');
+    const emi = mat.emissive ? mat.emissive.getHexString() : 'ne';
+    const mapId = mat.map ? (mat.map.uuid || mat.map.id) : 'nm';
+    const bumpId = mat.bumpMap ? (mat.bumpMap.uuid || mat.bumpMap.id) : 'nb';
+    const normId = mat.normalMap ? (mat.normalMap.uuid || mat.normalMap.id) : 'nn';
+    const aoId = mat.aoMap ? (mat.aoMap.uuid || mat.aoMap.id) : 'nao';
+    const lmId = mat.lightMap ? (mat.lightMap.uuid || mat.lightMap.id) : 'nlm';
+    const rough = mat.roughness !== undefined ? Number(mat.roughness).toFixed(2) : '';
+    const metal = mat.metalness !== undefined ? Number(mat.metalness).toFixed(2) : '';
+    const trans = mat.transparent ? 1 : 0;
+    const opac = Number(mat.opacity ?? 1).toFixed(2);
+    const side = mat.side ?? 0;
+    const prog = typeof mat.customProgramCacheKey === 'function' ? mat.customProgramCacheKey() : '';
+    return `${mat.type}_${col}_${emi}_${mapId}_${bumpId}_${normId}_${aoId}_${lmId}_${rough}_${metal}_${trans}_${opac}_${side}_${prog}`;
+  }
+
+  const sharedOutlineMat = createOutlineMaterial(0.030, 0x060508);
+  const buckets = new Map();
+  const meshesToRemove = [];
+
+  rootGroup.traverse((obj) => {
+    if (!obj.isMesh || preservedObjects.has(obj)) return;
+    if (!isVisibleFromRoot(obj)) return;
+    if (!obj.geometry || !obj.geometry.attributes || !obj.geometry.attributes.position) return;
+    if (Array.isArray(obj.material)) return;
+    if (obj.material && obj.material.transparent && obj.material.blending === THREE.AdditiveBlending) return;
+
+    const isOutlineMesh = (obj.renderOrder === 1) && obj.material && obj.material.side === THREE.BackSide;
+    const mat = isOutlineMesh ? sharedOutlineMat : obj.material;
+    const key = isOutlineMesh
+      ? '__SINGLE_OUTLINE_PASS__'
+      : `${getStructuralMatKey(mat)}_${obj.renderOrder || 0}`;
+
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      bucket = {
+        material: mat,
+        isOutline: isOutlineMesh,
+        canVColor: !isOutlineMesh && isUntexturedSolid(mat),
+        colorHexSet: new Set(),
+        castShadow: isOutlineMesh ? false : Boolean(obj.castShadow),
+        receiveShadow: isOutlineMesh ? false : Boolean(obj.receiveShadow),
+        renderOrder: isOutlineMesh ? 1 : (obj.renderOrder || 0),
+        geoms: [],
+        meshes: [],
+        preservedName: ''
+      };
+      buckets.set(key, bucket);
+    } else if (!isOutlineMesh) {
+      if (obj.castShadow) bucket.castShadow = true;
+      if (obj.receiveShadow) bucket.receiveShadow = true;
+    }
+
+    if (bucket.canVColor && mat.color) {
+      bucket.colorHexSet.add(mat.color.getHex());
+    }
+
+    let geom = obj.geometry.clone();
+    if (geom.index) {
+      geom = geom.toNonIndexed();
+    }
+    const relMatrix = rootInv.clone().multiply(obj.matrixWorld);
+    geom.applyMatrix4(relMatrix);
+
+    const vCount = geom.attributes.position.count;
+    if (!geom.attributes.normal) {
+      geom.computeVertexNormals();
+    } else {
+      geom.normalizeNormals();
+    }
+    if (!geom.attributes.uv) {
+      geom.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(vCount * 2), 2));
+    }
+    if (!geom.attributes.uv2) {
+      const uvArr = geom.attributes.uv.array;
+      geom.setAttribute('uv2', new THREE.BufferAttribute(new Float32Array(uvArr), 2));
+    }
+    if (bucket.canVColor && mat.color) {
+      const cArr = new Float32Array(vCount * 3);
+      const cr = mat.color.r;
+      const cg = mat.color.g;
+      const cb = mat.color.b;
+      for (let v = 0; v < vCount; v++) {
+        cArr[v * 3] = cr;
+        cArr[v * 3 + 1] = cg;
+        cArr[v * 3 + 2] = cb;
+      }
+      geom.setAttribute('color', new THREE.BufferAttribute(cArr, 3));
+    }
+
+    bucket.geoms.push(geom);
+    bucket.meshes.push(obj);
+    if (obj.name && !bucket.preservedName) {
+      bucket.preservedName = obj.name;
+    }
+  });
+
+  buckets.forEach((bucket) => {
+    if (bucket.geoms.length < 2) {
+      if (bucket.meshes.length === 1) {
+        const m = bucket.meshes[0];
+        if (m.castShadow && m.geometry) {
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          const r = m.geometry.boundingSphere ? m.geometry.boundingSphere.radius : 0;
+          if (r < 0.14) m.castShadow = false;
+        }
+      }
+      return;
+    }
+
+    let totalVerts = 0;
+    for (let i = 0; i < bucket.geoms.length; i++) {
+      totalVerts += bucket.geoms[i].attributes.position.count;
+    }
+
+    const useVColor = bucket.canVColor && bucket.colorHexSet.size > 1;
+    const posArr = new Float32Array(totalVerts * 3);
+    const normArr = new Float32Array(totalVerts * 3);
+    const uvArr = new Float32Array(totalVerts * 2);
+    const uv2Arr = new Float32Array(totalVerts * 2);
+    const colArr = useVColor ? new Float32Array(totalVerts * 3) : null;
+
+    let vOffset = 0;
+    for (let i = 0; i < bucket.geoms.length; i++) {
+      const g = bucket.geoms[i];
+      const count = g.attributes.position.count;
+      posArr.set(g.attributes.position.array.subarray(0, count * 3), vOffset * 3);
+      normArr.set(g.attributes.normal.array.subarray(0, count * 3), vOffset * 3);
+      if (g.attributes.uv && g.attributes.uv.array.length >= count * 2) {
+        uvArr.set(g.attributes.uv.array.subarray(0, count * 2), vOffset * 2);
+      }
+      if (g.attributes.uv2 && g.attributes.uv2.array.length >= count * 2) {
+        uv2Arr.set(g.attributes.uv2.array.subarray(0, count * 2), vOffset * 2);
+      }
+      if (useVColor && g.attributes.color && g.attributes.color.array.length >= count * 3) {
+        colArr.set(g.attributes.color.array.subarray(0, count * 3), vOffset * 3);
+      }
+      vOffset += count;
+    }
+
+    const mergedGeom = new THREE.BufferGeometry();
+    mergedGeom.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+    mergedGeom.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+    mergedGeom.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+    mergedGeom.setAttribute('uv2', new THREE.BufferAttribute(uv2Arr, 2));
+    if (useVColor) {
+      mergedGeom.setAttribute('color', new THREE.BufferAttribute(colArr, 3));
+    }
+    mergedGeom.computeBoundingSphere();
+
+    let finalMat = bucket.material;
+    if (useVColor) {
+      if (finalMat.userData && finalMat.userData.celParams) {
+        const p = finalMat.userData.celParams;
+        finalMat = createCelMaterial(0xffffff, null, p.emissiveHex, {
+          isMetallic: p.isMetallic,
+          glintThreshold: p.glintThreshold,
+          glintIntensity: p.glintIntensity,
+          creviceAO: p.creviceAO > 0,
+          rimIntensity: p.rimIntensity,
+          side: p.sideVal,
+          vertexColors: true
+        });
+      } else {
+        finalMat = finalMat.clone();
+        if (finalMat.color) finalMat.color.setHex(0xffffff);
+        finalMat.vertexColors = true;
+      }
+    }
+
+    const mergedMesh = new THREE.Mesh(mergedGeom, finalMat);
+    const radius = mergedGeom.boundingSphere ? mergedGeom.boundingSphere.radius : 0;
+    mergedMesh.castShadow = bucket.castShadow && (radius >= 0.14);
+    mergedMesh.receiveShadow = bucket.receiveShadow;
+    mergedMesh.renderOrder = bucket.renderOrder;
+    if (bucket.preservedName) {
+      mergedMesh.name = bucket.preservedName;
+    }
+    rootGroup.add(mergedMesh);
+
+    for (let i = 0; i < bucket.meshes.length; i++) {
+      meshesToRemove.push(bucket.meshes[i]);
+    }
+  });
+
+  const removeSet = new Set(meshesToRemove);
+  for (let i = 0; i < meshesToRemove.length; i++) {
+    const m = meshesToRemove[i];
+    if (!m.parent) continue;
+    const childrenCopy = [...m.children];
+    for (let c = 0; c < childrenCopy.length; c++) {
+      const child = childrenCopy[c];
+      if (!removeSet.has(child)) {
+        rootGroup.attach(child);
+      }
+    }
+    if (m.parent) {
+      m.parent.remove(m);
+    }
+  }
+
+  return rootGroup;
+}
+
+function optimizeArticulatedRigBones(rig) {
+  if (!rig || !rig.root) return rig;
+  const boneGroups = new Set();
+  [
+    rig.root, rig.hips, rig.torso, rig.headGroup,
+    rig.leftArm, rig.leftElbow, rig.leftHand,
+    rig.rightArm, rig.rightElbow, rig.rightHand,
+    rig.leftLeg, rig.leftKnee, rig.leftAnkle,
+    rig.rightLeg, rig.rightKnee, rig.rightAnkle,
+    rig.jawGroup, rig.visorGroup, rig.chainPendulum, rig.bossCape,
+    rig.leftCoatTail, rig.rightCoatTail, rig.recordDisc, rig.micGroup,
+    rig.vest, rig.medallion, rig.contactShadowDecal
+  ].forEach((b) => {
+    if (b && b.isObject3D) boneGroups.add(b);
+  });
+
+  boneGroups.forEach((bone) => {
+    if (bone === rig.contactShadowDecal) return;
+    mergeStaticGroupMeshes(bone, (obj) => boneGroups.has(obj));
+  });
+  return rig;
+}
+
+/**
+ * Assigns continuous, un-tiled planar UV2 coordinates across geometry bounds.
+ * Eliminates repeating seams and multi-face UV duplication in baked lightmaps and AO.
+ * 
+ * @param {THREE.BufferGeometry} geometry
+ * @param {THREE.Box3|Object|null} bounds
+ * @param {string} plane - 'xz' (default), 'xy', or 'yz'
+ * @returns {THREE.BufferGeometry}
+ */
+export function assignPlanarUV2(geometry, bounds = null, plane = 'xz') {
+  if (!geometry || !geometry.attributes || !geometry.attributes.position) {
+    return geometry;
+  }
+
+  const posAttr = geometry.attributes.position;
+  const count = posAttr.count;
+  const uv2Array = new Float32Array(count * 2);
+
+  let uIdx = 0;
+  let vIdx = 2; // Default 'xz'
+  const p = (plane || 'xz').toLowerCase();
+  if (p === 'xy') {
+    uIdx = 0;
+    vIdx = 1;
+  } else if (p === 'yz' || p === 'zy') {
+    uIdx = 2;
+    vIdx = 1;
+  } else {
+    uIdx = 0;
+    vIdx = 2;
+  }
+
+  let minU, maxU, minV, maxV;
+
+  if (bounds && typeof bounds === 'object') {
+    if (bounds.min !== undefined && bounds.max !== undefined) {
+      const getCoord = (vec, idx) => (idx === 0 ? vec.x : (idx === 1 ? vec.y : vec.z));
+      minU = getCoord(bounds.min, uIdx);
+      maxU = getCoord(bounds.max, uIdx);
+      minV = getCoord(bounds.min, vIdx);
+      maxV = getCoord(bounds.max, vIdx);
+    } else {
+      minU = bounds.minU ?? (uIdx === 0 ? bounds.minX : (uIdx === 1 ? bounds.minY : bounds.minZ));
+      maxU = bounds.maxU ?? (uIdx === 0 ? bounds.maxX : (uIdx === 1 ? bounds.maxY : bounds.maxZ));
+      minV = bounds.minV ?? (vIdx === 0 ? bounds.minX : (vIdx === 1 ? bounds.minY : bounds.minZ));
+      maxV = bounds.maxV ?? (vIdx === 0 ? bounds.maxX : (vIdx === 1 ? bounds.maxY : bounds.maxZ));
+    }
+  }
+
+  if (minU === undefined || maxU === undefined || minV === undefined || maxV === undefined) {
+    if (!geometry.boundingBox) geometry.computeBoundingBox();
+    const bb = geometry.boundingBox;
+    const getCoord = (vec, idx) => (idx === 0 ? vec.x : (idx === 1 ? vec.y : vec.z));
+    minU = minU ?? getCoord(bb.min, uIdx);
+    maxU = maxU ?? getCoord(bb.max, uIdx);
+    minV = minV ?? getCoord(bb.min, vIdx);
+    maxV = maxV ?? getCoord(bb.max, vIdx);
+  }
+
+  const rangeU = (maxU - minU) !== 0 ? (maxU - minU) : 1.0;
+  const rangeV = (maxV - minV) !== 0 ? (maxV - minV) : 1.0;
+
+  for (let i = 0; i < count; i++) {
+    const valU = posAttr.getComponent(i, uIdx);
+    const valV = posAttr.getComponent(i, vIdx);
+    const u = Math.min(1.0, Math.max(0.0, (valU - minU) / rangeU));
+    const v = Math.min(1.0, Math.max(0.0, (valV - minV) / rangeV));
+    uv2Array[i * 2] = u;
+    uv2Array[i * 2 + 1] = v;
+  }
+
+  geometry.setAttribute('uv2', new THREE.BufferAttribute(uv2Array, 2));
+  return geometry;
 }
 
 // ============================================================================
@@ -277,18 +711,27 @@ export function createHiFiMesh(geometry, colorHex, outlineThickness = 0.038, map
  * - u = 0.00 / 1.00 (x = 0 / 1024): Center Back (View 4)
  * - v = i / (slices.length - 1): 0.0 at bottom slice (y = 1024 on canvas) to 1.0 at top slice (y = 0 on canvas)
  */
-export function createSculptedLoftGeometry(slices, radialSegments = 32, frontIsNegZ = true, closeBottom = true, closeTop = true) {
+export function createSculptedLoftGeometry(slices, radialSegments = 18, frontIsNegZ = true, closeBottom = true, closeTop = true) {
+  radialSegments = Math.min(radialSegments, 18);
   const numSlices = slices.length;
+  if (numSlices === 0) return new THREE.BufferGeometry();
+
+  // If slices are defined top-to-bottom (descending Y), reverse them so slice indices increase upwards.
+  // This guarantees counter-clockwise outward-facing triangle winding, valid positive ySpan UVs,
+  // and correct end cap positioning.
+  const isDescending = numSlices > 1 && slices[0][0] > slices[numSlices - 1][0];
+  const effectiveSlices = isDescending ? [...slices].reverse() : slices;
+
   const positions = [];
   const uvs = [];
   const indices = [];
 
-  const yMin = slices[0][0];
-  const yMax = slices[numSlices - 1][0];
+  const yMin = effectiveSlices[0][0];
+  const yMax = effectiveSlices[numSlices - 1][0];
   const ySpan = Math.max(1e-5, yMax - yMin);
 
   for (let i = 0; i < numSlices; i++) {
-    const [y, rx, rzFront, rzBack, cx = 0, cz = 0, p = 2.0] = slices[i];
+    const [y, rx, rzFront, rzBack, cx = 0, cz = 0, p = 2.0] = effectiveSlices[i];
     // Linear vertical UV mapping so v is strictly proportional to 3D height y!
     const v = Math.max(0.0, Math.min(1.0, (y - yMin) / ySpan));
 
@@ -340,8 +783,8 @@ export function createSculptedLoftGeometry(slices, radialSegments = 32, frontIsN
   const wallVertexCount = positions.length / 3;
 
   // Optional end caps so geometry is 100% solid from all angles
-  if (closeBottom && slices.length > 0) {
-    const [y0, , , , cx0 = 0, cz0 = 0] = slices[0];
+  if (closeBottom && effectiveSlices.length > 0) {
+    const [y0, , , , cx0 = 0, cz0 = 0] = effectiveSlices[0];
     const botCenterIdx = positions.length / 3;
     positions.push(cx0, y0, cz0);
     uvs.push(0.5, 0.0);
@@ -350,8 +793,8 @@ export function createSculptedLoftGeometry(slices, radialSegments = 32, frontIsN
     }
   }
 
-  if (closeTop && slices.length > 0) {
-    const [yN, , , , cxN = 0, czN = 0] = slices[numSlices - 1];
+  if (closeTop && effectiveSlices.length > 0) {
+    const [yN, , , , cxN = 0, czN = 0] = effectiveSlices[numSlices - 1];
     const topCenterIdx = positions.length / 3;
     const topRowStart = (numSlices - 1) * ringStride;
     positions.push(cxN, yN, czN);
@@ -1341,6 +1784,7 @@ function createChallengerShinUVTexture() {
 //    Total Height: 2.00m (Soles at y = 0.00m, Hair Crown at y = 2.00m)
 // ============================================================================
 export function buildChallengerModel() {
+  _fighterShadowScope = true;
   const root = new THREE.Group();
 
   // Grounded dynamic contact shadow decal beneath fighter
@@ -1459,12 +1903,12 @@ export function buildChallengerModel() {
     [0.14, 0.168, 0.098, 0.104, 0, 0.002, 2.3],
     [0.19, 0.174, 0.102, 0.108, 0, 0.002, 2.3],
     // Athletic V-Tapered Bomber Jacket Chest (y = 0.20..0.48 -> y_world = 1.31m..1.59m)
-    [0.28, 0.192, 0.112, 0.118, 0, 0.004, 2.3],
-    [0.38, 0.212, 0.118, 0.124, 0, 0.006, 2.4],
-    [0.45, 0.216, 0.112, 0.118, 0, 0.006, 2.4],
-    // Shoulder Slope into Neck Base (y = 0.49..0.52 -> y_world = 1.60m..1.63m)
-    [0.49, 0.165, 0.092, 0.098, 0, 0.004, 2.2],
-    [0.52, 0.095, 0.075, 0.080, 0, 0.002, 2.0]
+    [0.28, 0.190, 0.112, 0.118, 0, 0.004, 2.25],
+    [0.38, 0.204, 0.118, 0.124, 0, 0.006, 2.25],
+    [0.44, 0.194, 0.110, 0.116, 0, 0.005, 2.15],
+    // Smooth Trapezoid Shoulder Slope into Neck Base (y = 0.48..0.52 -> y_world = 1.59m..1.63m)
+    [0.48, 0.164, 0.094, 0.100, 0, 0.004, 2.05],
+    [0.52, 0.095, 0.075, 0.080, 0, 0.002, 2.00]
   ];
   const torsoGeo = createSculptedLoftGeometry(torsoSlices, 36, true, true, true);
   const torsoMesh = createHiFiMesh(torsoGeo, 0xffffff, 0.032, createChallengerTorsoUVTexture());
@@ -1625,12 +2069,14 @@ export function buildChallengerModel() {
   // Full-Volume Rounded Anime Hair Base Cap framing Occiput, Temples, and Crown
   const hairBaseSlices = [
     // [y, rx, rzFront, rzBack, cx, cz, p]
-    [-0.055, 0.082, 0.018, 0.102, 0.0, 0.030, 2.0], // Nape of neck over collar
+    [-0.055, 0.082, 0.018, 0.102, 0.0, 0.030, 2.0],  // Nape of neck over collar
     [-0.005, 0.106, 0.036, 0.116, 0.0, 0.022, 2.05], // Lower occiput behind ears
     [ 0.048, 0.118, 0.058, 0.122, 0.0, 0.014, 2.05], // Mid occiput / temple level (recessed behind forehead skin!)
     [ 0.095, 0.122, 0.080, 0.122, 0.0, 0.008, 2.05], // Upper hairline (z_front = -0.072, behind 3D bangs!)
-    [ 0.138, 0.112, 0.078, 0.110, 0.0, 0.006, 2.05], // Full parietal dome
-    [ 0.172, 0.076, 0.052, 0.072, 0.0, 0.006, 2.00]  // Top crown cap
+    [ 0.138, 0.114, 0.082, 0.112, 0.0, 0.008, 2.00], // Full parietal dome
+    [ 0.168, 0.094, 0.068, 0.092, 0.0, 0.010, 2.00], // Upper rounded crown dome
+    [ 0.190, 0.062, 0.044, 0.062, 0.0, 0.012, 2.00], // Crown apex dome slope
+    [ 0.202, 0.028, 0.020, 0.028, 0.0, 0.014, 2.00]  // Rounded crown cap peak
   ];
   const hairBaseMesh = createHiFiMesh(
     createSculptedLoftGeometry(hairBaseSlices, 32, true, true, true),
@@ -1644,8 +2090,8 @@ export function buildChallengerModel() {
   const geoBangMed     = createCurvedHairLockGeometry(0.064, 0.054, 0.026,  0.006, -0.006);
   const geoBangSide    = createCurvedHairLockGeometry(0.068, 0.052, 0.026,  0.006,  0.008);
   const geoSideburn    = createCurvedHairLockGeometry(0.108, 0.046, 0.028,  0.012, -0.008);
-  const geoCrownTall   = createCurvedHairLockGeometry(0.104, 0.080, 0.046,  0.022,  0.006);
-  const geoCrownWide   = createCurvedHairLockGeometry(0.096, 0.078, 0.044,  0.020, -0.008);
+  const geoCrownTall   = createCurvedHairLockGeometry(0.096, 0.082, 0.048,  0.020,  0.004);
+  const geoCrownWide   = createCurvedHairLockGeometry(0.088, 0.078, 0.044,  0.018, -0.006);
   const geoLateral     = createCurvedHairLockGeometry(0.102, 0.076, 0.040,  0.018,  0.020);
   const geoNapeShingle = createCurvedHairLockGeometry(0.094, 0.070, 0.028,  0.014,  0.004);
 
@@ -1679,15 +2125,15 @@ export function buildChallengerModel() {
     { geo: geoBangSide,  pos: [-0.086, 0.092, -0.060], rot: [Math.PI + 0.08, -0.28, -0.28], col: HAIR_LIGHT, outline: 0.014 },
 
     // ------------------------------------------------------------------------
-    // LAYER 3: Full Tousled Crown Crest Tufts (Reaching y_world ≈ 2.00m without tall spiky horns)
+    // LAYER 3: Full Tousled Crown Crest Tufts (Rounded central peak reaching y_world ≈ 2.00m, zero cat-ear horns)
     // Bounds: y >= 0.13 (Count: 6)
     // ------------------------------------------------------------------------
-    { geo: geoCrownTall, pos: [ 0.000, 0.152, -0.018], rot: [0.32,  0.00,  0.06], col: HAIR_LIGHT, outline: 0.016 },
-    { geo: geoCrownWide, pos: [ 0.048, 0.144, -0.012], rot: [0.36,  0.16, -0.42], col: HAIR_MID,   outline: 0.016 },
-    { geo: geoCrownWide, pos: [-0.048, 0.144, -0.012], rot: [0.36, -0.16,  0.42], col: HAIR_LIGHT, outline: 0.016 },
-    { geo: geoCrownWide, pos: [ 0.054, 0.136,  0.026], rot: [0.54,  0.18, -0.48], col: HAIR_LIGHT, outline: 0.016 },
-    { geo: geoCrownWide, pos: [-0.054, 0.136,  0.026], rot: [0.54, -0.18,  0.48], col: HAIR_MID,   outline: 0.016 },
-    { geo: geoCrownTall, pos: [ 0.000, 0.146,  0.024], rot: [0.48,  0.00, -0.05], col: HAIR_MID,   outline: 0.016 },
+    { geo: geoCrownTall, pos: [ 0.000, 0.158, -0.004], rot: [0.54,  0.00,  0.00], col: HAIR_LIGHT, outline: 0.016 },
+    { geo: geoCrownWide, pos: [ 0.020, 0.154,  0.002], rot: [0.60,  0.08, -0.22], col: HAIR_MID,   outline: 0.016 },
+    { geo: geoCrownWide, pos: [-0.020, 0.154,  0.002], rot: [0.60, -0.08,  0.22], col: HAIR_LIGHT, outline: 0.016 },
+    { geo: geoCrownWide, pos: [ 0.046, 0.138,  0.008], rot: [0.74,  0.18, -0.78], col: HAIR_MID,   outline: 0.016 },
+    { geo: geoCrownWide, pos: [-0.046, 0.138,  0.008], rot: [0.74, -0.18,  0.78], col: HAIR_LIGHT, outline: 0.016 },
+    { geo: geoCrownTall, pos: [ 0.000, 0.148,  0.032], rot: [0.82,  0.00,  0.00], col: HAIR_MID,   outline: 0.016 },
 
     // ------------------------------------------------------------------------
     // LAYER 4: Tousled Lateral Tufts (Natural feathered side silhouette)
@@ -1728,16 +2174,17 @@ export function buildChallengerModel() {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * 0.215, 0.43, 0.005); // Preserved shoulder invariant
 
-    // 1. Upper Arm Sleeve (Child of shoulder, CHARCOAL_HEX, smoothly rounded shoulder cap)
+    // 1. Upper Arm Sleeve (Child of shoulder, CHARCOAL_HEX, smoothly rounded bomber-jacket shoulder slope)
     const upperSleeveSlices = [
       // [y, rx, rzFront, rzBack, cx, cz, p]
-      [-0.260, 0.075, 0.073, 0.075, 0,             0, 2.05], // Elbow junction
-      [-0.205, 0.081, 0.079, 0.081, 0,             0, 2.05], // Lower bicep cloth puff
-      [-0.125, 0.080, 0.078, 0.080, 0,             0, 2.05], // Mid-bicep
-      [-0.045, 0.084, 0.082, 0.084, 0,             0, 2.05], // Deltoid curve
-      [-0.005, 0.078, 0.076, 0.078, -side * 0.014, 0, 2.00], // Upper shoulder rounding inward
-      [ 0.030, 0.064, 0.064, 0.066, -side * 0.028, 0, 2.00], // Smooth deltoid dome slope
-      [ 0.055, 0.044, 0.044, 0.046, -side * 0.042, 0, 2.00]  // Tucked seamlessly into jacket shoulder
+      [-0.260, 0.073, 0.072, 0.074,  0.000,         0.000, 2.05], // Elbow junction
+      [-0.205, 0.078, 0.077, 0.079,  0.000,         0.000, 2.05], // Lower bicep cloth puff
+      [-0.125, 0.077, 0.076, 0.078,  0.000,         0.000, 2.05], // Mid-bicep
+      [-0.060, 0.075, 0.074, 0.076, -side * 0.002,  0.000, 2.02], // Lower deltoid curve
+      [-0.015, 0.068, 0.068, 0.070, -side * 0.014,  0.000, 2.00], // Rounded deltoid transition
+      [ 0.020, 0.055, 0.055, 0.057, -side * 0.038,  0.000, 2.00], // Sloped shoulder cap
+      [ 0.045, 0.040, 0.040, 0.042, -side * 0.065,  0.000, 2.00], // Continuous collar slope continuation
+      [ 0.065, 0.025, 0.025, 0.027, -side * 0.090,  0.000, 2.00]  // Tucked seamlessly into collar base
     ];
     const upperSleeve = createHiFiMesh(
       createSculptedLoftGeometry(upperSleeveSlices, 20, true, true, true),
@@ -1746,14 +2193,15 @@ export function buildChallengerModel() {
     );
     shoulder.add(upperSleeve);
 
-    // Outer Crimson Sleeve Racing Stripe (Child of shoulder, CRIMSON_HEX, follows rounded shoulder curve)
+    // Outer Crimson Sleeve Racing Stripe (Child of shoulder, CRIMSON_HEX, follows rounded shoulder slope)
     const stripeSlices = [
-      [-0.240, 0.010, 0.020, 0.020, side * 0.076, 0, 2.2],
-      [-0.170, 0.010, 0.022, 0.022, side * 0.081, 0, 2.2],
-      [-0.100, 0.010, 0.022, 0.022, side * 0.080, 0, 2.2],
-      [-0.035, 0.010, 0.022, 0.022, side * 0.082, 0, 2.2],
-      [ 0.005, 0.009, 0.020, 0.020, side * 0.062, 0, 2.1],
-      [ 0.035, 0.008, 0.016, 0.016, side * 0.036, 0, 2.0]
+      [-0.240, 0.010, 0.020, 0.020,  side * 0.072, 0, 2.2],
+      [-0.170, 0.010, 0.022, 0.022,  side * 0.076, 0, 2.2],
+      [-0.100, 0.010, 0.022, 0.022,  side * 0.075, 0, 2.2],
+      [-0.055, 0.010, 0.021, 0.021,  side * 0.073, 0, 2.1],
+      [-0.015, 0.009, 0.019, 0.019,  side * 0.054, 0, 2.0],
+      [ 0.020, 0.008, 0.016, 0.016,  side * 0.017, 0, 2.0],
+      [ 0.045, 0.007, 0.014, 0.014, -side * 0.025, 0, 2.0]
     ];
     const sleeveStripe = createHiFiMesh(
       createSculptedLoftGeometry(stripeSlices, 14, true, true, true),
@@ -2184,7 +2632,7 @@ export function buildChallengerModel() {
     rightArmObj.setFistClenched(clench);
   }
 
-  return {
+  return optimizeArticulatedRigBones({
     root,
     contactShadowDecal,
     hips,
@@ -2203,7 +2651,7 @@ export function buildChallengerModel() {
     rightKnee: rightLegObj.kneeJoint,
     rightAnkle: rightLegObj.ankleJoint,
     setExpression
-  };
+  });
 }
 
 // ============================================================================
@@ -3313,10 +3761,10 @@ function createKronosTorsoUVTexture() {
     ctx.stroke();
 
     // CENTERED PROPORTIONAL METALLIC GOLD CROWN + TURNTABLE EMBLEM
-    // Compensates for 1.70:1 cylindrical UV horizontal stretch so the crown and turntable render un-squashed!
+    // Boldly fills ~70% of the crimson vest back panel while compensating for cylindrical UV stretch!
     ctx.save();
-    ctx.translate(0, 435);
-    ctx.scale(1.12, 1.66);
+    ctx.translate(0, 485);
+    ctx.scale(1.48, 1.78);
     drawKronosCrownAndTurntable(ctx, 0, 0, 1.0);
     ctx.restore();
   });
@@ -3462,6 +3910,7 @@ function createKronosPantsLegUVTexture() {
 }
 
 export function buildKronosBossModel() {
+  _fighterShadowScope = true;
   const root = new THREE.Group();
   root.scale.setScalar(0.58); // Calibrated ~0.58x scale in DJ booth; 1.0x in studio turnaround & Wave 3 ring fight!
 
@@ -3506,16 +3955,15 @@ export function buildKronosBossModel() {
     // Gold Ribbed Waistband Hem at Bottom of Vest (y = 0.00..0.06 -> y_world = 1.07m..1.13m)
     [0.00, 0.176, 0.106, 0.112, 0.000, 0.000, 2.30],
     [0.06, 0.182, 0.112, 0.118, 0.000, 0.002, 2.30],
-    // Athletic V-Tapered Lower & Mid Torso (y = 0.15..0.36 -> y_world = 1.22m..1.43m)
-    [0.15, 0.198, 0.122, 0.126, 0.000, 0.004, 2.32],
-    [0.26, 0.222, 0.134, 0.136, 0.000, 0.007, 2.35],
-    [0.36, 0.242, 0.148, 0.142, 0.000, 0.010, 2.38],
-    // Maximum Pectoral Chest Projection (y = 0.43 -> y_world = 1.50m)
-    [0.43, 0.248, 0.154, 0.144, 0.000, 0.012, 2.40],
-    // Upper Chest & Clavicular Slope (y = 0.48..0.57 -> y_world = 1.55m..1.64m)
-    [0.48, 0.246, 0.146, 0.140, 0.000, 0.010, 2.40],
-    [0.52, 0.210, 0.126, 0.126, 0.000, 0.005, 2.25],
-    [0.55, 0.150, 0.102, 0.106, 0.000, 0.002, 2.15],
+    // Athletic V-Tapered Lower & Mid Torso (y = 0.15..0.35 -> y_world = 1.22m..1.42m)
+    [0.15, 0.196, 0.122, 0.126, 0.000, 0.004, 2.30],
+    [0.26, 0.214, 0.134, 0.136, 0.000, 0.007, 2.32],
+    [0.35, 0.224, 0.148, 0.142, 0.000, 0.010, 2.32],
+    // Sleeveless Vest Armhole Cut-In + Full Pectoral Chest Projection (y = 0.43..0.57 -> y_world = 1.50m..1.64m)
+    [0.43, 0.214, 0.154, 0.144, 0.000, 0.012, 2.25],
+    [0.48, 0.198, 0.146, 0.140, 0.000, 0.010, 2.20],
+    [0.52, 0.176, 0.126, 0.126, 0.000, 0.005, 2.15],
+    [0.55, 0.142, 0.102, 0.106, 0.000, 0.002, 2.08],
     [0.57, 0.105, 0.084, 0.088, 0.000, 0.000, 2.00]
   ];
   const torsoGeo = createSculptedLoftGeometry(torsoSlices, 36, false, true, true);
@@ -3580,8 +4028,8 @@ export function buildKronosBossModel() {
   // 3D Metallic Gold-Trimmed Armhole Borders encircling Shoulder Openings
   [-1, 1].forEach((side) => {
     const armholeBorder = new THREE.Group();
-    armholeBorder.position.set(side * 0.228, 0.445, 0.005);
-    armholeBorder.rotation.set(0, side * (Math.PI * 0.5), side * 0.22);
+    armholeBorder.position.set(side * 0.208, 0.445, 0.005);
+    armholeBorder.rotation.set(0, side * (Math.PI * 0.5), side * 0.24);
 
     const torusGeo = new THREE.TorusGeometry(0.076, 0.010, 12, 28);
     torusGeo.scale(1.0, 1.16, 0.96); // Contoured elliptical rim hugging vest armhole & deltoid slope
@@ -3930,14 +4378,14 @@ export function buildKronosBossModel() {
       [-0.180, 0.081, 0.096, 0.092,  side * 0.004,  0.004, 2.0], // Muscular bicep anterior expansion
       [-0.140, 0.086, 0.106, 0.102,  side * 0.006,  0.003, 2.0], // Peak bicep belly & lateral tricep head
       [-0.100, 0.090, 0.102, 0.104,  side * 0.010, -0.002, 2.0], // Tricep lateral head peak (horseshoe swell)
-      [-0.060, 0.094, 0.098, 0.100,  side * 0.012,  0.000, 2.0], // Deltoid insertion on humerus
-      [-0.030, 0.096, 0.096, 0.098,  side * 0.012,  0.001, 2.0], // Mid-lower deltoid slope
-      [-0.005, 0.095, 0.094, 0.096,  side * 0.006,  0.002, 2.0], // Peak lateral deltoid cap (rounded width)
-      [ 0.020, 0.088, 0.088, 0.090, -side * 0.004,  0.002, 2.0], // Upper deltoid curvature rounding inward
-      [ 0.042, 0.076, 0.076, 0.078, -side * 0.018,  0.001, 2.0], // Smooth deltoid dome arching toward armhole
-      [ 0.062, 0.062, 0.062, 0.064, -side * 0.032,  0.001, 2.0], // Deltoid dome shoulder curve
-      [ 0.076, 0.046, 0.046, 0.048, -side * 0.044,  0.000, 2.0], // Deltoid cap entering gold armhole
-      [ 0.088, 0.032, 0.032, 0.034, -side * 0.054,  0.000, 2.0]  // Tucked seamlessly inside gold vest armhole ring
+      [-0.060, 0.093, 0.096, 0.098,  side * 0.010,  0.000, 2.0], // Deltoid insertion on humerus
+      [-0.030, 0.094, 0.094, 0.096,  side * 0.008,  0.001, 2.0], // Anatomical peak lateral deltoid
+      [-0.005, 0.089, 0.090, 0.092,  side * 0.000,  0.001, 2.0], // Deltoid cap rounding upward
+      [ 0.020, 0.080, 0.080, 0.082, -side * 0.012,  0.001, 2.0], // Curving inward into armhole
+      [ 0.042, 0.068, 0.068, 0.070, -side * 0.026,  0.001, 2.0], // Smooth anatomical deltoid arch
+      [ 0.062, 0.054, 0.054, 0.056, -side * 0.038,  0.001, 2.0], // Deltoid dome entering gold rim
+      [ 0.076, 0.040, 0.040, 0.042, -side * 0.048,  0.000, 2.0], // Entering gold armhole
+      [ 0.088, 0.028, 0.028, 0.030, -side * 0.058,  0.000, 2.0]  // Tucked seamlessly inside gold vest armhole ring
     ];
     const upperArmGeo = createSculptedLoftGeometry(upperArmSlices, 28, false, true, true);
     const upperArm = createHiFiMesh(upperArmGeo, SKIN_COLOR, 0.030);
@@ -4334,7 +4782,7 @@ export function buildKronosBossModel() {
   hips.add(leftLegObj.hipJoint);
   hips.add(rightLegObj.hipJoint);
 
-  return {
+  return optimizeArticulatedRigBones({
     root,
     contactShadowDecal,
     hips,
@@ -4356,7 +4804,7 @@ export function buildKronosBossModel() {
     vest,
     medallion: goldMedallion,
     micGroup
-  };
+  });
 }
 
 // ============================================================================
@@ -4643,11 +5091,74 @@ export function createBruiserHeadUVTexture(idx = 0) {
 }
 
 /**
+ * Helper to generate open-arc multi-slice sculpted lofts (e.g. open vest shells and collars).
+ * Uses pure BufferGeometry with outward-facing normals and proper UVs.
+ */
+function createBruiserVestLoft(slices, radialSegments = 18, thetaStart = Math.PI * 0.34, thetaLength = Math.PI * 1.32) {
+  radialSegments = Math.min(radialSegments, 18);
+  const numSlices = slices.length;
+  if (numSlices === 0) return new THREE.BufferGeometry();
+
+  const isDescending = numSlices > 1 && slices[0][0] > slices[numSlices - 1][0];
+  const effectiveSlices = isDescending ? [...slices].reverse() : slices;
+
+  const positions = [];
+  const uvs = [];
+  const indices = [];
+
+  const yMin = effectiveSlices[0][0];
+  const yMax = effectiveSlices[numSlices - 1][0];
+  const ySpan = Math.max(1e-5, yMax - yMin);
+
+  for (let i = 0; i < numSlices; i++) {
+    const [y, rx, rzFront, rzBack, cx = 0, cz = 0, p = 2.2] = effectiveSlices[i];
+    const v = (y - yMin) / ySpan;
+
+    for (let j = 0; j <= radialSegments; j++) {
+      const u = j / radialSegments;
+      const theta = thetaStart + u * thetaLength;
+      const dirX = Math.sin(theta);
+      const dirZ = Math.cos(theta);
+
+      const isFront = dirZ >= 0;
+      const rz = isFront ? rzFront : rzBack;
+
+      const exp = 2.0 / p;
+      const sx = Math.sign(dirX) * Math.pow(Math.abs(dirX), exp);
+      const sz = Math.sign(dirZ) * Math.pow(Math.abs(dirZ), exp);
+
+      positions.push(cx + rx * sx, y, cz + rz * sz);
+      uvs.push(u, v);
+    }
+  }
+
+  const ringStride = radialSegments + 1;
+  for (let i = 0; i < numSlices - 1; i++) {
+    for (let j = 0; j < radialSegments; j++) {
+      const a = i * ringStride + j;
+      const b = a + 1;
+      const d = (i + 1) * ringStride + j;
+      const c = d + 1;
+      indices.push(a, b, d);
+      indices.push(b, c, d);
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * Enhanced Hype-Crew Bruiser Procedural 3D Model Factory.
  * Overhauls placeholder primitives into an authentic AA cel-shaded graphic-novel brawler
  * matching the left half of antagonists_turnaround_sheet_1792119851073.jpg.
  */
 export function buildBruiserModel(idx = 0) {
+  _fighterShadowScope = true;
   const root = new THREE.Group();
   root.scale.setScalar(0.96); // Imposing athletic brawler mass
 
@@ -4672,40 +5183,60 @@ export function buildBruiserModel(idx = 0) {
   const hairDark = 0x241712;        // Dark chestnut brown mohawk hair
 
   // ==========================================================================
-  // 1. TACTICAL BELT, BUCKLE & LOWER PELVIS (Calibrated for waist width ~0.32m)
+  // 1. TACTICAL BELT, BUCKLE & LOWER PELVIS (Calibrated for waist width ~0.38m)
   // ==========================================================================
-  const beltGeo = new THREE.CylinderGeometry(0.19, 0.175, 0.09, 24);
-  beltGeo.computeVertexNormals();
+  const bruiserBeltSlices = [
+    [-0.035, 0.188, 0.136, 0.136, 0, 0.008, 2.25],
+    [ 0.000, 0.192, 0.140, 0.140, 0, 0.008, 2.25],
+    [ 0.035, 0.188, 0.136, 0.136, 0, 0.008, 2.25]
+  ];
+  const beltGeo = createSculptedLoftGeometry(bruiserBeltSlices, 28, false, true, true);
   const beltMesh = createHiFiMesh(beltGeo, 0x101014, 0.038);
-  beltMesh.scale.set(1.10, 1.0, 0.78);
   beltMesh.position.y = 0.02;
   hips.add(beltMesh);
 
-  // Prominent Rectangular Silver Buckle with Center Dark Inset & Prong
+  // Prominent Rectangular Silver Buckle with Center Dark Inset & Prong (Lofted)
+  const buckleFrameSlices = [
+    [-0.032, 0.052, 0.018, 0.018, 0, 0, 2.35],
+    [ 0.000, 0.054, 0.020, 0.020, 0, 0, 2.35],
+    [ 0.032, 0.052, 0.018, 0.018, 0, 0, 2.35]
+  ];
+  const buckleFrameGeo = createSculptedLoftGeometry(buckleFrameSlices, 16, false, true, true);
   const buckleFrame = createHiFiMesh(
-    new THREE.BoxGeometry(0.10, 0.065, 0.035),
+    buckleFrameGeo,
     silverMetal,
     0.030,
     null,
     0x000000,
     { isMetallic: true, glintThreshold: 0.85, glintIntensity: 1.8 }
   );
-  buckleFrame.position.set(0, 0.02, 0.155);
+  buckleFrame.position.set(0, 0.02, 0.148);
   hips.add(buckleFrame);
 
-  const buckleCenter = createHiFiMesh(new THREE.BoxGeometry(0.060, 0.038, 0.038), 0x181820, 0.0);
-  buckleCenter.position.set(0, 0.02, 0.155);
+  const buckleCenterSlices = [
+    [-0.020, 0.034, 0.016, 0.016, 0, 0, 2.25],
+    [ 0.000, 0.036, 0.018, 0.018, 0, 0, 2.25],
+    [ 0.020, 0.034, 0.016, 0.016, 0, 0, 2.25]
+  ];
+  const buckleCenterGeo = createSculptedLoftGeometry(buckleCenterSlices, 14, false, true, true);
+  const buckleCenter = createHiFiMesh(buckleCenterGeo, 0x181820, 0.0);
+  buckleCenter.position.set(0, 0.02, 0.150);
   hips.add(buckleCenter);
 
+  const prongSlices = [
+    [-0.022, 0.007, 0.018, 0.018, 0, 0, 2.0],
+    [ 0.022, 0.007, 0.018, 0.018, 0, 0, 2.0]
+  ];
+  const prongGeo = createSculptedLoftGeometry(prongSlices, 10, false, true, true);
   const buckleProng = createHiFiMesh(
-    new THREE.BoxGeometry(0.014, 0.042, 0.042),
+    prongGeo,
     silverMetal,
     0.022,
     null,
     0x000000,
     { isMetallic: true }
   );
-  buckleProng.position.set(0, 0.02, 0.158);
+  buckleProng.position.set(0, 0.02, 0.152);
   hips.add(buckleProng);
 
   // ==========================================================================
@@ -4726,87 +5257,115 @@ export function buildBruiserModel(idx = 0) {
     [0.68, 0.185, 0.135, 0.130, 0, 0.010, 2.1]  // Shoulders / neck base
   ];
   const torsoGeo = createSculptedLoftGeometry(bruiserTorsoSlices, 32, false, true, true);
-  torsoGeo.computeVertexNormals();
   const torsoMesh = createHiFiMesh(torsoGeo, skinColor, 0.042);
   torso.add(torsoMesh);
 
   // Shaded Upper Abdominal Muscle Planes (Sculpted rounded muscular contours above belt beneath open vest)
   [-1, 1].forEach((side) => {
     [0.14, 0.21].forEach((ay) => {
-      const abGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.044, 16);
-      abGeo.scale(1.12, 1.0, 0.48);
-      abGeo.computeVertexNormals();
+      const abSlices = [
+        [-0.022, 0.028, 0.012, 0.008, 0, 0, 2.1],
+        [ 0.000, 0.032, 0.016, 0.010, 0, 0, 2.2],
+        [ 0.022, 0.028, 0.012, 0.008, 0, 0, 2.1]
+      ];
+      const abGeo = createSculptedLoftGeometry(abSlices, 14, false, true, true);
       const abPlate = createHiFiMesh(abGeo, idx === 0 ? 0xc28660 : 0x824a2a, 0.010);
-      abPlate.position.set(side * 0.036, ay, 0.140);
+      abPlate.position.set(side * 0.038, ay, 0.142);
       abPlate.rotation.set(-0.06, side * 0.12, 0);
       torso.add(abPlate);
     });
   });
 
   // Symmetrical Crimson Cloth Chest Wrap across mid-chest above abs matching turnaround sheet
-  // Base wrap cylinder centered horizontally across chest
-  const wrapBaseGeo = new THREE.CylinderGeometry(0.226, 0.205, 0.19, 28);
-  wrapBaseGeo.computeVertexNormals();
-  const wrapBase = createHiFiMesh(wrapBaseGeo, crimsonWrapColor, 0.038);
-  wrapBase.scale.set(1.08, 1.0, 0.82);
-  wrapBase.position.set(0, 0.385, 0.022);
+  const bruiserWrapSlices = [
+    [0.295, 0.208, 0.156, 0.142, 0, 0.020, 2.2], // Lower rim resting above abs
+    [0.345, 0.218, 0.164, 0.146, 0, 0.022, 2.2], // Solar plexus wrap contour
+    [0.415, 0.230, 0.172, 0.150, 0, 0.024, 2.2], // Mid-pectoral wrap swell
+    [0.475, 0.234, 0.176, 0.152, 0, 0.024, 2.2]  // Top rim under collar/lapels
+  ];
+  const wrapGeo = createSculptedLoftGeometry(bruiserWrapSlices, 30, false, false, false);
+  const wrapBase = createHiFiMesh(wrapGeo, crimsonWrapColor, 0.038);
   torso.add(wrapBase);
 
-  // Symmetrical upper and lower horizontal wrap rim folds
-  const wrapTopRimGeo = new THREE.CylinderGeometry(0.228, 0.224, 0.05, 28);
-  wrapTopRimGeo.computeVertexNormals();
+  // Symmetrical upper and lower horizontal wrap rim folds (Lofted)
+  const wrapTopRimSlices = [
+    [0.460, 0.236, 0.178, 0.154, 0, 0.024, 2.2],
+    [0.485, 0.236, 0.178, 0.154, 0, 0.024, 2.2]
+  ];
+  const wrapTopRimGeo = createSculptedLoftGeometry(wrapTopRimSlices, 28, false, false, false);
   const wrapTopRim = createHiFiMesh(wrapTopRimGeo, crimsonWrapColor, 0.034);
-  wrapTopRim.scale.set(1.08, 1.0, 0.82);
-  wrapTopRim.position.set(0, 0.455, 0.024);
   torso.add(wrapTopRim);
 
-  const wrapBotRimGeo = new THREE.CylinderGeometry(0.210, 0.206, 0.05, 28);
-  wrapBotRimGeo.computeVertexNormals();
+  const wrapBotRimSlices = [
+    [0.285, 0.210, 0.158, 0.144, 0, 0.020, 2.2],
+    [0.310, 0.210, 0.158, 0.144, 0, 0.020, 2.2]
+  ];
+  const wrapBotRimGeo = createSculptedLoftGeometry(wrapBotRimSlices, 28, false, false, false);
   const wrapBotRim = createHiFiMesh(wrapBotRimGeo, crimsonWrapColor, 0.034);
-  wrapBotRim.scale.set(1.08, 1.0, 0.82);
-  wrapBotRim.position.set(0, 0.315, 0.020);
   torso.add(wrapBotRim);
 
-  // Symmetrical Crisscrossing Cloth Strap Overlays crossing neatly in chest center
+  // Symmetrical Crisscrossing Cloth Strap Overlays crossing neatly in chest center (Lofted)
   [-1, 1].forEach((side) => {
-    const strapGeo = new THREE.BoxGeometry(0.036, 0.18, 0.016);
+    const strapSlices = [
+      [-0.085, 0.018, 0.008, 0.008, 0, 0, 2.1],
+      [ 0.000, 0.020, 0.010, 0.010, 0, 0, 2.1],
+      [ 0.085, 0.018, 0.008, 0.008, 0, 0, 2.1]
+    ];
+    const strapGeo = createSculptedLoftGeometry(strapSlices, 12, false, true, true);
     const strap = createHiFiMesh(strapGeo, 0x941820, 0.022);
-    strap.position.set(side * 0.038, 0.385, 0.162);
+    strap.position.set(side * 0.038, 0.385, 0.166);
     strap.rotation.set(0.04, 0, side * 0.35);
     torso.add(strap);
   });
 
   // Open Black Leather Biker Vest Shell (Fitted closely to athletic V-taper)
-  const vestShellGeo = new THREE.CylinderGeometry(
-    0.265, 0.220, 0.65, 28, 1, true,
-    Math.PI * 0.36, Math.PI * 1.28
-  );
-  vestShellGeo.computeVertexNormals();
+  const bruiserVestSlices = [
+    [0.02, 0.184, 0.138, 0.142, 0, 0.010, 2.2], // Waist hem above belt
+    [0.16, 0.198, 0.148, 0.150, 0, 0.014, 2.2], // Lower midriff
+    [0.32, 0.222, 0.164, 0.160, 0, 0.018, 2.2], // Ribcage / solar plexus
+    [0.48, 0.244, 0.178, 0.168, 0, 0.022, 2.2], // Pectorals
+    [0.60, 0.242, 0.172, 0.162, 0, 0.014, 2.15],// Upper chest / armholes
+    [0.68, 0.208, 0.148, 0.148, 0, 0.008, 2.1]  // Shoulder yoke connection
+  ];
+  const vestShellGeo = createBruiserVestLoft(bruiserVestSlices, 28, Math.PI * 0.34, Math.PI * 1.32);
   const vestMesh = createHiFiMesh(vestShellGeo, vestColor, 0.044);
-  vestMesh.scale.set(1.12, 1.0, 0.82);
-  vestMesh.position.set(0, 0.35, 0.01);
+  vestMesh.material.side = THREE.DoubleSide;
   torso.add(vestMesh);
 
-  // Standing Notched Biker Collar framing back and sides of the neck
-  const collarBackGeo = new THREE.CylinderGeometry(0.096, 0.092, 0.090, 24, 1, true, -Math.PI * 0.48, Math.PI * 0.96);
-  collarBackGeo.computeVertexNormals();
+  // Standing Notched Biker Collar framing back and sides of the neck (Lofted)
+  const collarSlices = [
+    [0.680, 0.104, 0.084, 0.102, 0, -0.010, 2.05],
+    [0.725, 0.108, 0.088, 0.106, 0, -0.010, 2.05],
+    [0.770, 0.112, 0.092, 0.110, 0, -0.010, 2.05]
+  ];
+  const collarBackGeo = createBruiserVestLoft(collarSlices, 22, Math.PI * 0.26, Math.PI * 1.48);
   const collarBack = createHiFiMesh(collarBackGeo, vestLapelColor, 0.038);
-  collarBack.position.set(0, 0.725, -0.015);
+  collarBack.material.side = THREE.DoubleSide;
   torso.add(collarBack);
 
   // Vest Shoulder Straps / Trapezius Yoke (extends vest all the way up over shoulders right next to neck)
   [-1, 1].forEach((side) => {
-    // Continuous contoured leather shoulder panel spanning from neck (x ~ side*0.08) to armhole (x ~ side*0.24)
-    const shoulderStrapGeo = new THREE.BoxGeometry(0.155, 0.038, 0.28);
-    shoulderStrapGeo.computeVertexNormals();
+    // Continuous contoured leather shoulder panel spanning from neck to armhole
+    const shoulderStrapSlices = [
+      [-0.14, 0.076, 0.020, 0.020, 0, 0, 2.2],
+      [-0.07, 0.078, 0.022, 0.022, 0, 0, 2.2],
+      [ 0.00, 0.080, 0.024, 0.024, 0, 0, 2.2],
+      [ 0.07, 0.078, 0.022, 0.022, 0, 0, 2.2],
+      [ 0.14, 0.076, 0.020, 0.020, 0, 0, 2.2]
+    ];
+    const shoulderStrapGeo = createSculptedLoftGeometry(shoulderStrapSlices, 16, false, true, true);
     const shoulderStrap = createHiFiMesh(shoulderStrapGeo, vestColor, 0.040);
-    shoulderStrap.position.set(side * 0.158, 0.696, 0.005);
-    shoulderStrap.rotation.set(0, 0, side * -0.16);
+    shoulderStrap.position.set(side * 0.162, 0.696, 0.005);
+    shoulderStrap.rotation.set(Math.PI * 0.5, 0, side * -0.16);
     torso.add(shoulderStrap);
 
     // Notched collar front lapel corner tab framing neck side
-    const collarTabGeo = new THREE.BoxGeometry(0.032, 0.085, 0.055);
-    collarTabGeo.computeVertexNormals();
+    const collarTabSlices = [
+      [-0.042, 0.016, 0.028, 0.028, 0, 0, 2.1],
+      [ 0.000, 0.017, 0.029, 0.029, 0, 0, 2.1],
+      [ 0.042, 0.016, 0.028, 0.028, 0, 0, 2.1]
+    ];
+    const collarTabGeo = createSculptedLoftGeometry(collarTabSlices, 12, false, true, true);
     const collarTab = createHiFiMesh(collarTabGeo, vestLapelColor, 0.032);
     collarTab.position.set(side * 0.092, 0.715, 0.075);
     collarTab.rotation.set(-0.15, side * -0.25, side * 0.12);
@@ -4823,8 +5382,13 @@ export function buildBruiserModel(idx = 0) {
     // Distressed frayed thread accents along sleeveless armhole rim
     for (let f = 0; f < 8; f++) {
       const fAngle = (f / 8) * Math.PI * 2;
+      const fraySlices = [
+        [-0.012, 0.007, 0.005, 0.005, 0, 0, 2.0],
+        [ 0.012, 0.007, 0.005, 0.005, 0, 0, 2.0]
+      ];
+      const frayGeo = createSculptedLoftGeometry(fraySlices, 8, false, true, true);
       const fray = createHiFiMesh(
-        new THREE.BoxGeometry(0.014, 0.024, 0.010),
+        frayGeo,
         f % 2 === 0 ? 0xd0d0dc : 0x7c7c88,
         0.020
       );
@@ -4838,15 +5402,26 @@ export function buildBruiserModel(idx = 0) {
     }
   });
 
-  // Hanging Waist Belt Straps below Vest Bottom Hem
+  // Hanging Waist Belt Straps below Vest Bottom Hem (Lofted)
   [-0.14, -0.05, 0.05, 0.14].forEach((sx) => {
-    const strap = createHiFiMesh(new THREE.BoxGeometry(0.026, 0.13, 0.02), 0x181720, 0.03);
+    const strapSlices = [
+      [-0.065, 0.013, 0.010, 0.010, 0, 0, 2.1],
+      [ 0.000, 0.014, 0.011, 0.011, 0, 0, 2.1],
+      [ 0.065, 0.013, 0.010, 0.010, 0, 0, 2.1]
+    ];
+    const strapGeo = createSculptedLoftGeometry(strapSlices, 12, false, true, true);
+    const strap = createHiFiMesh(strapGeo, 0x181720, 0.03);
     strap.position.set(sx, 0.02, 0.155);
     strap.rotation.set(0.12, 0, (sx < 0 ? 0.08 : -0.08));
     torso.add(strap);
 
+    const tipSlices = [
+      [-0.012, 0.013, 0.011, 0.011, 0, 0, 2.1],
+      [ 0.012, 0.013, 0.011, 0.011, 0, 0, 2.1]
+    ];
+    const tipGeo = createSculptedLoftGeometry(tipSlices, 10, false, true, true);
     const metalTip = createHiFiMesh(
-      new THREE.BoxGeometry(0.024, 0.020, 0.022),
+      tipGeo,
       silverMetal,
       0.022,
       null,
@@ -4857,16 +5432,28 @@ export function buildBruiserModel(idx = 0) {
     torso.add(metalTip);
   });
 
-  // Studded Notched Lapels brought closer toward center: clean central chest width ~0.14m exposed
+  // Studded Notched Lapels brought closer toward center: clean central chest width ~0.14m exposed (Lofted)
   [-1, 1].forEach((side) => {
     // Upper lapel collar connecting up to shoulder strap & collar
-    const upperLapel = createHiFiMesh(new THREE.BoxGeometry(0.115, 0.26, 0.032), vestLapelColor, 0.038);
+    const upperLapelSlices = [
+      [-0.130, 0.058, 0.016, 0.016, 0, 0, 2.2],
+      [ 0.000, 0.060, 0.017, 0.017, 0, 0, 2.2],
+      [ 0.130, 0.056, 0.015, 0.015, 0, 0, 2.2]
+    ];
+    const upperLapelGeo = createSculptedLoftGeometry(upperLapelSlices, 14, false, true, true);
+    const upperLapel = createHiFiMesh(upperLapelGeo, vestLapelColor, 0.038);
     upperLapel.position.set(side * 0.128, 0.555, 0.180);
     upperLapel.rotation.set(-0.08, side * -0.20, side * 0.15);
     torso.add(upperLapel);
 
     // Lower notched lapel tab
-    const lowerLapel = createHiFiMesh(new THREE.BoxGeometry(0.110, 0.25, 0.030), vestLapelColor, 0.038);
+    const lowerLapelSlices = [
+      [-0.125, 0.055, 0.015, 0.015, 0, 0, 2.2],
+      [ 0.000, 0.057, 0.016, 0.016, 0, 0, 2.2],
+      [ 0.125, 0.054, 0.014, 0.014, 0, 0, 2.2]
+    ];
+    const lowerLapelGeo = createSculptedLoftGeometry(lowerLapelSlices, 14, false, true, true);
+    const lowerLapel = createHiFiMesh(lowerLapelGeo, vestLapelColor, 0.038);
     lowerLapel.position.set(side * 0.130, 0.34, 0.188);
     lowerLapel.rotation.set(-0.04, side * -0.18, side * -0.10);
     torso.add(lowerLapel);
@@ -4891,9 +5478,14 @@ export function buildBruiserModel(idx = 0) {
     });
   });
 
-  // Asymmetric Diagonal Silver Zipper on Left Chest / Lapel
+  // Asymmetric Diagonal Silver Zipper on Left Chest / Lapel (Lofted)
+  const zipperBarSlices = [
+    [-0.130, 0.008, 0.009, 0.009, 0, 0, 2.0],
+    [ 0.130, 0.008, 0.009, 0.009, 0, 0, 2.0]
+  ];
+  const zipperBarGeo = createSculptedLoftGeometry(zipperBarSlices, 10, false, true, true);
   const zipperBar = createHiFiMesh(
-    new THREE.BoxGeometry(0.015, 0.26, 0.018),
+    zipperBarGeo,
     silverMetal,
     0.024,
     null,
@@ -4904,8 +5496,13 @@ export function buildBruiserModel(idx = 0) {
   zipperBar.rotation.set(-0.06, -0.20, -0.20);
   torso.add(zipperBar);
 
+  const zipperPullSlices = [
+    [-0.021, 0.011, 0.010, 0.010, 0, 0, 2.0],
+    [ 0.021, 0.011, 0.010, 0.010, 0, 0, 2.0]
+  ];
+  const zipperPullGeo = createSculptedLoftGeometry(zipperPullSlices, 10, false, true, true);
   const zipperPull = createHiFiMesh(
-    new THREE.BoxGeometry(0.022, 0.042, 0.020),
+    zipperPullGeo,
     silverMetal,
     0.022,
     null,
@@ -4916,12 +5513,15 @@ export function buildBruiserModel(idx = 0) {
   zipperPull.rotation.set(-0.06, -0.20, -0.20);
   torso.add(zipperPull);
 
-  // 5 Metallic Silver Conical Spikes Mounted Directly on EACH Vest Shoulder Strap
+  // 5 Metallic Silver Conical Spikes Mounted Directly on EACH Vest Shoulder Strap (Lofted)
   [-1, 1].forEach((side) => {
-    // 5 conical silver spikes spaced front-to-back directly along the crest of the vest shoulder strap
     [-0.08, -0.04, 0.00, 0.04, 0.08].forEach((sz, spIdx) => {
-      const spikeGeo = new THREE.ConeGeometry(0.024, 0.080, 16);
-      spikeGeo.computeVertexNormals();
+      const spikeSlices = [
+        [0.000, 0.024, 0.024, 0.024, 0, 0, 2.0],
+        [0.040, 0.014, 0.014, 0.014, 0, 0, 2.0],
+        [0.080, 0.002, 0.002, 0.002, 0, 0, 2.0]
+      ];
+      const spikeGeo = createSculptedLoftGeometry(spikeSlices, 14, false, true, true);
       const spike = createHiFiMesh(
         spikeGeo,
         silverMetal,
@@ -4944,7 +5544,6 @@ export function buildBruiserModel(idx = 0) {
     [0.16,  0.066, 0.064, 0.066, 0, 0.000, 2.0]
   ];
   const neckGeo = createSculptedLoftGeometry(bruiserNeckSlices, 24, false, false, false);
-  neckGeo.computeVertexNormals();
   const neckMesh = createHiFiMesh(neckGeo, skinColor, 0.032);
   neckMesh.position.y = 0.69;
   torso.add(neckMesh);
@@ -4968,7 +5567,6 @@ export function buildBruiserModel(idx = 0) {
     [0.132,  0.064, 0.062, 0.070, 0, -0.008, 2.0]  // Cranium apex under mohawk
   ];
   const headGeo = createSculptedLoftGeometry(bruiserHeadSlices, 32, false, true, true);
-  headGeo.computeVertexNormals();
   const headTex = createBruiserHeadUVTexture(idx);
   const headMesh = createHiFiMesh(headGeo, 0xffffff, 0.034, headTex);
   headGroup.add(headMesh);
@@ -4981,7 +5579,6 @@ export function buildBruiserModel(idx = 0) {
     [0.058, 0.004, 0.005, 0.005, 0, 0.000, 2.0]
   ];
   const noseGeo = createSculptedLoftGeometry(bruiserNosePts, 16, false, true, true);
-  noseGeo.computeVertexNormals();
   const noseMesh = createHiFiMesh(noseGeo, skinColor, 0.024);
   noseMesh.position.set(0, -0.038, 0.098);
   headGroup.add(noseMesh);
@@ -4995,7 +5592,6 @@ export function buildBruiserModel(idx = 0) {
       [0.036,  0.010, 0.016, 0.016, 0, 0, 2.0]
     ];
     const earGeo = createSculptedLoftGeometry(earSlices, 16, false, true, true);
-    earGeo.computeVertexNormals();
     const ear = createHiFiMesh(earGeo, skinColor, 0.024);
     ear.position.set(side * 0.098, -0.008, -0.005);
     ear.rotation.set(-0.06, side * 0.20, side * -0.12);
@@ -5017,7 +5613,6 @@ export function buildBruiserModel(idx = 0) {
   ];
   mohawkLockSpecs.forEach(({ z, y, length, width, thickness, bendZ, rotX }) => {
     const lockGeo = createCurvedHairLockGeometry(length, width, thickness, bendZ, 0.0);
-    lockGeo.computeVertexNormals();
     const lockMesh = createHiFiMesh(lockGeo, hairDark, 0.034);
     lockMesh.position.set(0, y, z);
     lockMesh.rotation.x = rotX;
@@ -5025,88 +5620,170 @@ export function buildBruiserModel(idx = 0) {
   });
 
   // ==========================================================================
-  // 4. TWO-SEGMENT MUSCULAR ARMS & MUAY-THAI BANDAGE WRAPS (radialSegments >= 20)
-  // Calibrated athletic brawler proportions (~22% reduced deltoid/bicep radius)
+  // 4. TWO-SEGMENT MUSCULAR ARMS & MUAY-THAI BANDAGE WRAPS
+  // 100% sculpted continuous deltoid-to-bicep loft and 3D diagonal bandage relief
   // ==========================================================================
   function buildBruiserArm(side) {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * 0.255, 0.62, 0); // Emerges naturally from sleeveless vest armhole
 
-    // Anatomical Deltoid Cap (~22% reduced radius: 0.100m, radialSegments >= 20, smooth normals)
-    const deltoidGeo = new THREE.SphereGeometry(0.100, 24, 18);
-    deltoidGeo.computeVertexNormals();
-    const deltoid = createHiFiMesh(deltoidGeo, skinColor, 0.038);
-    deltoid.scale.set(1.0, 1.12, 0.95);
-    deltoid.position.set(side * 0.012, -0.032, 0);
-    shoulder.add(deltoid);
-
-    // Muscular Bicep & Tricep (~22% reduced radius: 0.094/0.083m, radialSegments >= 20, smooth normals)
-    const bicepGeo = new THREE.CylinderGeometry(0.094, 0.083, 0.32, 24, 2);
-    bicepGeo.computeVertexNormals();
-    const bicep = createHiFiMesh(bicepGeo, skinColor, 0.042);
-    bicep.position.y = -0.17;
-    shoulder.add(bicep);
+    // Continuous 8-Slice Deltoid & Muscular Bicep/Tricep Loft arching into armhole
+    const bruiserUpperArmSlices = [
+      // [y, rx, rzFront, rzBack, cx, cz, p] with frontIsNegZ = false (+Z is front)
+      [ 0.080, 0.065, 0.065, 0.065, side *  0.005, 0, 2.05], // Deltoid apex arching into armhole
+      [ 0.030, 0.098, 0.094, 0.096, side *  0.014, 0, 2.15], // Deltoid lateral belly swell
+      [-0.035, 0.102, 0.096, 0.098, side *  0.016, 0, 2.20], // Maximum deltoid width under strap
+      [-0.105, 0.096, 0.092, 0.094, side *  0.008, 0, 2.20], // Deltoid insertion / bicep origin
+      [-0.170, 0.094, 0.095, 0.088, 0, 0.005, 2.18],         // Muscular bicep peak (+Z) & tricep sweep (-Z)
+      [-0.235, 0.088, 0.088, 0.082, 0, 0.002, 2.15],         // Lower bicep
+      [-0.295, 0.082, 0.080, 0.076, 0, 0.000, 2.10],         // Supracondylar ridge
+      [-0.340, 0.078, 0.075, 0.072, 0, 0.000, 2.05]          // Elbow joint insertion
+    ];
+    const upperArmGeo = createSculptedLoftGeometry(bruiserUpperArmSlices, 24, false, true, true);
+    const upperArm = createHiFiMesh(upperArmGeo, skinColor, 0.042);
+    shoulder.add(upperArm);
 
     const elbow = new THREE.Group();
     elbow.position.y = -0.34;
     shoulder.add(elbow);
 
-    // Forearm in Dark Muay-Thai Charcoal Underwrap (radialSegments >= 20, smooth normals)
-    const wrapGeo = new THREE.CylinderGeometry(0.088, 0.076, 0.34, 24, 2);
-    wrapGeo.computeVertexNormals();
-    const forearm = createHiFiMesh(wrapGeo, 0x1c1b22, 0.042);
-    forearm.position.y = -0.17;
+    // Anatomical Forearm Loft with Brachioradialis Belly Bulge (Dark Charcoal Underlayer)
+    const bruiserForearmSlices = [
+      // [y, rx, rzFront, rzBack, cx, cz, p] with frontIsNegZ = false
+      [ 0.000, 0.078, 0.076, 0.074, 0, 0, 2.10], // Elbow articulation
+      [-0.060, 0.088, 0.082, 0.080, side * 0.006, 0.004, 2.20], // Muscular brachioradialis belly bulge
+      [-0.120, 0.086, 0.080, 0.078, side * 0.004, 0.003, 2.18], // Mid-forearm muscular volume
+      [-0.180, 0.080, 0.075, 0.072, 0, 0.002, 2.15],             // Upper taper
+      [-0.240, 0.075, 0.070, 0.068, 0, 0.000, 2.10],             // Mid taper
+      [-0.290, 0.070, 0.066, 0.064, 0, 0.000, 2.05],             // Lower forearm
+      [-0.340, 0.066, 0.062, 0.060, 0, 0.000, 2.02]              // Wrist insertion
+    ];
+    const forearmGeo = createSculptedLoftGeometry(bruiserForearmSlices, 24, false, true, true);
+    const forearm = createHiFiMesh(forearmGeo, 0x1c1b22, 0.042);
     elbow.add(forearm);
 
-    // 6 Crisscrossing White Muay-Thai Athletic Bandages (radialSegments >= 20)
+    // 3D Crisscrossed Diagonal Muay-Thai Athletic Bandage Relief (crossing at ±32° around forearm circumference)
     const bandageWhite = 0xedeae2;
-    [-0.06, -0.11, -0.16, -0.21, -0.26, -0.30].forEach((wy, wIdx) => {
-      const stripeGeo = new THREE.CylinderGeometry(0.091 - wIdx * 0.0025, 0.091 - wIdx * 0.0025, 0.032, 22);
-      stripeGeo.computeVertexNormals();
-      const stripe = createHiFiMesh(stripeGeo, bandageWhite, 0.030);
-      stripe.position.y = wy;
-      stripe.rotation.z = (wIdx % 2 === 0 ? 0.08 : -0.08) * side;
-      elbow.add(stripe);
+    // Positive diagonal spiral bands (+32° / +0.56 rad)
+    [-0.07, -0.15, -0.23, -0.30].forEach((by, bIdx) => {
+      const bandR = 0.089 - bIdx * 0.006;
+      const bandSlices = [
+        [-0.012, bandR, bandR * 0.94, bandR * 0.92, 0, 0, 2.1],
+        [ 0.012, bandR, bandR * 0.94, bandR * 0.92, 0, 0, 2.1]
+      ];
+      const bandGeo = createSculptedLoftGeometry(bandSlices, 20, false, false, false);
+      const band = createHiFiMesh(bandGeo, bandageWhite, 0.030);
+      band.position.y = by;
+      band.rotation.set(0.10, 0, side * 0.56);
+      elbow.add(band);
     });
 
-    // Articulated Clenched Combat Fist with Knuckle Tape
+    // Negative diagonal spiral bands (-32° / -0.56 rad)
+    [-0.07, -0.15, -0.23, -0.30].forEach((by, bIdx) => {
+      const bandR = 0.089 - bIdx * 0.006;
+      const bandSlices = [
+        [-0.012, bandR, bandR * 0.94, bandR * 0.92, 0, 0, 2.1],
+        [ 0.012, bandR, bandR * 0.94, bandR * 0.92, 0, 0, 2.1]
+      ];
+      const bandGeo = createSculptedLoftGeometry(bandSlices, 20, false, false, false);
+      const band = createHiFiMesh(bandGeo, bandageWhite, 0.030);
+      band.position.y = by;
+      band.rotation.set(-0.10, 0, -side * 0.56);
+      elbow.add(band);
+    });
+
+    // Wrist Tape Band Loft
+    const wristSlices = [
+      [-0.025, 0.072, 0.068, 0.066, 0, 0, 2.05],
+      [ 0.025, 0.072, 0.068, 0.066, 0, 0, 2.05]
+    ];
+    const wristTapeGeo = createSculptedLoftGeometry(wristSlices, 20, false, true, true);
+    const wristTape = createHiFiMesh(wristTapeGeo, bandageWhite, 0.032);
+    wristTape.position.y = -0.34;
+    elbow.add(wristTape);
+
+    // Articulated Clenched Combat Fist with 2-Segment Knuckles, Tape & Thumb
     const hand = new THREE.Group();
     hand.position.y = -0.36;
     elbow.add(hand);
 
-    // Wrist Tape Band (radialSegments >= 20)
-    const wristTapeGeo = new THREE.CylinderGeometry(0.080, 0.080, 0.045, 22);
-    wristTapeGeo.computeVertexNormals();
-    const wristTape = createHiFiMesh(wristTapeGeo, bandageWhite, 0.030);
-    wristTape.position.y = 0.02;
-    hand.add(wristTape);
-
-    // Clenched Taped Palm
-    const palm = createHiFiMesh(new THREE.BoxGeometry(0.114, 0.098, 0.098), 0x18171f, 0.040);
+    // Contoured Palm Loft
+    const palmSlices = [
+      [ 0.025, 0.048, 0.036, 0.038, 0, 0, 2.15],
+      [-0.020, 0.054, 0.044, 0.044, 0, 0, 2.20],
+      [-0.065, 0.050, 0.040, 0.042, 0, 0, 2.15]
+    ];
+    const palmGeo = createSculptedLoftGeometry(palmSlices, 18, false, true, true);
+    const palm = createHiFiMesh(palmGeo, 0x18171f, 0.040);
     hand.add(palm);
 
-    // 4 Distinct Curled Fingers with White Athletic Knuckle Tape
-    [-0.035, -0.012, 0.012, 0.035].forEach((fx) => {
-      const finger = createHiFiMesh(new THREE.BoxGeometry(0.022, 0.038, 0.028), 0x22202a, 0.026);
-      finger.position.set(fx, -0.038, 0.042);
-      finger.rotation.x = 0.58;
-      hand.add(finger);
+    // 4 Distinct Curled Fingers with Proximal and Distal Knuckle Segments & Tape
+    for (let k = 0; k < 4; k++) {
+      const fx = (k - 1.5) * 0.024;
+      // Proximal knuckle segment
+      const proxSlices = [
+        [-0.015, 0.010, 0.016, 0.008, 0, -0.002, 2.1],
+        [ 0.000, 0.012, 0.018, 0.010, 0,  0.002, 2.15],
+        [ 0.015, 0.010, 0.016, 0.008, 0, -0.002, 2.1]
+      ];
+      const proxGeo = createSculptedLoftGeometry(proxSlices, 12, false, true, true);
+      const proxKnuckle = createHiFiMesh(proxGeo, 0x22202a, 0.026);
+      proxKnuckle.position.set(fx, -0.038, 0.038);
+      proxKnuckle.rotation.x = 0.52;
+      hand.add(proxKnuckle);
 
-      const tape = createHiFiMesh(new THREE.BoxGeometry(0.024, 0.019, 0.031), bandageWhite, 0.022);
-      tape.position.set(fx, -0.033, 0.045);
-      tape.rotation.x = 0.58;
-      hand.add(tape);
-    });
+      // White athletic tape cushion over MCP punch knuckle
+      const tapeSlices = [
+        [-0.012, 0.011, 0.019, 0.011, 0, 0.001, 2.1],
+        [ 0.012, 0.011, 0.019, 0.011, 0, 0.001, 2.1]
+      ];
+      const tapeGeo = createSculptedLoftGeometry(tapeSlices, 12, false, true, true);
+      const tapeMesh = createHiFiMesh(tapeGeo, bandageWhite, 0.022);
+      tapeMesh.position.set(fx, -0.034, 0.042);
+      tapeMesh.rotation.x = 0.52;
+      hand.add(tapeMesh);
 
-    // Articulated Taped Thumb tucked over fingers
-    const thumb = createHiFiMesh(new THREE.BoxGeometry(0.028, 0.036, 0.028), 0x22202a, 0.026);
-    thumb.position.set(-side * 0.054, -0.010, 0.030);
-    thumb.rotation.set(0.25, -side * 0.35, 0);
-    hand.add(thumb);
+      // Curled distal phalanx segment tucking inward under fist
+      const distSlices = [
+        [-0.014, 0.009, 0.013, 0.008, 0, 0, 2.05],
+        [ 0.014, 0.009, 0.013, 0.008, 0, 0, 2.05]
+      ];
+      const distGeo = createSculptedLoftGeometry(distSlices, 10, false, true, true);
+      const distMesh = createHiFiMesh(distGeo, 0x1e1c26, 0.024);
+      distMesh.position.set(fx, -0.058, 0.024);
+      distMesh.rotation.x = 1.35;
+      hand.add(distMesh);
+    }
 
-    const thumbTape = createHiFiMesh(new THREE.BoxGeometry(0.030, 0.021, 0.032), bandageWhite, 0.020);
-    thumbTape.position.set(-side * 0.054, -0.010, 0.033);
-    thumbTape.rotation.set(0.25, -side * 0.35, 0);
+    // Articulated 2-Segment Thumb tucked over fingers
+    const thumbProxSlices = [
+      [-0.018, 0.012, 0.016, 0.012, 0, 0, 2.1],
+      [ 0.018, 0.012, 0.016, 0.012, 0, 0, 2.1]
+    ];
+    const thumbProxGeo = createSculptedLoftGeometry(thumbProxSlices, 12, false, true, true);
+    const thumbProx = createHiFiMesh(thumbProxGeo, 0x22202a, 0.026);
+    thumbProx.position.set(-side * 0.046, -0.016, 0.034);
+    thumbProx.rotation.set(0.30, -side * 0.40, side * 0.15);
+    hand.add(thumbProx);
+
+    const thumbDistSlices = [
+      [-0.015, 0.011, 0.014, 0.011, 0, 0, 2.05],
+      [ 0.015, 0.011, 0.014, 0.011, 0, 0, 2.05]
+    ];
+    const thumbDistGeo = createSculptedLoftGeometry(thumbDistSlices, 12, false, true, true);
+    const thumbDist = createHiFiMesh(thumbDistGeo, 0x1e1c26, 0.024);
+    thumbDist.position.set(-side * 0.025, -0.028, 0.045);
+    thumbDist.rotation.set(0.65, -side * 0.70, 0);
+    hand.add(thumbDist);
+
+    const thumbTapeSlices = [
+      [-0.012, 0.013, 0.018, 0.013, 0, 0, 2.1],
+      [ 0.012, 0.013, 0.018, 0.013, 0, 0, 2.1]
+    ];
+    const thumbTapeGeo = createSculptedLoftGeometry(thumbTapeSlices, 12, false, true, true);
+    const thumbTape = createHiFiMesh(thumbTapeGeo, bandageWhite, 0.022);
+    thumbTape.position.set(-side * 0.036, -0.022, 0.040);
+    thumbTape.rotation.set(0.45, -side * 0.55, 0);
     hand.add(thumbTape);
 
     return { shoulder, elbow, fist: hand, hand };
@@ -5118,45 +5795,75 @@ export function buildBruiserModel(idx = 0) {
   torso.add(rightArmObj.shoulder);
 
   // ==========================================================================
-  // 5. TAPERED CARGO PANTS, ASYMMETRIC RIGHT KNEE ARMOR & COMBAT BOOTS
+  // 5. TAPERED CARGO PANTS, ASYMMETRIC RIGHT KNEE ARMOR & SCULPTED COMBAT BOOTS
+  // A-stance leg gap >= 3.5cm, sculpted lugged rubber tread, tongue & laces
   // ==========================================================================
   function buildBruiserLeg(side) {
     const hipJoint = new THREE.Group();
     hipJoint.position.set(side * 0.15, 0, 0);
 
-    // Baggy Tapered Cargo Thigh with Cloth Crease Folds (radialSegments >= 20)
-    const thighGeo = new THREE.CylinderGeometry(0.165, 0.135, 0.48, 24);
-    thighGeo.computeVertexNormals();
+    // Multi-Slice Baggy Cargo Thigh Loft with natural cloth folds (A-stance leg gap >= 3.5cm)
+    const bruiserThighSlices = [
+      // [y, rx, rzFront, rzBack, cx, cz, p] with frontIsNegZ = false
+      [ 0.000, 0.126, 0.128, 0.130, 0, 0.000, 2.22], // Hip insertion (inseam gap ~4.8cm)
+      [-0.100, 0.134, 0.136, 0.138, 0, 0.005, 2.25], // Upper quadriceps baggy fold bulge
+      [-0.200, 0.138, 0.140, 0.142, 0, 0.008, 2.25], // Mid-thigh maximum baggy drape
+      [-0.320, 0.130, 0.132, 0.134, 0, 0.005, 2.20], // Lower thigh taper
+      [-0.440, 0.118, 0.116, 0.120, 0, 0.002, 2.15], // Supracondylar knee transition
+      [-0.480, 0.110, 0.108, 0.112, 0, 0.000, 2.10]  // Knee joint insertion
+    ];
+    const thighGeo = createSculptedLoftGeometry(bruiserThighSlices, 24, false, true, true);
     const thigh = createHiFiMesh(thighGeo, pantsColor, 0.044);
-    thigh.position.y = -0.24;
     hipJoint.add(thigh);
 
-    // Thigh cloth fold ring (radialSegments >= 20)
-    const thighFoldGeo = new THREE.CylinderGeometry(0.170, 0.164, 0.06, 24);
-    thighFoldGeo.computeVertexNormals();
-    const thighFold = createHiFiMesh(thighFoldGeo, pantsColor, 0.032);
-    thighFold.position.y = -0.16;
-    hipJoint.add(thighFold);
+    // Natural Thigh Cloth Crease Fold Rings (Lofted)
+    [-0.16, -0.28].forEach((fy) => {
+      const foldSlices = [
+        [-0.020, 0.136, 0.138, 0.140, 0, 0.005, 2.22],
+        [ 0.000, 0.142, 0.144, 0.146, 0, 0.008, 2.25],
+        [ 0.020, 0.136, 0.138, 0.140, 0, 0.005, 2.22]
+      ];
+      const foldGeo = createSculptedLoftGeometry(foldSlices, 20, false, false, false);
+      const fold = createHiFiMesh(foldGeo, pantsColor, 0.034);
+      fold.position.y = fy;
+      hipJoint.add(fold);
+    });
 
-    // Outer-Thigh Cargo Flap Pocket
-    const cargoPocket = createHiFiMesh(new THREE.BoxGeometry(0.080, 0.19, 0.16), 0x14151e, 0.038);
-    cargoPocket.position.set(side * 0.145, -0.22, 0);
+    // Outer-Thigh Cargo Bellows Flap Pocket (Lofted)
+    const pocketSlices = [
+      [-0.090, 0.038, 0.078, 0.078, 0, 0, 2.3],
+      [ 0.000, 0.040, 0.080, 0.080, 0, 0, 2.35],
+      [ 0.090, 0.038, 0.078, 0.078, 0, 0, 2.3]
+    ];
+    const cargoPocketGeo = createSculptedLoftGeometry(pocketSlices, 16, false, true, true);
+    const cargoPocket = createHiFiMesh(cargoPocketGeo, 0x14151e, 0.038);
+    cargoPocket.position.set(side * 0.148, -0.22, 0);
     hipJoint.add(cargoPocket);
 
-    const pocketFlap = createHiFiMesh(new THREE.BoxGeometry(0.085, 0.045, 0.165), 0x101118, 0.032);
-    pocketFlap.position.set(side * 0.150, -0.12, 0);
+    const flapSlices = [
+      [-0.022, 0.042, 0.082, 0.082, 0, 0, 2.3],
+      [ 0.022, 0.042, 0.082, 0.082, 0, 0, 2.3]
+    ];
+    const flapGeo = createSculptedLoftGeometry(flapSlices, 14, false, true, true);
+    const pocketFlap = createHiFiMesh(flapGeo, 0x101118, 0.032);
+    pocketFlap.position.set(side * 0.152, -0.12, 0);
     pocketFlap.rotation.z = side * -0.06;
     hipJoint.add(pocketFlap);
 
+    const snapSlices = [
+      [-0.006, 0.012, 0.012, 0.012, 0, 0, 2.0],
+      [ 0.006, 0.012, 0.012, 0.012, 0, 0, 2.0]
+    ];
+    const snapGeo = createSculptedLoftGeometry(snapSlices, 10, false, true, true);
     const pocketSnap = createHiFiMesh(
-      new THREE.SphereGeometry(0.012, 8, 8),
+      snapGeo,
       silverMetal,
-      0.02,
+      0.020,
       null,
       0x000000,
       { isMetallic: true }
     );
-    pocketSnap.position.set(side * 0.195, -0.13, 0);
+    pocketSnap.position.set(side * 0.196, -0.13, 0);
     hipJoint.add(pocketSnap);
 
     const kneeJoint = new THREE.Group();
@@ -5164,19 +5871,29 @@ export function buildBruiserModel(idx = 0) {
     hipJoint.add(kneeJoint);
 
     // ASYMMETRIC KNEE ARMOR SPECIFICATION:
-    // Right Knee (side === 1) gets Armored Hardshell Pad with 4 Silver Rivets.
-    // Left Knee (side === -1) gets UNARMORED Cargo Pants Cloth folds!
+    // Right Knee (side === 1): Armored Contoured Hardshell Pad with 4 Silver Rivets & Dual Retention Straps.
+    // Left Knee (side === -1): UNARMORED Cargo Pants Natural Flexion Folds!
     if (side === 1) {
-      // Molded Charcoal-Grey Hardshell Knee Guard
-      const kneePad = createHiFiMesh(new THREE.BoxGeometry(0.16, 0.145, 0.065), 0x484b56, 0.040);
+      // Molded Charcoal-Grey Hardshell Knee Guard (Lofted)
+      const armorSlices = [
+        [-0.075, 0.072, 0.028, 0.010, 0, 0.000, 2.2], // Lower tapered apex
+        [-0.030, 0.084, 0.040, 0.012, 0, 0.005, 2.3], // Lower patellar swell
+        [ 0.020, 0.086, 0.042, 0.012, 0, 0.006, 2.3], // Upper patellar swell
+        [ 0.075, 0.074, 0.030, 0.010, 0, 0.000, 2.2]  // Upper rim
+      ];
+      const kneePadGeo = createSculptedLoftGeometry(armorSlices, 20, false, true, true);
+      const kneePad = createHiFiMesh(kneePadGeo, 0x484b56, 0.040);
       kneePad.position.set(0, 0.02, 0.125);
       kneeJoint.add(kneePad);
 
-      // 4 Corner Silver Rivets on Knee Armor Plate
+      // 4 Corner Silver Rivets on Knee Armor Plate (Lofted)
       [-0.052, 0.052].forEach((rx) => {
-        [-0.042, 0.042].forEach((ry) => {
-          const rivetGeo = new THREE.SphereGeometry(0.014, 8, 8);
-          rivetGeo.computeVertexNormals();
+        [-0.045, 0.045].forEach((ry) => {
+          const rivetSlices = [
+            [-0.006, 0.012, 0.012, 0.012, 0, 0, 2.0],
+            [ 0.006, 0.012, 0.012, 0.012, 0, 0, 2.0]
+          ];
+          const rivetGeo = createSculptedLoftGeometry(rivetSlices, 10, false, true, true);
           const rivet = createHiFiMesh(
             rivetGeo,
             silverMetal,
@@ -5185,69 +5902,145 @@ export function buildBruiserModel(idx = 0) {
             0x000000,
             { isMetallic: true, glintThreshold: 0.85, glintIntensity: 1.8 }
           );
-          rivet.position.set(rx, 0.02 + ry, 0.158);
+          rivet.position.set(rx, 0.02 + ry, 0.160);
           kneeJoint.add(rivet);
         });
       });
 
-      // Black Elastic Knee Pad Retention Strap (radialSegments >= 20)
-      const kneeStrapGeo = new THREE.CylinderGeometry(0.138, 0.138, 0.05, 24);
-      kneeStrapGeo.computeVertexNormals();
-      const kneeStrap = createHiFiMesh(kneeStrapGeo, 0x121216, 0.032);
-      kneeStrap.position.set(0, 0.02, 0);
-      kneeJoint.add(kneeStrap);
+      // Dual Black Elastic Retention Straps around popliteal fossa (Lofted)
+      [-0.025, 0.055].forEach((sy) => {
+        const strapSlices = [
+          [-0.018, 0.120, 0.116, 0.116, 0, 0.002, 2.15],
+          [ 0.018, 0.120, 0.116, 0.116, 0, 0.002, 2.15]
+        ];
+        const kneeStrapGeo = createSculptedLoftGeometry(strapSlices, 22, false, false, false);
+        const kneeStrap = createHiFiMesh(kneeStrapGeo, 0x121216, 0.032);
+        kneeStrap.position.set(0, sy, 0);
+        kneeJoint.add(kneeStrap);
+      });
     } else {
-      // Left Knee: Unarmored Cargo Pants Cloth Knee Flexion Folds (radialSegments >= 20)
-      const kneeFoldGeo = new THREE.CylinderGeometry(0.142, 0.136, 0.08, 24);
-      kneeFoldGeo.computeVertexNormals();
-      const kneeFold = createHiFiMesh(kneeFoldGeo, pantsColor, 0.035);
-      kneeFold.position.set(0, 0.02, 0.01);
-      kneeJoint.add(kneeFold);
+      // Left Knee: Unarmored Cargo Pants Natural Cloth Knee Flexion Folds (Lofted)
+      const leftKneeFoldSlices = [
+        [-0.040, 0.118, 0.114, 0.112, 0, 0.002, 2.15],
+        [ 0.000, 0.126, 0.124, 0.116, 0, 0.012, 2.25], // Natural forward flexion crease bulge
+        [ 0.040, 0.118, 0.114, 0.112, 0, 0.002, 2.15]
+      ];
+      const leftKneeGeo = createSculptedLoftGeometry(leftKneeFoldSlices, 22, false, false, false);
+      const leftKneeFold = createHiFiMesh(leftKneeGeo, pantsColor, 0.036);
+      leftKneeFold.position.set(0, 0.02, 0.01);
+      kneeJoint.add(leftKneeFold);
     }
 
-    // Lower Calf & Bloused Pant Leg Cuff over Boot (radialSegments >= 20)
-    const calfGeo = new THREE.CylinderGeometry(0.138, 0.120, 0.38, 24);
-    calfGeo.computeVertexNormals();
+    // Lower Calf & Bloused Pant Leg Cuff over Boot (Lofted)
+    const bruiserCalfPantsSlices = [
+      // [y, rx, rzFront, rzBack, cx, cz, p] with frontIsNegZ = false
+      [ 0.000, 0.114, 0.110, 0.112, 0, 0.000, 2.15], // Below knee joint
+      [-0.080, 0.122, 0.118, 0.124, 0, -0.005, 2.22],// Gastrocnemius muscle / cloth drape volume
+      [-0.180, 0.118, 0.114, 0.118, 0, -0.002, 2.20],// Mid calf
+      [-0.280, 0.110, 0.106, 0.110, 0, 0.000, 2.15], // Lower calf
+      [-0.360, 0.102, 0.098, 0.102, 0, 0.000, 2.10]  // Inset into boot collar
+    ];
+    const calfGeo = createSculptedLoftGeometry(bruiserCalfPantsSlices, 24, false, true, true);
     const calf = createHiFiMesh(calfGeo, pantsColor, 0.044);
-    calf.position.y = -0.18;
     kneeJoint.add(calf);
 
-    const blousedCuffGeo = new THREE.CylinderGeometry(0.146, 0.140, 0.07, 24);
-    blousedCuffGeo.computeVertexNormals();
-    const blousedCuff = createHiFiMesh(blousedCuffGeo, pantsColor, 0.035);
-    blousedCuff.position.y = -0.34;
+    // Deep bloused pant leg cuff overhang loft
+    const blousedCuffSlices = [
+      [-0.300, 0.112, 0.108, 0.110, 0, 0.000, 2.15],
+      [-0.340, 0.124, 0.120, 0.122, 0, 0.002, 2.25], // Deep fold bulge overhang
+      [-0.370, 0.116, 0.112, 0.114, 0, 0.000, 2.20]
+    ];
+    const blousedCuffGeo = createSculptedLoftGeometry(blousedCuffSlices, 22, false, true, true);
+    const blousedCuff = createHiFiMesh(blousedCuffGeo, pantsColor, 0.038);
     kneeJoint.add(blousedCuff);
 
-    // Heavy Laced Brawler Combat Boot
+    // Heavy Laced Brawler Combat Boot (100% Sculpted Lofts)
     const boot = new THREE.Group();
     boot.position.set(0, -0.44, 0.02);
     kneeJoint.add(boot);
 
-    // Thick Lugged Rubber Outsole
-    const sole = createHiFiMesh(new THREE.BoxGeometry(0.24, 0.09, 0.44), 0x0c0b0e, 0.048);
-    sole.position.y = -0.045;
+    // Thick Lugged Rubber Outsole (Lofted)
+    const soleSlices = [
+      [-0.075, 0.108, 0.200, 0.145, 0, 0.020, 2.5], // Outsole tread baseline
+      [-0.040, 0.112, 0.204, 0.148, 0, 0.020, 2.5]  // Midsole junction
+    ];
+    const soleGeo = createSculptedLoftGeometry(soleSlices, 24, false, true, true);
+    const sole = createHiFiMesh(soleGeo, 0x0c0b0e, 0.048);
     boot.add(sole);
 
-    // Midsole Welt Line
-    const welt = createHiFiMesh(new THREE.BoxGeometry(0.23, 0.02, 0.42), 0x22222a, 0.025);
-    welt.position.y = 0.005;
+    // Midsole Welt Line (Lofted)
+    const weltSlices = [
+      [-0.040, 0.108, 0.198, 0.144, 0, 0.018, 2.4],
+      [-0.025, 0.105, 0.194, 0.140, 0, 0.018, 2.4]
+    ];
+    const weltGeo = createSculptedLoftGeometry(weltSlices, 22, false, false, false);
+    const welt = createHiFiMesh(weltGeo, 0x22222a, 0.026);
     boot.add(welt);
 
-    // Combat Boot Leather Upper & Shaft
-    const upper = createHiFiMesh(new THREE.BoxGeometry(0.21, 0.17, 0.36), 0x18171f, 0.048);
-    upper.position.set(0, 0.08, 0.02);
+    // Rear Heel Step Cleat (Lofted)
+    const heelSlices = [
+      [-0.075, 0.104, 0.010, 0.140, 0, -0.010, 2.4],
+      [-0.045, 0.106, 0.010, 0.142, 0, -0.010, 2.4]
+    ];
+    const heelGeo = createSculptedLoftGeometry(heelSlices, 18, false, true, true);
+    const heel = createHiFiMesh(heelGeo, 0x08080a, 0.038);
+    boot.add(heel);
+
+    // 3D Lug Tread Cleats under Forefoot (Lofted)
+    [-0.035, 0.035].forEach((tx) => {
+      [0.05, 0.11, 0.17].forEach((tz) => {
+        const cleatSlices = [
+          [-0.082, 0.016, 0.018, 0.018, 0, 0, 2.2],
+          [-0.072, 0.018, 0.020, 0.020, 0, 0, 2.2]
+        ];
+        const cleatGeo = createSculptedLoftGeometry(cleatSlices, 10, false, true, true);
+        const cleat = createHiFiMesh(cleatGeo, 0x060608, 0.022);
+        cleat.position.set(tx, 0, tz);
+        boot.add(cleat);
+      });
+    });
+
+    // Combat Boot Leather Upper & Shaft (Lofted)
+    const bootUpperSlices = [
+      [-0.025, 0.098, 0.185, 0.130, 0, 0.018, 2.35], // Vamp & instep
+      [ 0.020, 0.088, 0.140, 0.110, 0, 0.012, 2.25], // Ankle transition
+      [ 0.070, 0.080, 0.090, 0.092, 0, 0.006, 2.18], // Mid shaft
+      [ 0.120, 0.082, 0.084, 0.086, 0, 0.002, 2.15], // Upper shaft
+      [ 0.160, 0.086, 0.088, 0.090, 0, 0.000, 2.15]  // Collar rim under bloused cuff
+    ];
+    const upperGeo = createSculptedLoftGeometry(bootUpperSlices, 24, false, false, true);
+    const upper = createHiFiMesh(upperGeo, 0x18171f, 0.046);
     boot.add(upper);
 
-    // Tapered Toe Box
-    const toeBox = createHiFiMesh(new THREE.BoxGeometry(0.20, 0.11, 0.17), 0x14131a, 0.040);
-    toeBox.position.set(0, 0.04, 0.135);
+    // Rounded Toe Box (Lofted)
+    const toeBoxSlices = [
+      [-0.030, 0.088, 0.090, 0.010, 0, 0.120, 2.25],
+      [ 0.010, 0.082, 0.082, 0.010, 0, 0.115, 2.20],
+      [ 0.045, 0.065, 0.055, 0.008, 0, 0.105, 2.10]
+    ];
+    const toeBoxGeo = createSculptedLoftGeometry(toeBoxSlices, 18, false, true, true);
+    const toeBox = createHiFiMesh(toeBoxGeo, 0x14131a, 0.038);
     boot.add(toeBox);
 
-    // Front Boot Laces with Silver Eyelets
-    [-0.038, 0.038].forEach((lx) => {
-      [0.05, 0.09, 0.13, 0.17].forEach((ly, lIdx) => {
-        const eyeletGeo = new THREE.SphereGeometry(0.009, 8, 8);
-        eyeletGeo.computeVertexNormals();
+    // Extended Front Tongue rising above boot collar (Lofted)
+    const tongueSlices = [
+      [0.020, 0.036, 0.015, 0.010, 0, 0.100, 2.1],
+      [0.080, 0.038, 0.016, 0.010, 0, 0.092, 2.1],
+      [0.140, 0.040, 0.016, 0.010, 0, 0.084, 2.1],
+      [0.190, 0.036, 0.014, 0.008, 0, 0.076, 2.05]
+    ];
+    const tongueGeo = createSculptedLoftGeometry(tongueSlices, 14, false, true, true);
+    const tongue = createHiFiMesh(tongueGeo, 0x121118, 0.032);
+    boot.add(tongue);
+
+    // Front Boot Laces with 4 Pairs of Silver Eyelets (Lofted)
+    [-0.036, 0.036].forEach((lx) => {
+      [0.04, 0.075, 0.11, 0.145].forEach((ly, lIdx) => {
+        const eyeletSlices = [
+          [-0.005, 0.008, 0.008, 0.008, 0, 0, 2.0],
+          [ 0.005, 0.008, 0.008, 0.008, 0, 0, 2.0]
+        ];
+        const eyeletGeo = createSculptedLoftGeometry(eyeletSlices, 10, false, true, true);
         const eyelet = createHiFiMesh(
           eyeletGeo,
           silverMetal,
@@ -5256,17 +6049,21 @@ export function buildBruiserModel(idx = 0) {
           0x000000,
           { isMetallic: true }
         );
-        eyelet.position.set(lx, ly, 0.135 - lIdx * 0.025);
+        eyelet.position.set(lx, ly, 0.118 - lIdx * 0.018);
         boot.add(eyelet);
       });
     });
 
-    // Dark crisscrossed front laces
-    const laceGeo = new THREE.BoxGeometry(0.080, 0.014, 0.014);
-    [0.05, 0.09, 0.13, 0.17].forEach((ly, lIdx) => {
-      const lace = createHiFiMesh(laceGeo, 0x0a0a0e, 0.02);
-      lace.position.set(0, ly, 0.135 - lIdx * 0.025);
-      lace.rotation.z = (lIdx % 2 === 0 ? 0.25 : -0.25);
+    // Dark crisscrossed front combat laces (Lofted)
+    [0.04, 0.075, 0.11, 0.145].forEach((ly, lIdx) => {
+      const laceSlices = [
+        [-0.036, 0.006, 0.006, 0.006, 0, 0, 2.0],
+        [ 0.036, 0.006, 0.006, 0.006, 0, 0, 2.0]
+      ];
+      const laceGeo = createSculptedLoftGeometry(laceSlices, 10, false, true, true);
+      const lace = createHiFiMesh(laceGeo, 0x08080c, 0.020);
+      lace.position.set(0, ly, 0.120 - lIdx * 0.018);
+      lace.rotation.set(0.24, 0, (lIdx % 2 === 0 ? 0.28 : -0.28));
       boot.add(lace);
     });
 
@@ -5278,23 +6075,27 @@ export function buildBruiserModel(idx = 0) {
   hips.add(leftLegObj.hipJoint);
   hips.add(rightLegObj.hipJoint);
 
-  return {
-    rig: {
-      root,
-      contactShadowDecal,
-      hips,
-      torso,
-      headGroup,
-      leftArm: leftArmObj.shoulder,
-      leftElbow: leftArmObj.elbow,
-      rightArm: rightArmObj.shoulder,
-      rightElbow: rightArmObj.elbow,
-      leftLeg: leftLegObj.hipJoint,
-      leftKnee: leftLegObj.kneeJoint,
-      rightLeg: rightLegObj.hipJoint,
-      rightKnee: rightLegObj.kneeJoint
-    }
-  };
+  const rig = optimizeArticulatedRigBones({
+    root,
+    contactShadowDecal,
+    hips,
+    torso,
+    headGroup,
+    leftArm: leftArmObj.shoulder,
+    leftElbow: leftArmObj.elbow,
+    leftHand: leftArmObj.hand,
+    rightArm: rightArmObj.shoulder,
+    rightElbow: rightArmObj.elbow,
+    rightHand: rightArmObj.hand,
+    leftLeg: leftLegObj.hipJoint,
+    leftKnee: leftLegObj.kneeJoint,
+    leftAnkle: leftLegObj.boot,
+    rightLeg: rightLegObj.hipJoint,
+    rightKnee: rightLegObj.kneeJoint,
+    rightAnkle: rightLegObj.boot
+  });
+
+  return { rig, ...rig };
 }
 
 // Export alias matching ORIGINAL_REQUEST.md & PROJECT.md
@@ -5529,6 +6330,80 @@ function createSpectatorFaceTexture(skinHex = 0xd89c74, styleIdx = 0) {
   return tex;
 }
 
+/**
+ * Streetwear DJ / Producer Headphones accessory.
+ * Supports wearing over ears or resting around neck/collar.
+ */
+function buildStreetwearHeadphones(parentGroup, yPos = 0.0, zPos = 0.0, colorHex = 0x181a20, accentHex = 0xd49b35, overEars = false) {
+  const hpGroup = new THREE.Group();
+  hpGroup.position.set(0, yPos, zPos);
+  parentGroup.add(hpGroup);
+
+  if (overEars) {
+    const overHeadBandSlices = [
+      [0.015, 0.098, 0.014, 0.014, 0, 0.002, 2.0],
+      [0.065, 0.096, 0.015, 0.015, 0, 0.003, 2.05],
+      [0.115, 0.082, 0.016, 0.016, 0, 0.004, 2.1],
+      [0.150, 0.052, 0.016, 0.016, 0, 0.004, 2.05]
+    ];
+    const bandGeo = createSculptedLoftGeometry(overHeadBandSlices, 20, false, false, false);
+    const band = createHiFiMesh(bandGeo, colorHex, 0.026);
+    band.position.set(0, 0.07, 0.005);
+    hpGroup.add(band);
+
+    [-1, 1].forEach((side) => {
+      const cupSlices = [
+        [-0.024, 0.012, 0.024, 0.024, side * 0.098, 0, 2.1],
+        [ 0.000, 0.016, 0.028, 0.028, side * 0.104, 0, 2.15],
+        [ 0.024, 0.012, 0.024, 0.024, side * 0.098, 0, 2.1]
+      ];
+      const cupGeo = createSculptedLoftGeometry(cupSlices, 14, false, true, true);
+      const cup = createHiFiMesh(cupGeo, colorHex, 0.028);
+      cup.position.set(0, 0.005, -0.002);
+      hpGroup.add(cup);
+
+      const ringSlices = [
+        [-0.006, 0.006, 0.018, 0.018, side * 0.110, 0, 2.1],
+        [ 0.006, 0.006, 0.018, 0.018, side * 0.110, 0, 2.1]
+      ];
+      const ringGeo = createSculptedLoftGeometry(ringSlices, 12, false, true, true);
+      const ring = createHiFiMesh(ringGeo, accentHex, 0.020);
+      ring.position.set(0, 0.005, -0.002);
+      hpGroup.add(ring);
+    });
+  } else {
+    const neckBandSlices = [
+      [-0.012, 0.142, 0.014, 0.085, 0, -0.008, 2.1],
+      [ 0.000, 0.150, 0.016, 0.095, 0, -0.010, 2.15],
+      [ 0.012, 0.142, 0.014, 0.085, 0, -0.008, 2.1]
+    ];
+    const bandGeo = createSculptedLoftGeometry(neckBandSlices, 20, false, false, false);
+    const band = createHiFiMesh(bandGeo, colorHex, 0.028);
+    band.position.set(0, 0.02, 0.01);
+    hpGroup.add(band);
+
+    [-1, 1].forEach((side) => {
+      const cupSlices = [
+        [-0.015, 0.022, 0.026, 0.026, side * 0.145, 0.085, 2.15],
+        [ 0.015, 0.022, 0.026, 0.026, side * 0.145, 0.085, 2.15]
+      ];
+      const cupGeo = createSculptedLoftGeometry(cupSlices, 14, false, true, true);
+      const cup = createHiFiMesh(cupGeo, colorHex, 0.028);
+      cup.rotation.y = side * 0.35;
+      hpGroup.add(cup);
+
+      const accentSlices = [
+        [-0.008, 0.016, 0.018, 0.018, side * 0.145, 0.098, 2.1],
+        [ 0.008, 0.016, 0.018, 0.018, side * 0.145, 0.098, 2.1]
+      ];
+      const accentGeo = createSculptedLoftGeometry(accentSlices, 12, false, true, true);
+      const accent = createHiFiMesh(accentGeo, accentHex, 0.020);
+      accent.rotation.y = side * 0.35;
+      hpGroup.add(accent);
+    });
+  }
+}
+
 export function buildSpectatorModel(
   shirtHex = 0xc26a2b,
   pantsHex = 0x22242a,
@@ -5546,341 +6421,526 @@ export function buildSpectatorModel(
 
   const style = styleIdx !== null ? (Math.abs(styleIdx) % 7) : (spectatorCounter++ % 7);
 
-  // 1. Torso Geometry with 3 Streetwear Silhouettes:
-  // - Hoodies (Styles 3, 5): kangaroo pouch, drawstrings, ribbed hem
-  // - Bomber Jackets (Styles 1, 4): puffy shell, ribbed collar/hem, front zipper
-  // - Layered Streetwear Tees (Styles 0, 2, 6): tapered tee, crewneck collar band
+  // 1. Torso Geometry with 3 Multi-Slice Sculpted Streetwear Silhouettes (frontIsNegZ = false):
+  // - Hoodies (Styles 3, 5): multi-slice loft with kangaroo pouch protrusion, drawstrings, ribbed hem
+  // - Bomber Jackets (Styles 1, 4): puffy midriff/chest loft, knit collar, sculpted zipper
+  // - Layered Streetwear Tees (Styles 0, 2, 6): tapered athletic loft, crewneck collar trim
   const torso = new THREE.Group();
   torso.position.y = 0.04;
   hips.add(torso);
 
   if (style === 3 || style === 5) {
-    // STREETWEAR HOODIE
-    const hoodieGeo = new THREE.CylinderGeometry(0.24, 0.19, 0.66, 20);
-    hoodieGeo.computeVertexNormals();
+    // STREETWEAR HOODIE MULTI-SLICE LOFT
+    const hoodieTorsoSlices = [
+      [0.00, 0.200, 0.145, 0.140, 0, 0.000, 2.2], // Ribbed hem base
+      [0.07, 0.204, 0.148, 0.142, 0, 0.000, 2.2], // Hem top
+      [0.18, 0.228, 0.182, 0.150, 0, 0.010, 2.25],// Midriff + kangaroo pouch protrusion
+      [0.28, 0.235, 0.184, 0.152, 0, 0.010, 2.25],// Upper pouch
+      [0.44, 0.244, 0.170, 0.155, 0, 0.006, 2.2], // Pectoral chest
+      [0.54, 0.232, 0.145, 0.140, 0, 0.004, 2.15],// Upper chest
+      [0.66, 0.125, 0.105, 0.105, 0, 0.000, 2.0]  // Neck base slope
+    ];
+    const hoodieGeo = createSculptedLoftGeometry(hoodieTorsoSlices, 22, false, true, true);
     const hoodieMesh = createHiFiMesh(hoodieGeo, shirtHex, 0.044);
-    hoodieMesh.position.y = 0.33;
     torso.add(hoodieMesh);
 
-    // Kangaroo front pouch pocket
-    const pouchGeo = new THREE.BoxGeometry(0.22, 0.14, 0.042);
-    pouchGeo.computeVertexNormals();
+    // 3D Contoured Kangaroo Pouch Pocket Loft
+    const pouchSlices = [
+      [0.16, 0.110, 0.014, 0.004, 0, 0.188, 2.2],
+      [0.23, 0.118, 0.018, 0.004, 0, 0.194, 2.25],
+      [0.29, 0.105, 0.014, 0.004, 0, 0.190, 2.2]
+    ];
+    const pouchGeo = createSculptedLoftGeometry(pouchSlices, 18, false, true, true);
     const pouch = createHiFiMesh(pouchGeo, shirtHex, 0.038);
-    pouch.position.set(0, 0.23, 0.142);
     torso.add(pouch);
 
-    // Ribbed bottom hem
-    const hemGeo = new THREE.CylinderGeometry(0.196, 0.190, 0.07, 20);
-    hemGeo.computeVertexNormals();
-    const hem = createHiFiMesh(hemGeo, shirtHex, 0.035);
-    hem.position.y = 0.035;
-    torso.add(hem);
-
-    // Cream drawstrings hanging down chest
+    // Cream drawstrings hanging down chest with metallic aglets
     [-0.035, 0.035].forEach((dx) => {
-      const stringGeo = new THREE.CylinderGeometry(0.007, 0.007, 0.16, 12);
-      stringGeo.computeVertexNormals();
+      const stringSlices = [
+        [0.39, 0.007, 0.007, 0.007, dx, 0.182, 2.0],
+        [0.55, 0.007, 0.007, 0.007, dx, 0.182, 2.0]
+      ];
+      const stringGeo = createSculptedLoftGeometry(stringSlices, 10, false, true, true);
       const stringMesh = createHiFiMesh(stringGeo, 0xe8e2d4, 0.016);
-      stringMesh.position.set(dx, 0.48, 0.165);
       torso.add(stringMesh);
 
-      // Silver aglet tip
-      const aglet = createHiFiMesh(new THREE.CylinderGeometry(0.009, 0.009, 0.024, 10), 0xdce0ea, 0.014);
-      aglet.position.set(dx, 0.39, 0.165);
+      const agletSlices = [
+        [0.370, 0.009, 0.009, 0.009, dx, 0.182, 2.0],
+        [0.394, 0.009, 0.009, 0.009, dx, 0.182, 2.0]
+      ];
+      const agletGeo = createSculptedLoftGeometry(agletSlices, 10, false, true, true);
+      const aglet = createHiFiMesh(agletGeo, 0xdce0ea, 0.014);
       torso.add(aglet);
     });
 
     if (style === 3) {
-      // Relaxed folded hood around back of neck
-      const hoodRingGeo = new THREE.TorusGeometry(0.19, 0.055, 10, 20);
-      hoodRingGeo.computeVertexNormals();
+      // Relaxed folded hood drape around back of neck
+      const hoodDrapeSlices = [
+        [0.61, 0.170, 0.040, 0.095, 0, -0.055, 2.1],
+        [0.66, 0.185, 0.048, 0.115, 0, -0.065, 2.15],
+        [0.70, 0.175, 0.042, 0.100, 0, -0.060, 2.1]
+      ];
+      const hoodRingGeo = createSculptedLoftGeometry(hoodDrapeSlices, 20, false, false, false);
       const hoodRing = createHiFiMesh(hoodRingGeo, shirtHex, 0.040);
-      hoodRing.position.set(0, 0.67, -0.05);
-      hoodRing.rotation.x = Math.PI * 0.38;
       torso.add(hoodRing);
     }
   } else if (style === 1 || style === 4) {
-    // STREETWEAR BOMBER JACKET
-    const jacketGeo = new THREE.CylinderGeometry(0.255, 0.210, 0.64, 20);
-    jacketGeo.computeVertexNormals();
+    // STREETWEAR BOMBER JACKET MULTI-SLICE LOFT
+    const bomberTorsoSlices = [
+      [0.00, 0.210, 0.145, 0.140, 0, 0.000, 2.3], // Ribbed waistband
+      [0.06, 0.214, 0.148, 0.142, 0, 0.000, 2.3],
+      [0.20, 0.252, 0.188, 0.172, 0, 0.008, 2.3], // Puffy lower midriff
+      [0.36, 0.262, 0.198, 0.182, 0, 0.010, 2.25],// Full puffy chest
+      [0.52, 0.248, 0.175, 0.165, 0, 0.006, 2.2], // Upper chest
+      [0.64, 0.130, 0.112, 0.112, 0, 0.000, 2.05] // Shoulder slope into knit collar
+    ];
+    const jacketGeo = createSculptedLoftGeometry(bomberTorsoSlices, 22, false, true, true);
     const jacketMesh = createHiFiMesh(jacketGeo, shirtHex, 0.044);
-    jacketMesh.position.y = 0.34;
     torso.add(jacketMesh);
 
     // Ribbed knit collar
-    const collarGeo = new THREE.TorusGeometry(0.135, 0.034, 10, 20);
-    collarGeo.computeVertexNormals();
+    const collarSlices = [
+      [0.63, 0.134, 0.116, 0.116, 0, 0.000, 2.1],
+      [0.67, 0.126, 0.108, 0.108, 0, 0.000, 2.05]
+    ];
+    const collarGeo = createSculptedLoftGeometry(collarSlices, 20, false, false, false);
     const collar = createHiFiMesh(collarGeo, 0x22242a, 0.034);
-    collar.position.set(0, 0.66, 0.01);
-    collar.rotation.x = Math.PI * 0.45;
     torso.add(collar);
 
-    // Metallic center zipper line
-    const zipperGeo = new THREE.BoxGeometry(0.014, 0.58, 0.018);
+    // Sculpted center zipper tape
+    const zipperSlices = [
+      [0.05, 0.010, 0.010, 0.004, 0, 0.155, 2.0],
+      [0.22, 0.010, 0.012, 0.004, 0, 0.195, 2.0],
+      [0.40, 0.010, 0.012, 0.004, 0, 0.205, 2.0],
+      [0.62, 0.010, 0.010, 0.004, 0, 0.145, 2.0]
+    ];
+    const zipperGeo = createSculptedLoftGeometry(zipperSlices, 10, false, true, true);
     const zipper = createHiFiMesh(zipperGeo, 0xdce0ea, 0.022);
-    zipper.position.set(0, 0.34, 0.185);
     torso.add(zipper);
 
-    // Ribbed knit bottom waistband hem
-    const hemGeo = new THREE.CylinderGeometry(0.216, 0.216, 0.08, 20);
-    hemGeo.computeVertexNormals();
+    // Ribbed knit bottom waistband
+    const hemSlices = [
+      [-0.01, 0.208, 0.142, 0.138, 0, 0.000, 2.25],
+      [ 0.06, 0.214, 0.148, 0.142, 0, 0.000, 2.25]
+    ];
+    const hemGeo = createSculptedLoftGeometry(hemSlices, 20, false, true, true);
     const hem = createHiFiMesh(hemGeo, 0x22242a, 0.035);
-    hem.position.y = 0.01;
     torso.add(hem);
   } else {
-    // LAYERED STREETWEAR TEE / LONG-SLEEVE
-    const teeGeo = new THREE.CylinderGeometry(0.245, 0.214, 0.65, 20);
-    teeGeo.computeVertexNormals();
+    // LAYERED STREETWEAR TEE / LONG-SLEEVE MULTI-SLICE LOFT
+    const teeTorsoSlices = [
+      [0.00, 0.212, 0.142, 0.140, 0, 0.000, 2.2], // Bottom hem
+      [0.06, 0.214, 0.144, 0.142, 0, 0.000, 2.2],
+      [0.22, 0.228, 0.155, 0.150, 0, 0.004, 2.2], // Athletic waist
+      [0.40, 0.246, 0.168, 0.158, 0, 0.006, 2.2], // Upper chest
+      [0.54, 0.235, 0.145, 0.140, 0, 0.004, 2.15],// Clavicle line
+      [0.65, 0.120, 0.100, 0.100, 0, 0.000, 2.0]  // Crewneck base
+    ];
+    const teeGeo = createSculptedLoftGeometry(teeTorsoSlices, 22, false, true, true);
     const teeMesh = createHiFiMesh(teeGeo, shirtHex, 0.044);
-    teeMesh.position.y = 0.34;
     torso.add(teeMesh);
 
     // Contrasting crewneck collar trim
-    const crewGeo = new THREE.TorusGeometry(0.125, 0.024, 8, 20);
-    crewGeo.computeVertexNormals();
+    const crewSlices = [
+      [0.63, 0.124, 0.104, 0.104, 0, 0.000, 2.05],
+      [0.67, 0.118, 0.098, 0.098, 0, 0.000, 2.0]
+    ];
+    const crewGeo = createSculptedLoftGeometry(crewSlices, 20, false, false, false);
     const crew = createHiFiMesh(crewGeo, 0xe8e2d4, 0.030);
-    crew.position.set(0, 0.66, 0.01);
-    crew.rotation.x = Math.PI * 0.45;
     torso.add(crew);
 
     // Bottom hem trim
-    const hemGeo = new THREE.CylinderGeometry(0.216, 0.216, 0.08, 20);
-    hemGeo.computeVertexNormals();
+    const hemSlices = [
+      [-0.01, 0.210, 0.140, 0.138, 0, 0.000, 2.2],
+      [ 0.06, 0.214, 0.144, 0.142, 0, 0.000, 2.2]
+    ];
+    const hemGeo = createSculptedLoftGeometry(hemSlices, 20, false, true, true);
     const hem = createHiFiMesh(hemGeo, shirtHex, 0.035);
-    hem.position.y = 0.01;
     torso.add(hem);
   }
 
-  // 1b. Stationary Shoulder Sockets on Torso (prevents any gaps when arms raise)
+  // 1b. Stationary Sculpted Shoulder Sockets on Torso
   [-1, 1].forEach((side) => {
-    const socketGeo = new THREE.SphereGeometry(0.076, 16, 12);
-    socketGeo.computeVertexNormals();
+    const socketSlices = [
+      [-0.05, 0.065, 0.065, 0.065, 0, 0, 2.0],
+      [ 0.00, 0.076, 0.076, 0.076, 0, 0, 2.0],
+      [ 0.05, 0.065, 0.065, 0.065, 0, 0, 2.0]
+    ];
+    const socketGeo = createSculptedLoftGeometry(socketSlices, 14, false, true, true);
     const socket = createHiFiMesh(socketGeo, shirtHex, 0.040);
     socket.position.set(side * 0.23, 0.58, 0);
     torso.add(socket);
   });
 
-  // 1c. Solid Pelvis / Waist-Hip Block on Hips (eliminates horizontal air gaps between shirt and pants)
-  const pelvisGeo = new THREE.CylinderGeometry(0.198, 0.194, 0.20, 20);
-  pelvisGeo.computeVertexNormals();
+  // 1c. Multi-Slice Sculpted Pelvis Loft on Hips (connects waist hem to leg hips seamlessly)
+  const spectatorPelvisSlices = [
+    [-0.21, 0.176, 0.126, 0.132, 0, 0.000, 2.15], // Lower groin / gluteus base enclosing thigh roots
+    [-0.12, 0.188, 0.138, 0.144, 0, 0.001, 2.2],  // Mid groin taper
+    [-0.04, 0.198, 0.146, 0.150, 0, 0.002, 2.25], // Mid pelvis / hip curves
+    [ 0.02, 0.202, 0.148, 0.150, 0, 0.002, 2.25]  // Upper waist rim connecting to torso
+  ];
+  const pelvisGeo = createSculptedLoftGeometry(spectatorPelvisSlices, 20, false, true, true);
   const pelvis = createHiFiMesh(pelvisGeo, pantsHex, 0.042);
-  pelvis.scale.set(1.0, 1.0, 0.84);
   pelvis.position.y = 0.01;
   hips.add(pelvis);
 
-  // 2. Sculpted Head with Cel-Shaded Procedural Face & 7 Diverse Urban Hair/Headwear Styles
+  // 1d. Anatomical 3-Slice Sculpted Neck Loft on Torso (connects collar rim to chin/jawline seamlessly)
+  const spectatorNeckSlices = [
+    [0.64, 0.066, 0.062, 0.062, 0, 0.005, 2.1], // Base seated inside collar rim (y=0.64..0.67)
+    [0.70, 0.060, 0.056, 0.056, 0, 0.003, 2.1], // Mid neck column bridging the void
+    [0.77, 0.056, 0.052, 0.054, 0, 0.002, 2.05] // Upper throat inserting cleanly into jawline/chin
+  ];
+  const neckGeo = createSculptedLoftGeometry(spectatorNeckSlices, 18, false, false, false);
+  const neckMesh = createHiFiMesh(neckGeo, skinHex, 0.030);
+  torso.add(neckMesh);
+
+  // 2. Sculpted Anime Cranium Loft with 3D Nose Bridge, 3D Ears & 7 Streetwear Styles
   const headGroup = new THREE.Group();
   headGroup.position.y = 0.86;
   torso.add(headGroup);
 
-  const headGeo = new THREE.SphereGeometry(0.18, 24, 18);
-  headGeo.computeVertexNormals();
+  const spectatorHeadSlices = [
+    [-0.115, 0.024, 0.042, 0.028, 0, 0.012, 2.2], // Pointed anime chin tip
+    [-0.085, 0.052, 0.068, 0.050, 0, 0.010, 2.2], // Jawline / gonion V-taper
+    [-0.050, 0.070, 0.082, 0.072, 0, 0.005, 2.15],// Mouth level
+    [-0.015, 0.080, 0.090, 0.085, 0, 0.002, 2.1], // Cheekbones & nose radix
+    [ 0.025, 0.082, 0.092, 0.090, 0, 0.000, 2.05],// Eye midline (u = 0.50 aligns with face texture)
+    [ 0.065, 0.078, 0.084, 0.088, 0,-0.003, 2.0], // Brow ridge & temple
+    [ 0.098, 0.068, 0.068, 0.078, 0,-0.005, 2.0], // Forehead hairline
+    [ 0.125, 0.045, 0.045, 0.055, 0,-0.006, 2.0]  // Cranium apex
+  ];
+  const headGeo = createSculptedLoftGeometry(spectatorHeadSlices, 24, false, true, true);
   const faceTex = createSpectatorFaceTexture(skinHex, style);
   const head = createHiFiMesh(headGeo, 0xffffff, 0.038, faceTex);
-  head.rotation.y = -Math.PI / 2; // Aligns procedural face features directly to +Z (Front)
   headGroup.add(head);
 
+  // 3D Sleek Anime Nose Bridge (anchored at nose radix/bridge)
+  const spectatorNosePts = [
+    [0.000, 0.004, 0.005, 0.005, 0, 0.000, 2.0], // Philtrum
+    [0.014, 0.008, 0.018, 0.005, 0, 0.006, 2.0], // Sharp nose tip
+    [0.034, 0.006, 0.012, 0.004, 0, 0.003, 2.0], // Mid bridge
+    [0.048, 0.003, 0.004, 0.004, 0, 0.000, 2.0]  // Radix between eyes
+  ];
+  const noseGeo = createSculptedLoftGeometry(spectatorNosePts, 14, false, true, true);
+  const noseMesh = createHiFiMesh(noseGeo, skinHex, 0.0); // 0 outline thickness to avoid dark line down nose
+  noseMesh.position.set(0, -0.028, 0.084);
+  headGroup.add(noseMesh);
+
+  // 3D Sculpted Ears
+  [-1, 1].forEach((side) => {
+    const earSlices = [
+      [-0.026, 0.007, 0.012, 0.012, 0, 0, 2.0],
+      [-0.006, 0.014, 0.019, 0.019, side * -0.003, 0, 2.0],
+      [ 0.014, 0.015, 0.021, 0.021, side * -0.004, 0, 2.0],
+      [ 0.028, 0.007, 0.012, 0.012, 0, 0, 2.0]
+    ];
+    const earGeo = createSculptedLoftGeometry(earSlices, 14, false, true, true);
+    const ear = createHiFiMesh(earGeo, skinHex, 0.026);
+    ear.position.set(side * 0.086, 0.005, -0.002);
+    headGroup.add(ear);
+  });
+
   if (style === 0) {
-    // STYLE 0: Backwards Snapback Cap with Brim (sits cleanly above eyebrows/eyes)
-    const capGeo = new THREE.SphereGeometry(0.186, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.44);
-    capGeo.computeVertexNormals();
+    // STYLE 0: Backwards Snapback Cap with Curved Visor & Streetwear Headphones around neck
+    const capCrownSlices = [
+      [0.045, 0.082, 0.082, 0.088, 0, -0.004, 2.05],
+      [0.085, 0.084, 0.084, 0.088, 0, -0.004, 2.05],
+      [0.125, 0.078, 0.076, 0.082, 0, -0.004, 2.0],
+      [0.155, 0.048, 0.046, 0.052, 0, -0.004, 2.0]
+    ];
+    const capGeo = createSculptedLoftGeometry(capCrownSlices, 20, false, false, true);
     const cap = createHiFiMesh(capGeo, shirtHex, 0.042);
-    cap.position.set(0, 0.055, 0);
     headGroup.add(cap);
 
-    const buttonGeo = new THREE.SphereGeometry(0.018, 10, 10);
+    const buttonSlices = [
+      [0.152, 0.018, 0.018, 0.018, 0, -0.004, 2.0],
+      [0.165, 0.012, 0.012, 0.012, 0, -0.004, 2.0]
+    ];
+    const buttonGeo = createSculptedLoftGeometry(buttonSlices, 12, false, true, true);
     const button = createHiFiMesh(buttonGeo, 0xe8e2d4, 0.020);
-    button.position.set(0, 0.240, 0);
     headGroup.add(button);
 
-    const visorGeo = new THREE.BoxGeometry(0.17, 0.022, 0.13);
+    const visorSlices = [
+      [0.052, 0.082, 0.010, 0.045, 0, -0.095, 2.0],
+      [0.065, 0.078, 0.008, 0.070, 0, -0.145, 2.0],
+      [0.078, 0.068, 0.006, 0.055, 0, -0.185, 2.0]
+    ];
+    const visorGeo = createSculptedLoftGeometry(visorSlices, 16, false, true, true);
     const visor = createHiFiMesh(visorGeo, shirtHex, 0.036);
-    visor.position.set(0, 0.092, -0.185);
-    visor.rotation.x = 0.16;
     headGroup.add(visor);
 
-    // Hair peeking from beneath backwards cap (back and sides)
-    const hairGeo = new THREE.SphereGeometry(0.184, 14, 10, Math.PI * 0.45, Math.PI * 1.1, Math.PI * 0.36, Math.PI * 0.36);
-    const hair = createHiFiMesh(hairGeo, 0x221814, 0.04);
-    hair.position.set(0, 0.04, -0.02);
+    // Hair peeking from beneath backwards cap
+    const hairSlices = [
+      [-0.03, 0.076, 0.035, 0.082, 0, -0.015, 2.05],
+      [ 0.03, 0.080, 0.040, 0.086, 0, -0.015, 2.05]
+    ];
+    const hairGeo = createSculptedLoftGeometry(hairSlices, 16, false, true, true);
+    const hair = createHiFiMesh(hairGeo, 0x221814, 0.040);
     headGroup.add(hair);
+
+    buildStreetwearHeadphones(torso, 0.62, 0.01, 0x181a20, 0xd49b35, false);
   } else if (style === 1) {
-    // STYLE 1: Forwards Snapback Cap with Curved Visor (sits cleanly above eyebrows/eyes)
-    const capGeo = new THREE.SphereGeometry(0.186, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.44);
-    capGeo.computeVertexNormals();
+    // STYLE 1: Forwards Snapback Cap with Curved Visor & Embroidered Patch
+    const capCrownSlices = [
+      [0.045, 0.082, 0.084, 0.084, 0, -0.002, 2.05],
+      [0.085, 0.084, 0.086, 0.086, 0, -0.002, 2.05],
+      [0.125, 0.078, 0.080, 0.078, 0, -0.002, 2.0],
+      [0.155, 0.048, 0.050, 0.048, 0, -0.002, 2.0]
+    ];
+    const capGeo = createSculptedLoftGeometry(capCrownSlices, 20, false, false, true);
     const cap = createHiFiMesh(capGeo, 0x3b4d66, 0.042);
-    cap.position.set(0, 0.055, 0);
     headGroup.add(cap);
 
-    const buttonGeo = new THREE.SphereGeometry(0.018, 10, 10);
+    const buttonSlices = [
+      [0.152, 0.018, 0.018, 0.018, 0, -0.002, 2.0],
+      [0.165, 0.012, 0.012, 0.012, 0, -0.002, 2.0]
+    ];
+    const buttonGeo = createSculptedLoftGeometry(buttonSlices, 12, false, true, true);
     const button = createHiFiMesh(buttonGeo, 0xd49b35, 0.020);
-    button.position.set(0, 0.240, 0);
     headGroup.add(button);
 
-    const visorGeo = new THREE.BoxGeometry(0.18, 0.022, 0.14);
+    const visorSlices = [
+      [0.055, 0.082, 0.045, 0.010, 0, 0.095, 2.0],
+      [0.050, 0.078, 0.070, 0.008, 0, 0.145, 2.0],
+      [0.042, 0.068, 0.055, 0.006, 0, 0.185, 2.0]
+    ];
+    const visorGeo = createSculptedLoftGeometry(visorSlices, 16, false, true, true);
     const visor = createHiFiMesh(visorGeo, 0x3b4d66, 0.036);
-    visor.position.set(0, 0.098, 0.185);
-    visor.rotation.x = -0.14;
     headGroup.add(visor);
 
-    const patchGeo = new THREE.BoxGeometry(0.055, 0.040, 0.015);
+    const patchSlices = [
+      [0.075, 0.028, 0.008, 0.004, 0, 0.090, 2.0],
+      [0.110, 0.028, 0.008, 0.004, 0, 0.088, 2.0]
+    ];
+    const patchGeo = createSculptedLoftGeometry(patchSlices, 12, false, true, true);
     const patch = createHiFiMesh(patchGeo, 0xe8e2d4, 0.022);
-    patch.position.set(0, 0.155, 0.182);
     headGroup.add(patch);
   } else if (style === 2) {
-    // STYLE 2: Snug Ribbed Streetwear Beanie with Fold-Up Cuff & Sunglasses (+0.04m elevated)
-    const beanieGeo = new THREE.CylinderGeometry(0.165, 0.178, 0.14, 22);
-    beanieGeo.computeVertexNormals();
+    // STYLE 2: Ribbed Streetwear Beanie with Fold-Up Cuff, Sunglasses & Streetwear Headphones
+    const beanieSlices = [
+      [0.070, 0.086, 0.088, 0.088, 0, 0.000, 2.1], // Base above cuff
+      [0.120, 0.084, 0.086, 0.086, 0, 0.000, 2.1], // Ribbed crown body
+      [0.170, 0.072, 0.074, 0.074, 0, 0.000, 2.05],
+      [0.210, 0.042, 0.044, 0.044, 0, 0.000, 2.0]  // Dome top
+    ];
+    const beanieGeo = createSculptedLoftGeometry(beanieSlices, 20, false, true, true);
     const beanie = createHiFiMesh(beanieGeo, 0xd49b35, 0.044);
-    beanie.position.set(0, 0.14, 0);
     headGroup.add(beanie);
 
-    const domeGeo = new THREE.SphereGeometry(0.166, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.5);
-    domeGeo.computeVertexNormals();
-    const dome = createHiFiMesh(domeGeo, 0xd49b35, 0.042);
-    dome.position.set(0, 0.21, 0);
-    headGroup.add(dome);
-
-    const cuffGeo = new THREE.TorusGeometry(0.180, 0.018, 12, 24);
-    cuffGeo.computeVertexNormals();
+    const cuffSlices = [
+      [0.040, 0.088, 0.090, 0.090, 0, 0.000, 2.15],
+      [0.072, 0.092, 0.094, 0.094, 0, 0.000, 2.15],
+      [0.078, 0.086, 0.088, 0.088, 0, 0.000, 2.1]
+    ];
+    const cuffGeo = createSculptedLoftGeometry(cuffSlices, 20, false, true, true);
     const cuff = createHiFiMesh(cuffGeo, 0xd49b35, 0.038);
-    cuff.position.set(0, 0.075, 0);
-    cuff.rotation.x = Math.PI * 0.5;
     headGroup.add(cuff);
 
-    const tagGeo = new THREE.BoxGeometry(0.032, 0.024, 0.012);
+    const tagSlices = [
+      [0.045, 0.016, 0.008, 0.004, 0, 0.096, 2.0],
+      [0.068, 0.016, 0.008, 0.004, 0, 0.098, 2.0]
+    ];
+    const tagGeo = createSculptedLoftGeometry(tagSlices, 12, false, true, true);
     const tag = createHiFiMesh(tagGeo, 0x22242a, 0.020);
-    tag.position.set(0, 0.075, 0.186);
     headGroup.add(tag);
+
+    buildStreetwearHeadphones(headGroup, 0.02, 0.005, 0x181a20, 0xd49b35, true);
   } else if (style === 3) {
-    // STYLE 3: Sculpted Volumetric Afro (Framing head with face clearly visible)
-    // Raised by +0.055m on Y (0.12 -> 0.175) and shifted -0.03m on Z (-0.065 -> -0.095)
-    const afroGeo = new THREE.SphereGeometry(0.220, 22, 18);
-    afroGeo.computeVertexNormals();
+    // STYLE 3: Multi-Lobe Volumetric Textured Afro
+    const afroSlices = [
+      [0.040, 0.100, 0.095, 0.115, 0, -0.020, 2.1],
+      [0.100, 0.125, 0.110, 0.138, 0, -0.025, 2.15],
+      [0.165, 0.130, 0.108, 0.142, 0, -0.030, 2.15],
+      [0.225, 0.115, 0.090, 0.125, 0, -0.030, 2.1],
+      [0.275, 0.065, 0.055, 0.075, 0, -0.025, 2.0]
+    ];
+    const afroGeo = createSculptedLoftGeometry(afroSlices, 22, false, true, true);
     const afro = createHiFiMesh(afroGeo, 0x161210, 0.048);
-    afro.position.set(0, 0.175, -0.095);
     headGroup.add(afro);
 
-    // Natural secondary texture lobes elevated proportionally
     [
-      [-0.14, 0.195, -0.09], [0.14, 0.195, -0.09],
-      [0, 0.275, -0.10], [0, 0.175, -0.18]
-    ].forEach(([lx, ly, lz]) => {
-      const lobeGeo = new THREE.SphereGeometry(0.095, 12, 10);
-      lobeGeo.computeVertexNormals();
+      [-0.105, 0.170, -0.025, 0.048],
+      [ 0.105, 0.170, -0.025, 0.048],
+      [ 0.000, 0.245, -0.040, 0.052],
+      [-0.075, 0.120, -0.085, 0.046],
+      [ 0.075, 0.120, -0.085, 0.046]
+    ].forEach(([lx, ly, lz, lr]) => {
+      const lobeSlices = [
+        [ly - lr, lr * 0.7, lr * 0.7, lr * 0.7, lx, lz, 2.0],
+        [ly,      lr,       lr,       lr,       lx, lz, 2.1],
+        [ly + lr, lr * 0.6, lr * 0.6, lr * 0.6, lx, lz, 2.0]
+      ];
+      const lobeGeo = createSculptedLoftGeometry(lobeSlices, 12, false, true, true);
       const lobe = createHiFiMesh(lobeGeo, 0x161210, 0.040);
-      lobe.position.set(lx, ly, lz);
       headGroup.add(lobe);
     });
   } else if (style === 4) {
-    // STYLE 4: High-Top Fade (+0.04m elevated, shifted slightly back on -Z to clear forehead/brows)
-    const fadeGeo = new THREE.CylinderGeometry(0.165, 0.178, 0.17, 24);
-    fadeGeo.computeVertexNormals();
+    // STYLE 4: High-Top Fade with Streetwear Headphones
+    const fadeSlices = [
+      [0.045, 0.082, 0.082, 0.086, 0, -0.010, 2.1], // Base hairline
+      [0.095, 0.084, 0.084, 0.088, 0, -0.010, 2.15],// Mid vertical fade
+      [0.175, 0.084, 0.084, 0.088, 0, -0.010, 2.2], // Crisp cylindrical walls
+      [0.220, 0.080, 0.080, 0.084, 0, -0.010, 2.2], // Flat crown perimeter
+      [0.235, 0.040, 0.040, 0.042, 0, -0.010, 2.0]  // Crown center
+    ];
+    const fadeGeo = createSculptedLoftGeometry(fadeSlices, 20, false, true, true);
     const fade = createHiFiMesh(fadeGeo, 0x181412, 0.044);
-    fade.position.set(0, 0.16, -0.03);
     headGroup.add(fade);
 
-    const topCapGeo = new THREE.CircleGeometry(0.165, 22);
-    topCapGeo.rotateX(-Math.PI / 2);
-    const topCap = createHiFiMesh(topCapGeo, 0x201a16, 0.036);
-    topCap.position.set(0, 0.245, -0.03);
-    headGroup.add(topCap);
+    buildStreetwearHeadphones(torso, 0.62, 0.01, 0x181a20, 0xd49b35, false);
   } else if (style === 5) {
-    // STYLE 5: Pulled-Up Hoodie Hood (Framing face with open front, clear of eyes)
-    const hoodGeo = new THREE.SphereGeometry(0.225, 22, 18, 0, Math.PI * 2, 0, Math.PI * 0.75);
-    hoodGeo.computeVertexNormals();
+    // STYLE 5: Pulled-Up Hoodie Hood with Contoured Binding Rim
+    const hoodSlices = [
+      [-0.040, 0.102, 0.065, 0.118, 0, -0.035, 2.1], // Hood neckline base
+      [ 0.025, 0.115, 0.080, 0.135, 0, -0.038, 2.15],// Mid cranium wrap
+      [ 0.095, 0.118, 0.082, 0.138, 0, -0.038, 2.15],
+      [ 0.165, 0.108, 0.068, 0.125, 0, -0.035, 2.1], // Upper head curve
+      [ 0.215, 0.055, 0.035, 0.065, 0, -0.030, 2.0]  // Apex
+    ];
+    const hoodGeo = createSculptedLoftGeometry(hoodSlices, 22, false, false, true);
     const hoodMesh = createHiFiMesh(hoodGeo, shirtHex, 0.046);
-    hoodMesh.position.set(0, 0.09, -0.08);
     headGroup.add(hoodMesh);
 
-    // Hood opening face binding rim
-    const rimGeo = new THREE.TorusGeometry(0.175, 0.026, 12, 22);
-    rimGeo.computeVertexNormals();
+    const rimSlices = [
+      [0.000, 0.125, 0.018, 0.010, 0, 0.062, 2.15],
+      [0.035, 0.132, 0.022, 0.012, 0, 0.068, 2.15],
+      [0.070, 0.125, 0.018, 0.010, 0, 0.062, 2.15]
+    ];
+    const rimGeo = createSculptedLoftGeometry(rimSlices, 20, false, false, false);
     const rim = createHiFiMesh(rimGeo, shirtHex, 0.040);
-    rim.position.set(0, 0.06, 0.07);
-    rim.rotation.x = 0.15;
     headGroup.add(rim);
   } else {
-    // STYLE 6: Swept-Back Braids / Ponytail
-    const hairGeo = new THREE.SphereGeometry(0.185, 20, 16);
-    hairGeo.computeVertexNormals();
-    const hair = createHiFiMesh(hairGeo, 0x1e1510, 0.045);
-    hair.position.set(0, 0.08, -0.035);
-    headGroup.add(hair);
+    // STYLE 6: Swept-Back Braids / Ponytail with Streetwear Headphones around neck
+    const braidScalpSlices = [
+      [0.035, 0.082, 0.080, 0.086, 0, -0.015, 2.05],
+      [0.085, 0.085, 0.082, 0.088, 0, -0.015, 2.1],
+      [0.130, 0.076, 0.070, 0.082, 0, -0.018, 2.05],
+      [0.155, 0.045, 0.040, 0.050, 0, -0.020, 2.0]
+    ];
+    const braidScalpGeo = createSculptedLoftGeometry(braidScalpSlices, 20, false, true, true);
+    const braidScalp = createHiFiMesh(braidScalpGeo, 0x1e1510, 0.045);
+    headGroup.add(braidScalp);
 
-    const tieGeo = new THREE.TorusGeometry(0.042, 0.016, 10, 18);
-    tieGeo.computeVertexNormals();
+    const tieSlices = [
+      [0.045, 0.022, 0.022, 0.022, 0, -0.115, 2.0],
+      [0.065, 0.020, 0.020, 0.020, 0, -0.115, 2.0]
+    ];
+    const tieGeo = createSculptedLoftGeometry(tieSlices, 14, false, true, true);
     const tie = createHiFiMesh(tieGeo, 0xd49b35, 0.026);
-    tie.position.set(0, 0.06, -0.19);
-    tie.rotation.x = Math.PI * 0.45;
     headGroup.add(tie);
 
-    const tailGeo = new THREE.CylinderGeometry(0.038, 0.022, 0.25, 14);
-    tailGeo.computeVertexNormals();
+    const tailSlices = [
+      [ 0.055, 0.024, 0.024, 0.024, 0.000, -0.118, 2.0],
+      [ 0.010, 0.022, 0.022, 0.022, 0.005, -0.145, 2.0],
+      [-0.055, 0.018, 0.018, 0.018, 0.010, -0.175, 2.0],
+      [-0.130, 0.014, 0.014, 0.014, 0.015, -0.205, 2.0],
+      [-0.200, 0.005, 0.005, 0.005, 0.018, -0.225, 2.0]
+    ];
+    const tailGeo = createSculptedLoftGeometry(tailSlices, 14, false, true, true);
     const tail = createHiFiMesh(tailGeo, 0x1e1510, 0.038);
-    tail.position.set(0.02, -0.06, -0.23);
-    tail.rotation.x = -0.35;
     headGroup.add(tail);
+
+    buildStreetwearHeadphones(torso, 0.62, 0.01, 0x181a20, 0xd49b35, false);
   }
 
-  // 3. Two-Segment Articulated Cheering Arms with Deltoid Shoulders & Clenched Fists
-  // Fixed pivot at shoulder center (0, 0, 0) guaranteeing 100% continuous socket connection
+  // 3. Multi-Slice Sculpted Cheering Arms with Anatomical Deltoids & Articulated Fists
   function buildSpectatorArm(side) {
     const shoulder = new THREE.Group();
     shoulder.position.set(side * 0.24, 0.58, 0);
 
     // Anatomical Deltoid Shoulder Cap centered at pivot (0, 0, 0)
-    const deltoidGeo = new THREE.SphereGeometry(0.076, 18, 14);
-    deltoidGeo.computeVertexNormals();
+    const spectatorDeltoidSlices = [
+      [ 0.070, 0.052, 0.052, 0.052, side * -0.008, 0, 2.0],
+      [ 0.025, 0.078, 0.074, 0.074, side *  0.008, 0, 2.1],
+      [-0.035, 0.076, 0.072, 0.072, side *  0.006, 0, 2.1],
+      [-0.085, 0.065, 0.062, 0.062, 0, 0, 2.05]
+    ];
+    const deltoidGeo = createSculptedLoftGeometry(spectatorDeltoidSlices, 18, false, true, true);
     const deltoid = createHiFiMesh(deltoidGeo, shirtHex, 0.042);
     shoulder.add(deltoid);
 
     // Upper arm starting right at shoulder center y = 0 down to y = -0.26
-    const upperGeo = new THREE.CylinderGeometry(0.072, 0.062, 0.26, 18);
-    upperGeo.computeVertexNormals();
+    const spectatorUpperArmSlices = [
+      [ 0.00, 0.074, 0.070, 0.072, 0, 0, 2.1], // Shoulder socket connection
+      [-0.07, 0.072, 0.068, 0.070, 0, 0, 2.1], // Bicep/tricep peak
+      [-0.17, 0.064, 0.060, 0.062, 0, 0, 2.1], // Mid bicep
+      [-0.26, 0.058, 0.054, 0.056, 0, 0, 2.0]  // Elbow joint transition
+    ];
+    const upperGeo = createSculptedLoftGeometry(spectatorUpperArmSlices, 18, false, true, true);
     const upperArm = createHiFiMesh(upperGeo, shirtHex, 0.042);
-    upperArm.position.y = -0.13;
     shoulder.add(upperArm);
 
     const elbow = new THREE.Group();
     elbow.position.y = -0.26;
     shoulder.add(elbow);
 
-    // Forearm extending down from elbow pivot (0, 0, 0)
+    // Forearm extending down from elbow pivot (0, 0, 0) to y = -0.24
     const forearmColor = (style === 1 || style === 3 || style === 5) ? shirtHex : skinHex;
-    const foreGeo = new THREE.CylinderGeometry(0.064, 0.054, 0.24, 18);
-    foreGeo.computeVertexNormals();
+    const spectatorForearmSlices = [
+      [ 0.00, 0.060, 0.056, 0.058, 0, 0, 2.1], // Elbow base
+      [-0.07, 0.064, 0.058, 0.060, 0, 0, 2.1], // Brachioradialis muscular volume
+      [-0.16, 0.054, 0.050, 0.052, 0, 0, 2.0], // Lower forearm taper
+      [-0.24, 0.048, 0.046, 0.048, 0, 0, 2.0]  // Wrist insertion
+    ];
+    const foreGeo = createSculptedLoftGeometry(spectatorForearmSlices, 18, false, true, true);
     const forearm = createHiFiMesh(foreGeo, forearmColor, 0.042);
-    forearm.position.y = -0.12;
     elbow.add(forearm);
 
-    // Clenched Cheering Fist at forearm end
+    // Clenched Cheering Fist at forearm end (y = -0.24)
     const hand = new THREE.Group();
     hand.position.y = -0.24;
     elbow.add(hand);
 
-    const palmGeo = new THREE.BoxGeometry(0.078, 0.072, 0.068);
+    // Contoured Palm Loft
+    const palmSlices = [
+      [ 0.020, 0.036, 0.026, 0.028, 0, 0, 2.1],
+      [-0.015, 0.042, 0.032, 0.034, 0, 0, 2.15],
+      [-0.050, 0.040, 0.030, 0.032, 0, 0, 2.1]
+    ];
+    const palmGeo = createSculptedLoftGeometry(palmSlices, 16, false, true, true);
     const palm = createHiFiMesh(palmGeo, skinHex, 0.038);
     hand.add(palm);
 
-    const thumbGeo = new THREE.BoxGeometry(0.024, 0.038, 0.028);
-    const thumb = createHiFiMesh(thumbGeo, skinHex, 0.026);
-    thumb.position.set(-side * 0.036, 0.005, 0.022);
-    hand.add(thumb);
+    // 4 Curled Knuckle Segments across the fist front
+    for (let k = 0; k < 4; k++) {
+      const kx = (k - 1.5) * 0.018;
+      const knuckleSlices = [
+        [-0.018, 0.008, 0.014, 0.006, 0, -0.002, 2.0],
+        [-0.034, 0.009, 0.016, 0.008, 0,  0.002, 2.1],
+        [-0.048, 0.008, 0.014, 0.006, 0, -0.002, 2.0]
+      ];
+      const knuckleGeo = createSculptedLoftGeometry(knuckleSlices, 10, false, true, true);
+      const knuckle = createHiFiMesh(knuckleGeo, skinHex, 0.024);
+      knuckle.position.set(kx, 0, 0.026);
+      hand.add(knuckle);
+    }
 
-    const knuckleGeo = new THREE.BoxGeometry(0.068, 0.018, 0.024);
-    const knuckle = createHiFiMesh(knuckleGeo, skinHex, 0.024);
-    knuckle.position.set(0, -0.030, 0.028);
-    hand.add(knuckle);
+    // Tucked Thumb curving over the index/middle knuckle
+    const thumbSlices = [
+      [ 0.005, 0.010, 0.012, 0.010, -side * 0.036, 0.012, 2.0],
+      [-0.012, 0.012, 0.016, 0.012, -side * 0.026, 0.026, 2.1],
+      [-0.028, 0.009, 0.012, 0.009, -side * 0.012, 0.028, 2.0]
+    ];
+    const thumbGeo = createSculptedLoftGeometry(thumbSlices, 12, false, true, true);
+    const thumb = createHiFiMesh(thumbGeo, skinHex, 0.026);
+    hand.add(thumb);
 
     // Wrist accessory: digital watch or wristband
     if (side === -1 && (style === 0 || style === 4)) {
-      const watch = createHiFiMesh(new THREE.BoxGeometry(0.032, 0.022, 0.032), 0x181820, 0.022);
-      watch.position.set(0, 0.04, 0.028);
+      const watchSlices = [
+        [0.025, 0.020, 0.022, 0.022, 0, 0.018, 2.1],
+        [0.045, 0.020, 0.022, 0.022, 0, 0.018, 2.1]
+      ];
+      const watchGeo = createSculptedLoftGeometry(watchSlices, 12, false, true, true);
+      const watch = createHiFiMesh(watchGeo, 0x181820, 0.022);
       hand.add(watch);
     } else if (style === 2 || style === 6) {
-      const band = createHiFiMesh(new THREE.CylinderGeometry(0.062, 0.062, 0.028, 16), 0xd49b35, 0.020);
-      band.position.y = 0.04;
+      const bandSlices = [
+        [0.025, 0.052, 0.048, 0.050, 0, 0, 2.1],
+        [0.048, 0.052, 0.048, 0.050, 0, 0, 2.1]
+      ];
+      const bandGeo = createSculptedLoftGeometry(bandSlices, 14, false, true, true);
+      const band = createHiFiMesh(bandGeo, 0xd49b35, 0.020);
       hand.add(band);
     }
 
@@ -5892,32 +6952,50 @@ export function buildSpectatorModel(
   torso.add(leftArmObj.shoulder);
   torso.add(rightArmObj.shoulder);
 
-  // 4. Legs with Tapered Jeans/Pants & Two-Tone Rubber Sole Streetwear Sneakers
+  // 4. Multi-Slice Sculpted Pants & Two-Tone High-Top Sneakers
   [-0.102, 0.102].forEach((lx) => {
     // Upper thigh reaching cleanly up into the pelvis block without lateral overhang
-    const thighGeo = new THREE.CylinderGeometry(0.092, 0.088, 0.42, 18);
-    thighGeo.computeVertexNormals();
+    const spectatorThighSlices = [
+      [ 0.00, 0.096, 0.092, 0.094, 0, 0, 2.2], // Hip insertion
+      [-0.12, 0.098, 0.095, 0.096, 0, 0, 2.2], // Quadriceps curve
+      [-0.26, 0.092, 0.088, 0.090, 0, 0, 2.15],// Lower thigh taper
+      [-0.42, 0.085, 0.081, 0.083, 0, 0, 2.1]  // Knee transition
+    ];
+    const thighGeo = createSculptedLoftGeometry(spectatorThighSlices, 18, false, true, true);
     const thigh = createHiFiMesh(thighGeo, pantsHex, 0.042);
     thigh.position.set(lx, -0.19, 0);
     hips.add(thigh);
 
-    // Knee cloth fold
-    const kneeGeo = new THREE.CylinderGeometry(0.092, 0.088, 0.06, 18);
-    kneeGeo.computeVertexNormals();
+    // Knee cloth flexion fold
+    const spectatorKneeFoldSlices = [
+      [ 0.030, 0.088, 0.085, 0.085, 0, 0.004, 2.1],
+      [ 0.000, 0.094, 0.092, 0.086, 0, 0.008, 2.2], // Forward knee flexion crease
+      [-0.030, 0.086, 0.083, 0.083, 0, 0.004, 2.1]
+    ];
+    const kneeGeo = createSculptedLoftGeometry(spectatorKneeFoldSlices, 16, false, true, true);
     const knee = createHiFiMesh(kneeGeo, pantsHex, 0.035);
     knee.position.set(lx, -0.40, 0.005);
     hips.add(knee);
 
     // Lower calf
-    const calfGeo = new THREE.CylinderGeometry(0.088, 0.076, 0.38, 18);
-    calfGeo.computeVertexNormals();
+    const spectatorCalfSlices = [
+      [ 0.00, 0.086, 0.082, 0.084, 0, 0, 2.1], // Below knee fold
+      [-0.10, 0.090, 0.085, 0.088, 0, 0, 2.15],// Gastrocnemius volume
+      [-0.24, 0.078, 0.073, 0.075, 0, 0, 2.05],// Lower calf taper
+      [-0.38, 0.070, 0.068, 0.070, 0, 0, 2.0]  // Ankle cuff insertion
+    ];
+    const calfGeo = createSculptedLoftGeometry(spectatorCalfSlices, 18, false, true, true);
     const calf = createHiFiMesh(calfGeo, pantsHex, 0.042);
     calf.position.set(lx, -0.61, 0);
     hips.add(calf);
 
     // Tapered jogger ankle cuff
-    const cuffGeo = new THREE.CylinderGeometry(0.080, 0.076, 0.05, 18);
-    cuffGeo.computeVertexNormals();
+    const spectatorCuffSlices = [
+      [ 0.025, 0.076, 0.074, 0.074, 0, 0, 2.1],
+      [ 0.000, 0.082, 0.080, 0.080, 0, 0, 2.15],
+      [-0.025, 0.076, 0.074, 0.074, 0, 0, 2.1]
+    ];
+    const cuffGeo = createSculptedLoftGeometry(spectatorCuffSlices, 16, false, true, true);
     const cuff = createHiFiMesh(cuffGeo, 0x181a20, 0.030);
     cuff.position.set(lx, -0.82, 0);
     hips.add(cuff);
@@ -5928,32 +7006,56 @@ export function buildSpectatorModel(
     hips.add(shoe);
 
     // Crisp white rubber lug outsole
-    const sole = createHiFiMesh(new THREE.BoxGeometry(0.165, 0.048, 0.33), 0xf2ede4, 0.038);
-    sole.position.set(0, -0.045, 0.02);
+    const sneakerSoleSlices = [
+      [-0.048, 0.082, 0.170, 0.115, 0, 0.015, 2.5],
+      [-0.018, 0.084, 0.174, 0.118, 0, 0.015, 2.5]
+    ];
+    const soleGeo = createSculptedLoftGeometry(sneakerSoleSlices, 20, false, true, true);
+    const sole = createHiFiMesh(soleGeo, 0xf2ede4, 0.038);
     shoe.add(sole);
 
     // White rubber toe bumper cap
-    const bumper = createHiFiMesh(new THREE.BoxGeometry(0.155, 0.038, 0.085), 0xf2ede4, 0.032);
-    bumper.position.set(0, -0.020, 0.145);
+    const sneakerToeCapSlices = [
+      [-0.018, 0.078, 0.095, 0.010, 0, 0.085, 2.2],
+      [ 0.015, 0.068, 0.085, 0.010, 0, 0.082, 2.1],
+      [ 0.038, 0.048, 0.060, 0.008, 0, 0.075, 2.0]
+    ];
+    const bumperGeo = createSculptedLoftGeometry(sneakerToeCapSlices, 18, false, true, true);
+    const bumper = createHiFiMesh(bumperGeo, 0xf2ede4, 0.032);
     shoe.add(bumper);
 
     // Colored sneaker upper
-    const upper = createHiFiMesh(new THREE.BoxGeometry(0.148, 0.095, 0.27), shirtHex, 0.040);
-    upper.position.set(0, 0.030, 0.015);
+    const sneakerUpperSlices = [
+      [-0.018, 0.076, 0.155, 0.110, 0, 0.015, 2.2],
+      [ 0.025, 0.070, 0.125, 0.105, 0, 0.018, 2.1],
+      [ 0.065, 0.060, 0.075, 0.095, 0, 0.020, 2.05],
+      [ 0.100, 0.054, 0.054, 0.080, 0, 0.022, 2.05]
+    ];
+    const upperGeo = createSculptedLoftGeometry(sneakerUpperSlices, 20, false, true, true);
+    const upper = createHiFiMesh(upperGeo, shirtHex, 0.040);
     shoe.add(upper);
 
     // White lace throat & tongue
-    const tongue = createHiFiMesh(new THREE.BoxGeometry(0.075, 0.025, 0.14), 0xf2ede4, 0.025);
-    tongue.position.set(0, 0.080, 0.04);
+    const sneakerTongueSlices = [
+      [ 0.030, 0.038, 0.055, 0.020, 0, 0.065, 2.1],
+      [ 0.070, 0.036, 0.045, 0.018, 0, 0.048, 2.1],
+      [ 0.105, 0.034, 0.035, 0.016, 0, 0.035, 2.0]
+    ];
+    const tongueGeo = createSculptedLoftGeometry(sneakerTongueSlices, 16, false, true, true);
+    const tongue = createHiFiMesh(tongueGeo, 0xf2ede4, 0.025);
     shoe.add(tongue);
 
     // Mustard heel tab accent
-    const heelTab = createHiFiMesh(new THREE.BoxGeometry(0.035, 0.030, 0.015), 0xd49b35, 0.020);
-    heelTab.position.set(0, 0.065, -0.12);
+    const heelTabSlices = [
+      [ 0.050, 0.018, 0.008, 0.014, 0, -0.095, 2.0],
+      [ 0.080, 0.018, 0.008, 0.014, 0, -0.105, 2.0]
+    ];
+    const heelTabGeo = createSculptedLoftGeometry(heelTabSlices, 12, false, true, true);
+    const heelTab = createHiFiMesh(heelTabGeo, 0xd49b35, 0.020);
     shoe.add(heelTab);
   });
 
-  return {
+  return optimizeArticulatedRigBones({
     root,
     hips,
     torso,
@@ -5962,7 +7064,242 @@ export function buildSpectatorModel(
     leftElbow: leftArmObj.elbow,
     rightArm: rightArmObj.shoulder,
     rightElbow: rightArmObj.elbow
-  };
+  });
+}
+
+
+export function buildInstancedArenaCrowd(scene, configs) {
+  const count = configs.length;
+  const SENTINEL_SHIRT = 0x11aa22;
+  const SENTINEL_PANTS = 0x2233cc;
+  const SENTINEL_SKIN  = 0xcc7744;
+
+  const templateSpec = buildSpectatorModel(SENTINEL_SHIRT, SENTINEL_PANTS, SENTINEL_SKIN, 0);
+  templateSpec.root.updateMatrixWorld(true);
+
+  const boneSlots = ['hips', 'torso', 'headGroup', 'leftArm', 'leftElbow', 'rightArm', 'rightElbow'];
+  const slotSet = new Set(boneSlots.map((k) => templateSpec[k]).filter(Boolean));
+
+  const instancedBatches = [];
+  const instancedGroup = new THREE.Group();
+  instancedGroup.name = 'instanced_arena_crowd';
+  if (scene) scene.add(instancedGroup);
+
+  const whiteMatCache = new Map();
+  function getInstancedRoleMaterial(origMat, role) {
+    if (role === 'fixed' || origMat.isShaderMaterial) return origMat;
+    const key = origMat.uuid + '_' + role;
+    if (whiteMatCache.has(key)) return whiteMatCache.get(key);
+    const whiteMat = createCelMaterial(0xffffff, origMat.map || null, origMat.emissive ? origMat.emissive.getHex() : 0x000000);
+    whiteMatCache.set(key, whiteMat);
+    return whiteMat;
+  }
+
+  boneSlots.forEach((slotName) => {
+    const boneObj = templateSpec[slotName];
+    if (!boneObj) return;
+    const boneInv = boneObj.matrixWorld.clone().invert();
+    const roleBuckets = new Map();
+
+    function collectBoneMeshes(node) {
+      if (node !== boneObj && slotSet.has(node)) return;
+      if (node.isMesh && node.geometry && node.geometry.attributes && node.geometry.attributes.position) {
+        let role = 'fixed';
+        if (node.material && node.material.color && !node.material.isShaderMaterial) {
+          const hex = node.material.color.getHex();
+          if (hex === SENTINEL_SHIRT) role = 'shirt';
+          else if (hex === SENTINEL_PANTS) role = 'pants';
+          else if (hex === SENTINEL_SKIN) role = 'skin';
+        }
+        const targetMat = getInstancedRoleMaterial(node.material, role);
+        const key = `${role}_${targetMat.uuid}_${node.renderOrder || 0}`;
+        let b = roleBuckets.get(key);
+        if (!b) {
+          b = { role, material: targetMat, renderOrder: node.renderOrder || 0, geoms: [] };
+          roleBuckets.set(key, b);
+        }
+        let g = node.geometry.clone();
+        if (g.index) g = g.toNonIndexed();
+        const relMat = boneInv.clone().multiply(node.matrixWorld);
+        g.applyMatrix4(relMat);
+        if (!g.attributes.normal) g.computeVertexNormals();
+        const vCount = g.attributes.position.count;
+        if (!g.attributes.uv) g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(vCount * 2), 2));
+        b.geoms.push(g);
+      }
+      for (let i = 0; i < node.children.length; i++) {
+        collectBoneMeshes(node.children[i]);
+      }
+    }
+    collectBoneMeshes(boneObj);
+
+    roleBuckets.forEach((b) => {
+      let totalVerts = 0;
+      for (let i = 0; i < b.geoms.length; i++) totalVerts += b.geoms[i].attributes.position.count;
+      const posArr = new Float32Array(totalVerts * 3);
+      const normArr = new Float32Array(totalVerts * 3);
+      const uvArr = new Float32Array(totalVerts * 2);
+      let vOff = 0;
+      for (let i = 0; i < b.geoms.length; i++) {
+        const g = b.geoms[i];
+        const c = g.attributes.position.count;
+        posArr.set(g.attributes.position.array.subarray(0, c * 3), vOff * 3);
+        normArr.set(g.attributes.normal.array.subarray(0, c * 3), vOff * 3);
+        uvArr.set(g.attributes.uv.array.subarray(0, c * 2), vOff * 2);
+        vOff += c;
+      }
+      const mergedGeo = new THREE.BufferGeometry();
+      mergedGeo.setAttribute('position', new THREE.BufferAttribute(posArr, 3));
+      mergedGeo.setAttribute('normal', new THREE.BufferAttribute(normArr, 3));
+      mergedGeo.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2));
+      mergedGeo.computeBoundingSphere();
+
+      const instMesh = new THREE.InstancedMesh(mergedGeo, b.material, count);
+      instMesh.castShadow = false;
+      instMesh.receiveShadow = false;
+      instMesh.renderOrder = b.renderOrder;
+      instMesh.frustumCulled = false;
+
+      if (b.role !== 'fixed') {
+        const tmpColor = new THREE.Color();
+        for (let idx = 0; idx < count; idx++) {
+          const cfg = configs[idx];
+          const hex = b.role === 'shirt'
+            ? (cfg.shirt ?? cfg.topColor ?? 0xc26a2b)
+            : (b.role === 'pants' ? (cfg.pants ?? cfg.pantsColor ?? 0x22242a) : (cfg.skin ?? cfg.skinColor ?? 0xd89c74));
+          tmpColor.setHex(hex);
+          instMesh.setColorAt(idx, tmpColor);
+        }
+        if (instMesh.instanceColor) instMesh.instanceColor.needsUpdate = true;
+      }
+
+      instancedGroup.add(instMesh);
+      instancedBatches.push({ slotName, instMesh });
+    });
+  });
+
+  const spectators = configs.map((cfg, i) => {
+    const root = new THREE.Group();
+    const hips = new THREE.Group();
+    hips.position.copy(templateSpec.hips.position);
+    root.add(hips);
+
+    const torso = new THREE.Group();
+    torso.position.copy(templateSpec.torso.position);
+    hips.add(torso);
+
+    const headGroup = new THREE.Group();
+    headGroup.position.copy(templateSpec.headGroup.position);
+    torso.add(headGroup);
+
+    const leftArm = new THREE.Group();
+    leftArm.position.copy(templateSpec.leftArm.position);
+    torso.add(leftArm);
+
+    const leftElbow = new THREE.Group();
+    leftElbow.position.copy(templateSpec.leftElbow.position);
+    leftArm.add(leftElbow);
+
+    const rightArm = new THREE.Group();
+    rightArm.position.copy(templateSpec.rightArm.position);
+    torso.add(rightArm);
+
+    const rightElbow = new THREE.Group();
+    rightElbow.position.copy(templateSpec.rightElbow.position);
+    rightArm.add(rightElbow);
+
+    root.scale.setScalar(cfg.scale ?? 0.86);
+    if (cfg.position) {
+      root.position.copy(cfg.position);
+    } else if (cfg.x !== undefined) {
+      root.position.set(cfg.x, cfg.y || 0, cfg.z || 0);
+    }
+    if (cfg.lookAt) {
+      root.lookAt(cfg.lookAt);
+    } else if (cfg.rotY !== undefined) {
+      root.rotation.y = cfg.rotY;
+    }
+    if (scene) scene.add(root);
+
+    return {
+      spec: { root, hips, torso, headGroup, leftArm, leftElbow, rightArm, rightElbow },
+      phaseOffset: cfg.phaseOffset ?? (i * 0.65),
+      animMode: cfg.animMode ?? (i % 5)
+    };
+  });
+
+  function updateMatrices() {
+    for (let i = 0; i < count; i++) {
+      spectators[i].spec.root.updateMatrixWorld(true);
+    }
+    for (let b = 0; b < instancedBatches.length; b++) {
+      const { slotName, instMesh } = instancedBatches[b];
+      for (let i = 0; i < count; i++) {
+        const bone = spectators[i].spec[slotName];
+        if (bone) {
+          instMesh.setMatrixAt(i, bone.matrixWorld);
+        }
+      }
+      instMesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+
+  function update(elapsed, bpm = 92, jumpAmp = 0.14) {
+    for (let i = 0; i < count; i++) {
+      const { spec, phaseOffset, animMode = 0 } = spectators[i];
+      const cheer = Math.abs(Math.sin(elapsed * (bpm / 60) * Math.PI + phaseOffset));
+      const sway = Math.sin(elapsed * (bpm / 120) * Math.PI + phaseOffset);
+      spec.hips.position.y = 1.04 + cheer * jumpAmp;
+
+      switch (animMode) {
+        case 0:
+          spec.rightArm.rotation.set(-2.35 - cheer * 0.35, 0, 0.22);
+          spec.rightElbow.rotation.set(-0.45 + cheer * 0.25, 0, 0);
+          spec.leftArm.rotation.set(-0.45 - cheer * 0.15, 0, -0.20);
+          spec.leftElbow.rotation.set(-0.85 - cheer * 0.15, 0, 0);
+          spec.torso.rotation.set(0, 0, sway * 0.06);
+          spec.headGroup.rotation.set(cheer * 0.10, 0, 0);
+          break;
+        case 1:
+          spec.leftArm.rotation.set(-0.78, 0, 0.18 + cheer * 0.22);
+          spec.rightArm.rotation.set(-0.78, 0, -0.18 - cheer * 0.22);
+          spec.leftElbow.rotation.set(-1.10, 0, 0.26 + cheer * 0.18);
+          spec.rightElbow.rotation.set(-1.10, 0, -0.26 - cheer * 0.18);
+          spec.torso.rotation.set(0, 0, 0);
+          spec.headGroup.rotation.set(cheer * 0.08, 0, 0);
+          break;
+        case 2:
+          spec.torso.rotation.set(0, 0, sway * 0.12);
+          spec.leftArm.rotation.set(-0.35 - cheer * 0.20, 0, -0.22 + sway * 0.08);
+          spec.rightArm.rotation.set(-0.35 - (1 - cheer) * 0.20, 0, 0.22 + sway * 0.08);
+          spec.leftElbow.rotation.set(-0.85 - cheer * 0.20, 0, 0);
+          spec.rightElbow.rotation.set(-0.85 - (1 - cheer) * 0.20, 0, 0);
+          spec.headGroup.rotation.set(0, 0, -sway * 0.08);
+          break;
+        case 3:
+          spec.leftArm.rotation.set(-2.30 - cheer * 0.35, 0, -0.26);
+          spec.rightArm.rotation.set(-2.30 - (1 - cheer) * 0.35, 0, 0.26);
+          spec.leftElbow.rotation.set(-0.40 + cheer * 0.20, 0, 0);
+          spec.rightElbow.rotation.set(-0.40 + (1 - cheer) * 0.20, 0, 0);
+          spec.torso.rotation.set(0, 0, 0);
+          spec.headGroup.rotation.set(-0.10 - cheer * 0.10, 0, 0);
+          break;
+        case 4:
+        default:
+          spec.torso.rotation.set(0.14 + cheer * 0.05, 0, 0);
+          spec.headGroup.rotation.set(0.10 + cheer * 0.16, 0, 0);
+          spec.leftArm.rotation.set(-0.65 - cheer * 0.15, 0, -0.18);
+          spec.rightArm.rotation.set(-0.65 - cheer * 0.15, 0, 0.18);
+          spec.leftElbow.rotation.set(-0.80 - cheer * 0.15, 0, 0);
+          spec.rightElbow.rotation.set(-0.80 - cheer * 0.15, 0, 0);
+          break;
+      }
+    }
+    updateMatrices();
+  }
+
+  update(0, 92, 0.14);
+  return { spectators, instancedGroup, instancedBatches, updateMatrices, update };
 }
 
 let _brassInteriorTex = null;
@@ -5999,8 +7336,8 @@ export function createBrickWarehouseTexture() {
   c.height = 1024;
   const ctx = c.getContext('2d');
 
-  // Mortar base
-  ctx.fillStyle = '#34313a';
+  // Deep mortar base
+  ctx.fillStyle = '#221f28';
   ctx.fillRect(0, 0, 1024, 1024);
 
   const brickW = 60;
@@ -6025,20 +7362,30 @@ export function createBrickWarehouseTexture() {
       ctx.fillRect(x, y, brickW, brickH);
 
       // Subtle soot / wear stippling on brick face
-      ctx.fillStyle = 'rgba(20, 16, 26, 0.18)';
+      ctx.fillStyle = 'rgba(20, 16, 26, 0.22)';
       ctx.fillRect(x, y + brickH - 4, brickW, 4);
-      ctx.fillStyle = 'rgba(255, 200, 180, 0.12)';
+      ctx.fillStyle = 'rgba(255, 200, 180, 0.14)';
       ctx.fillRect(x, y, brickW, 3);
+
+      // Graphic-novel comic ink cross-hatching in bottom-right shadow corner
+      ctx.strokeStyle = 'rgba(12, 8, 18, 0.45)';
+      ctx.lineWidth = 1.2;
+      for (let h = 0; h < 4; h++) {
+        ctx.beginPath();
+        ctx.moveTo(x + brickW - 14 + h * 3, y + brickH);
+        ctx.lineTo(x + brickW, y + brickH - 14 + h * 3);
+        ctx.stroke();
+      }
     }
   }
 
   // Weathering streaks & grime washes
-  for (let s = 0; s < 12; s++) {
+  for (let s = 0; s < 14; s++) {
     const sx = Math.random() * 1024;
     const sw = 20 + Math.random() * 80;
     const grad = ctx.createLinearGradient(sx, 0, sx, 1024);
-    grad.addColorStop(0, 'rgba(15, 12, 22, 0.35)');
-    grad.addColorStop(0.3 + Math.random() * 0.4, 'rgba(25, 20, 32, 0.15)');
+    grad.addColorStop(0, 'rgba(15, 12, 22, 0.40)');
+    grad.addColorStop(0.3 + Math.random() * 0.4, 'rgba(25, 20, 32, 0.18)');
     grad.addColorStop(1, 'rgba(15, 12, 22, 0.0)');
     ctx.fillStyle = grad;
     ctx.fillRect(sx, 0, sw, 1024);
@@ -6049,35 +7396,91 @@ export function createBrickWarehouseTexture() {
   _brickWarehouseTex.wrapT = THREE.RepeatWrapping;
   _brickWarehouseTex.repeat.set(4, 3);
   _brickWarehouseTex.colorSpace = THREE.SRGBColorSpace;
+  _brickWarehouseTex.anisotropy = 4;
   return _brickWarehouseTex;
+}
+
+let _brickWarehouseBumpTex = null;
+export function createBrickWarehouseBumpMap() {
+  if (_brickWarehouseBumpTex) return _brickWarehouseBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Deep recessed mortar baseline (#202020)
+  ctx.fillStyle = '#202020';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  const brickW = 60;
+  const brickH = 26;
+  const seam = 4;
+  const rows = Math.ceil(1024 / (brickH + seam));
+  const cols = Math.ceil(1024 / (brickW + seam)) + 2;
+
+  for (let r = 0; r < rows; r++) {
+    const y = r * (brickH + seam);
+    const xOffset = (r % 2 === 0) ? 0 : -(brickW + seam) / 2;
+    for (let col = -1; col < cols; col++) {
+      const x = col * (brickW + seam) + xOffset;
+      const bH = 190 + Math.floor(Math.sin(r * 31.4 + col * 17.8) * 30);
+      ctx.fillStyle = `rgb(${bH}, ${bH}, ${bH})`;
+      ctx.fillRect(x + 1, y + 1, brickW - 2, brickH - 2);
+
+      // Top bevel highlight (raised)
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(x + 1, y + 1, brickW - 2, 2);
+
+      // Bottom bevel shadow (depressed)
+      ctx.fillStyle = '#454545';
+      ctx.fillRect(x + 1, y + brickH - 3, brickW - 2, 2);
+
+      // Comic hatch groove incisions
+      ctx.strokeStyle = '#383838';
+      ctx.lineWidth = 1.5;
+      for (let h = 0; h < 3; h++) {
+        ctx.beginPath();
+        ctx.moveTo(x + brickW - 12 + h * 3, y + brickH - 1);
+        ctx.lineTo(x + brickW - 1, y + brickH - 12 + h * 3);
+        ctx.stroke();
+      }
+    }
+  }
+
+  _brickWarehouseBumpTex = new THREE.CanvasTexture(c);
+  _brickWarehouseBumpTex.wrapS = THREE.RepeatWrapping;
+  _brickWarehouseBumpTex.wrapT = THREE.RepeatWrapping;
+  _brickWarehouseBumpTex.repeat.set(4, 3);
+  _brickWarehouseBumpTex.anisotropy = 4;
+  return _brickWarehouseBumpTex;
 }
 
 let _loftWindowTex = null;
 export function createIndustrialLoftWindowTexture() {
   if (_loftWindowTex) return _loftWindowTex;
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 512;
+  c.width = 1024;
+  c.height = 1024;
   const ctx = c.getContext('2d');
 
   // Outer dark iron frame
   ctx.fillStyle = '#141620';
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
   // Intense warm golden incandescent interior glow
-  const grad = ctx.createRadialGradient(256, 220, 30, 256, 256, 280);
+  const grad = ctx.createRadialGradient(512, 440, 60, 512, 512, 560);
   grad.addColorStop(0.0, '#fff4b8');
   grad.addColorStop(0.35, '#ffbe42');
   grad.addColorStop(0.75, '#ea7818');
-  grad.addColorStop(1.0, '#9c3e0a');
+  grad.addColorStop(1.0, '#8c3508');
 
-  // 3 columns x 4 rows of glass panes
-  const cols = 3;
-  const rows = 4;
-  const margin = 16;
-  const mullion = 12;
-  const paneW = (512 - margin * 2 - (cols - 1) * mullion) / cols;
-  const paneH = (512 - margin * 2 - (rows - 1) * mullion) / rows;
+  // 4 columns x 5 rows of industrial glass panes
+  const cols = 4;
+  const rows = 5;
+  const margin = 28;
+  const mullion = 18;
+  const paneW = (1024 - margin * 2 - (cols - 1) * mullion) / cols;
+  const paneH = (1024 - margin * 2 - (rows - 1) * mullion) / rows;
 
   for (let r = 0; r < rows; r++) {
     for (let cl = 0; cl < cols; cl++) {
@@ -6086,13 +7489,26 @@ export function createIndustrialLoftWindowTexture() {
       ctx.fillStyle = grad;
       ctx.fillRect(px, py, paneW, paneH);
 
-      // Glass reflection highlights
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.fillRect(px + 4, py + 4, paneW - 8, 6);
-      ctx.fillRect(px + 4, py + 4, 6, paneH - 8);
+      // Dirty glass corner grime & soot washes
+      ctx.fillStyle = 'rgba(25, 18, 12, 0.45)';
+      ctx.fillRect(px, py + paneH - 16, paneW, 16);
+      ctx.fillRect(px, py, 14, paneH);
 
-      // Soft vignette around pane edges
-      ctx.strokeStyle = 'rgba(30, 18, 10, 0.45)';
+      // Glass specular reflection highlights
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.40)';
+      ctx.fillRect(px + 6, py + 6, paneW - 12, 10);
+      ctx.fillRect(px + 6, py + 6, 10, paneH - 12);
+
+      // Diagonal comic reflection glint
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(px + 12, py + paneH - 12);
+      ctx.lineTo(px + paneW - 12, py + 12);
+      ctx.stroke();
+
+      // Inked perimeter around pane
+      ctx.strokeStyle = '#0e1018';
       ctx.lineWidth = 4;
       ctx.strokeRect(px + 2, py + 2, paneW - 4, paneH - 4);
     }
@@ -6100,44 +7516,110 @@ export function createIndustrialLoftWindowTexture() {
 
   _loftWindowTex = new THREE.CanvasTexture(c);
   _loftWindowTex.colorSpace = THREE.SRGBColorSpace;
+  _loftWindowTex.anisotropy = 4;
   return _loftWindowTex;
+}
+
+let _loftWindowBumpTex = null;
+export function createIndustrialLoftWindowBumpMap() {
+  if (_loftWindowBumpTex) return _loftWindowBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Prominently raised iron frame baseline (#e8e8e8)
+  ctx.fillStyle = '#e8e8e8';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  const cols = 4;
+  const rows = 5;
+  const margin = 28;
+  const mullion = 18;
+  const paneW = (1024 - margin * 2 - (cols - 1) * mullion) / cols;
+  const paneH = (1024 - margin * 2 - (rows - 1) * mullion) / rows;
+
+  for (let r = 0; r < rows; r++) {
+    for (let cl = 0; cl < cols; cl++) {
+      const px = margin + cl * (paneW + mullion);
+      const py = margin + r * (paneH + mullion);
+      // Recessed glass pane
+      ctx.fillStyle = '#222222';
+      ctx.fillRect(px, py, paneW, paneH);
+
+      // Glass bevel near frame
+      ctx.fillStyle = '#383838';
+      ctx.fillRect(px + 4, py + 4, paneW - 8, paneH - 8);
+    }
+  }
+
+  _loftWindowBumpTex = new THREE.CanvasTexture(c);
+  _loftWindowBumpTex.anisotropy = 4;
+  return _loftWindowBumpTex;
 }
 
 let _corrugatedShutterTex = null;
 export function createCorrugatedShutterTexture() {
   if (_corrugatedShutterTex) return _corrugatedShutterTex;
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 512;
+  c.width = 1024;
+  c.height = 1024;
   const ctx = c.getContext('2d');
 
   ctx.fillStyle = '#3a4150';
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  const slatH = 16;
-  const numSlats = Math.ceil(512 / slatH);
+  const slatH = 24;
+  const numSlats = Math.ceil(1024 / slatH);
 
   for (let s = 0; s < numSlats; s++) {
     const y = s * slatH;
     const grad = ctx.createLinearGradient(0, y, 0, y + slatH);
-    grad.addColorStop(0.0, '#1a1d26'); // dark inter-slat seam
-    grad.addColorStop(0.18, '#323948');
-    grad.addColorStop(0.48, '#727c94'); // metallic highlight ridge
-    grad.addColorStop(0.78, '#464f62');
-    grad.addColorStop(1.0, '#222632');
+    grad.addColorStop(0.0, '#141720'); // deep inter-slat seam
+    grad.addColorStop(0.18, '#2d3444');
+    grad.addColorStop(0.48, '#76829c'); // metallic highlight ridge
+    grad.addColorStop(0.78, '#444d60');
+    grad.addColorStop(1.0, '#1e222c');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, y, 512, slatH);
+    ctx.fillRect(0, y, 1024, slatH);
 
     // Weathering rust / dirt wash
-    if (s % 5 === 0) {
-      ctx.fillStyle = 'rgba(120, 60, 30, 0.12)';
-      ctx.fillRect(0, y + 2, 512, slatH - 4);
+    if (s % 4 === 0) {
+      ctx.fillStyle = 'rgba(130, 65, 30, 0.15)';
+      ctx.fillRect(0, y + 2, 1024, slatH - 4);
     }
   }
 
   _corrugatedShutterTex = new THREE.CanvasTexture(c);
   _corrugatedShutterTex.colorSpace = THREE.SRGBColorSpace;
+  _corrugatedShutterTex.anisotropy = 4;
   return _corrugatedShutterTex;
+}
+
+let _corrugatedShutterBumpTex = null;
+export function createCorrugatedShutterBumpMap() {
+  if (_corrugatedShutterBumpTex) return _corrugatedShutterBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  const slatH = 24;
+  const numSlats = Math.ceil(1024 / slatH);
+
+  for (let s = 0; s < numSlats; s++) {
+    const y = s * slatH;
+    const grad = ctx.createLinearGradient(0, y, 0, y + slatH);
+    grad.addColorStop(0.0, '#1c1c1c'); // recessed groove seam
+    grad.addColorStop(0.50, '#e8e8e8'); // raised convex peak
+    grad.addColorStop(1.0, '#1c1c1c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, 1024, slatH);
+  }
+
+  _corrugatedShutterBumpTex = new THREE.CanvasTexture(c);
+  _corrugatedShutterBumpTex.anisotropy = 4;
+  return _corrugatedShutterBumpTex;
 }
 
 let _streetArtMuralTex = null;
@@ -6218,32 +7700,158 @@ export function createStreetArtMuralTexture() {
   return _streetArtMuralTex;
 }
 
+let _honeycombGrilleTex = null;
+export function createHoneycombGrilleTexture() {
+  if (_honeycombGrilleTex) return _honeycombGrilleTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Dark speaker cavity behind grille
+  ctx.fillStyle = '#0a0812';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  const hexR = 14;
+  const dx = hexR * Math.sqrt(3);
+  const dy = hexR * 1.5;
+  const cols = Math.ceil(1024 / dx) + 1;
+  const rows = Math.ceil(1024 / dy) + 1;
+
+  for (let r = 0; r < rows; r++) {
+    const y = r * dy;
+    const xOff = (r % 2 === 0) ? 0 : dx / 2;
+    for (let cl = 0; cl < cols; cl++) {
+      const x = cl * dx + xOff;
+
+      // Outer hexagonal perforated metal cell
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3 - Math.PI / 6;
+        const px = x + (hexR + 2) * Math.cos(a);
+        const py = y + (hexR + 2) * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#323644';
+      ctx.fill();
+
+      // Top-edge comic highlight rim
+      ctx.strokeStyle = '#6e7a96';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Inner perforated hole (void)
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3 - Math.PI / 6;
+        const px = x + (hexR - 2.5) * Math.cos(a);
+        const py = y + (hexR - 2.5) * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#08060c';
+      ctx.fill();
+    }
+  }
+
+  _honeycombGrilleTex = new THREE.CanvasTexture(c);
+  _honeycombGrilleTex.wrapS = THREE.RepeatWrapping;
+  _honeycombGrilleTex.wrapT = THREE.RepeatWrapping;
+  _honeycombGrilleTex.repeat.set(2, 2);
+  _honeycombGrilleTex.colorSpace = THREE.SRGBColorSpace;
+  _honeycombGrilleTex.anisotropy = 4;
+  return _honeycombGrilleTex;
+}
+
+let _honeycombGrilleBumpTex = null;
+export function createHoneycombGrilleBumpMap() {
+  if (_honeycombGrilleBumpTex) return _honeycombGrilleBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Deep recessed void behind holes
+  ctx.fillStyle = '#101010';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  const hexR = 14;
+  const dx = hexR * Math.sqrt(3);
+  const dy = hexR * 1.5;
+  const cols = Math.ceil(1024 / dx) + 1;
+  const rows = Math.ceil(1024 / dy) + 1;
+
+  for (let r = 0; r < rows; r++) {
+    const y = r * dy;
+    const xOff = (r % 2 === 0) ? 0 : dx / 2;
+    for (let cl = 0; cl < cols; cl++) {
+      const x = cl * dx + xOff;
+
+      // Raised hexagonal perforated metal web plate
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3 - Math.PI / 6;
+        const px = x + (hexR + 2) * Math.cos(a);
+        const py = y + (hexR + 2) * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fill();
+
+      // Deep punched center hole
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (i * Math.PI) / 3 - Math.PI / 6;
+        const px = x + (hexR - 2.5) * Math.cos(a);
+        const py = y + (hexR - 2.5) * Math.sin(a);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = '#050505';
+      ctx.fill();
+    }
+  }
+
+  _honeycombGrilleBumpTex = new THREE.CanvasTexture(c);
+  _honeycombGrilleBumpTex.wrapS = THREE.RepeatWrapping;
+  _honeycombGrilleBumpTex.wrapT = THREE.RepeatWrapping;
+  _honeycombGrilleBumpTex.repeat.set(2, 2);
+  _honeycombGrilleBumpTex.anisotropy = 4;
+  return _honeycombGrilleBumpTex;
+}
+
 let _ampGrilleTex = null;
 export function createAmpGrilleTexture() {
   if (_ampGrilleTex) return _ampGrilleTex;
   const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 256;
+  c.width = 1024;
+  c.height = 1024;
   const ctx = c.getContext('2d');
 
   ctx.fillStyle = '#181716';
-  ctx.fillRect(0, 0, 256, 256);
+  ctx.fillRect(0, 0, 1024, 1024);
 
-  // Woven wheat / black basketweave
-  const cell = 8;
-  for (let y = 0; y < 256; y += cell) {
-    for (let x = 0; x < 256; x += cell) {
+  // Woven wheat / black basketweave (upgraded to 1024px)
+  const cell = 16;
+  for (let y = 0; y < 1024; y += cell) {
+    for (let x = 0; x < 1024; x += cell) {
       const isEven = ((x / cell) + (y / cell)) % 2 === 0;
       if (isEven) {
         ctx.fillStyle = '#3e372a';
         ctx.fillRect(x, y, cell, cell);
         ctx.fillStyle = '#b89d6e'; // golden wheat highlight thread
-        ctx.fillRect(x + 2, y + 2, cell - 4, 2);
+        ctx.fillRect(x + 3, y + 3, cell - 6, 3);
       } else {
         ctx.fillStyle = '#1c1b18';
         ctx.fillRect(x, y, cell, cell);
         ctx.fillStyle = '#5c4e36';
-        ctx.fillRect(x + 2, y + 2, 2, cell - 4);
+        ctx.fillRect(x + 3, y + 3, 3, cell - 6);
       }
     }
   }
@@ -6253,6 +7861,7 @@ export function createAmpGrilleTexture() {
   _ampGrilleTex.wrapT = THREE.RepeatWrapping;
   _ampGrilleTex.repeat.set(2, 2);
   _ampGrilleTex.colorSpace = THREE.SRGBColorSpace;
+  _ampGrilleTex.anisotropy = 4;
   return _ampGrilleTex;
 }
 
@@ -6260,58 +7869,119 @@ let _jerseyBarrierTex = null;
 export function createJerseyBarrierTexture() {
   if (_jerseyBarrierTex) return _jerseyBarrierTex;
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 256;
+  c.width = 1024;
+  c.height = 512;
   const ctx = c.getContext('2d');
 
   // Weathered concrete base
   ctx.fillStyle = '#828792';
-  ctx.fillRect(0, 0, 512, 256);
+  ctx.fillRect(0, 0, 1024, 512);
 
-  // Concrete aggregate noise
-  for (let i = 0; i < 300; i++) {
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(50, 55, 65, 0.25)' : 'rgba(210, 215, 225, 0.25)';
-    ctx.fillRect(Math.random() * 512, Math.random() * 256, 4 + Math.random() * 8, 2 + Math.random() * 6);
+  // Concrete aggregate noise (1,200 specks)
+  for (let i = 0; i < 1200; i++) {
+    ctx.fillStyle = i % 2 === 0 ? 'rgba(50, 55, 65, 0.30)' : 'rgba(215, 220, 230, 0.30)';
+    ctx.fillRect(Math.random() * 1024, Math.random() * 512, 3 + Math.random() * 8, 2 + Math.random() * 6);
+  }
+
+  // Chipped concrete gouges & hairline fracture cracks
+  ctx.strokeStyle = '#32343c';
+  ctx.lineWidth = 2.5;
+  for (let i = 0; i < 16; i++) {
+    ctx.beginPath();
+    let x = Math.random() * 1024;
+    let y = Math.random() * 512;
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 4; s++) {
+      x += (Math.random() - 0.5) * 45;
+      y += (Math.random() - 0.5) * 35;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
   }
 
   // Diagonal reflective orange and white hazard stripes
-  const stripeW = 48;
+  const stripeW = 96;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 40, 512, 140); // stripe band along mid-section
+  ctx.rect(0, 80, 1024, 280); // stripe band along mid-section
   ctx.clip();
 
-  for (let x = -200; x < 700; x += stripeW * 2) {
+  for (let x = -400; x < 1400; x += stripeW * 2) {
     ctx.fillStyle = '#ff6d00'; // vibrant safety orange
     ctx.beginPath();
-    ctx.moveTo(x, 256);
-    ctx.lineTo(x + stripeW, 256);
-    ctx.lineTo(x + stripeW + 160, 0);
-    ctx.lineTo(x + 160, 0);
+    ctx.moveTo(x, 512);
+    ctx.lineTo(x + stripeW, 512);
+    ctx.lineTo(x + stripeW + 320, 0);
+    ctx.lineTo(x + 320, 0);
     ctx.closePath();
     ctx.fill();
 
     ctx.fillStyle = '#f0f2f5'; // reflective white
     ctx.beginPath();
-    ctx.moveTo(x + stripeW, 256);
-    ctx.lineTo(x + stripeW * 2, 256);
-    ctx.lineTo(x + stripeW * 2 + 160, 0);
-    ctx.lineTo(x + stripeW + 160, 0);
+    ctx.moveTo(x + stripeW, 512);
+    ctx.lineTo(x + stripeW * 2, 512);
+    ctx.lineTo(x + stripeW * 2 + 320, 0);
+    ctx.lineTo(x + stripeW + 320, 0);
     ctx.closePath();
     ctx.fill();
   }
   ctx.restore();
 
-  // Dark grime at bottom edge
-  const grimeGrad = ctx.createLinearGradient(0, 200, 0, 256);
+  // Dark asphalt grime at bottom edge
+  const grimeGrad = ctx.createLinearGradient(0, 400, 0, 512);
   grimeGrad.addColorStop(0, 'rgba(25, 30, 40, 0.0)');
-  grimeGrad.addColorStop(1, 'rgba(25, 30, 40, 0.65)');
+  grimeGrad.addColorStop(1, 'rgba(20, 24, 32, 0.70)');
   ctx.fillStyle = grimeGrad;
-  ctx.fillRect(0, 200, 512, 56);
+  ctx.fillRect(0, 400, 1024, 112);
 
   _jerseyBarrierTex = new THREE.CanvasTexture(c);
   _jerseyBarrierTex.colorSpace = THREE.SRGBColorSpace;
+  _jerseyBarrierTex.anisotropy = 4;
   return _jerseyBarrierTex;
+}
+
+let _jerseyBarrierBumpTex = null;
+export function createJerseyBarrierBumpMap() {
+  if (_jerseyBarrierBumpTex) return _jerseyBarrierBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const ctx = c.getContext('2d');
+
+  // Baseline concrete height (#808080)
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 1024, 512);
+
+  // Concrete aggregate tooth
+  for (let i = 0; i < 1500; i++) {
+    const val = 110 + Math.floor(Math.random() * 45);
+    ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+    ctx.fillRect(Math.random() * 1024, Math.random() * 512, 3, 3);
+  }
+
+  // Chipped corner fractures (deep gouges)
+  ctx.strokeStyle = '#282828';
+  ctx.lineWidth = 3;
+  for (let i = 0; i < 16; i++) {
+    ctx.beginPath();
+    let x = Math.random() * 1024;
+    let y = Math.random() * 512;
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 4; s++) {
+      x += (Math.random() - 0.5) * 45;
+      y += (Math.random() - 0.5) * 35;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Raised reflective vinyl warning stripe band
+  ctx.fillStyle = '#b8b8b8';
+  ctx.fillRect(0, 80, 1024, 280);
+
+  _jerseyBarrierBumpTex = new THREE.CanvasTexture(c);
+  _jerseyBarrierBumpTex.anisotropy = 4;
+  return _jerseyBarrierBumpTex;
 }
 
 // ----------------------------------------------------------------------------
@@ -6496,28 +8166,49 @@ export function createStageChassisTexture() {
   if (_stageChassisTex) return _stageChassisTex;
   const c = document.createElement('canvas');
   c.width = 1024;
-  c.height = 256;
+  c.height = 512;
   const ctx = c.getContext('2d');
 
   ctx.fillStyle = '#1c182c';
-  ctx.fillRect(0, 0, 1024, 256);
+  ctx.fillRect(0, 0, 1024, 512);
+
+  // Stamped Vertical Structural Panel Seams
+  ctx.strokeStyle = '#0e0c18';
+  ctx.lineWidth = 6;
+  for (let px = 256; px < 1024; px += 256) {
+    ctx.beginPath();
+    ctx.moveTo(px, 15);
+    ctx.lineTo(px, 395);
+    ctx.stroke();
+  }
 
   // Horizontal ribbed trailer skirt
-  const slatH = 24;
-  for (let y = 10; y < 190; y += slatH) {
+  const slatH = 48;
+  for (let y = 20; y < 390; y += slatH) {
     const grad = ctx.createLinearGradient(0, y, 0, y + slatH);
     grad.addColorStop(0, '#0e0c18');
     grad.addColorStop(0.2, '#28233e');
-    grad.addColorStop(0.5, '#443c68');
+    grad.addColorStop(0.5, '#483f6c');
     grad.addColorStop(0.8, '#26213a');
     grad.addColorStop(1, '#0c0a16');
     ctx.fillStyle = grad;
-    ctx.fillRect(0, y, 1024, slatH - 3);
+    ctx.fillRect(0, y, 1024, slatH - 5);
 
-    for (let rx = 30; rx < 1024; rx += 80) {
+    // Stamped bolt heads / rivets
+    for (let rx = 32; rx < 1024; rx += 64) {
+      ctx.fillStyle = '#0a0812';
+      ctx.beginPath();
+      ctx.arc(rx, y + slatH / 2 + 1, 5, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = '#f5c211';
       ctx.beginPath();
-      ctx.arc(rx, y + slatH / 2, 3, 0, Math.PI * 2);
+      ctx.arc(rx, y + slatH / 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(rx - 1, y + slatH / 2 - 1, 1.5, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -6525,25 +8216,25 @@ export function createStageChassisTexture() {
   // Diagonal safety hazard chevrons along bottom edge
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 200, 1024, 56);
+  ctx.rect(0, 400, 1024, 112);
   ctx.clip();
-  const chevW = 32;
-  for (let x = -100; x < 1200; x += chevW * 2) {
+  const chevW = 64;
+  for (let x = -200; x < 1400; x += chevW * 2) {
     ctx.fillStyle = '#f5c211';
     ctx.beginPath();
-    ctx.moveTo(x, 256);
-    ctx.lineTo(x + chevW, 256);
-    ctx.lineTo(x + chevW + 40, 200);
-    ctx.lineTo(x + 40, 200);
+    ctx.moveTo(x, 512);
+    ctx.lineTo(x + chevW, 512);
+    ctx.lineTo(x + chevW + 80, 400);
+    ctx.lineTo(x + 80, 400);
     ctx.closePath();
     ctx.fill();
 
     ctx.fillStyle = '#121218';
     ctx.beginPath();
-    ctx.moveTo(x + chevW, 256);
-    ctx.lineTo(x + chevW * 2, 256);
-    ctx.lineTo(x + chevW * 2 + 40, 200);
-    ctx.lineTo(x + chevW + 40, 200);
+    ctx.moveTo(x + chevW, 512);
+    ctx.lineTo(x + chevW * 2, 512);
+    ctx.lineTo(x + chevW * 2 + 80, 400);
+    ctx.lineTo(x + chevW + 80, 400);
     ctx.closePath();
     ctx.fill();
   }
@@ -6553,17 +8244,64 @@ export function createStageChassisTexture() {
   for (let mx = 80; mx < 1024; mx += 180) {
     ctx.fillStyle = '#ff9900';
     ctx.beginPath();
-    ctx.arc(mx, 195, 6, 0, Math.PI * 2);
+    ctx.arc(mx, 395, 10, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(mx - 1, 193, 2, 0, Math.PI * 2);
+    ctx.arc(mx - 2, 393, 3, 0, Math.PI * 2);
     ctx.fill();
   }
 
   _stageChassisTex = new THREE.CanvasTexture(c);
   _stageChassisTex.colorSpace = THREE.SRGBColorSpace;
+  _stageChassisTex.anisotropy = 4;
   return _stageChassisTex;
+}
+
+let _stageChassisBumpTex = null;
+export function createStageChassisBumpMap() {
+  if (_stageChassisBumpTex) return _stageChassisBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 512;
+  const ctx = c.getContext('2d');
+
+  // Neutral chassis plate baseline
+  ctx.fillStyle = '#555555';
+  ctx.fillRect(0, 0, 1024, 512);
+
+  // Recessed Stamped Vertical Seams
+  ctx.fillStyle = '#181818';
+  for (let px = 256; px < 1024; px += 256) {
+    ctx.fillRect(px - 3, 15, 6, 380);
+  }
+
+  // Ribbed Skirt Slats
+  const slatH = 48;
+  for (let y = 20; y < 390; y += slatH) {
+    const grad = ctx.createLinearGradient(0, y, 0, y + slatH);
+    grad.addColorStop(0, '#1c1c1c'); // recessed groove
+    grad.addColorStop(0.5, '#c8c8c8'); // raised ridge apex
+    grad.addColorStop(1, '#1c1c1c');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, 1024, slatH - 5);
+
+    // Raised Bolt Head Stud Relief (#ffffff)
+    for (let rx = 32; rx < 1024; rx += 64) {
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(rx, y + slatH / 2, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Raised Hazard Chevron Band
+  ctx.fillStyle = '#909090';
+  ctx.fillRect(0, 400, 1024, 112);
+
+  _stageChassisBumpTex = new THREE.CanvasTexture(c);
+  _stageChassisBumpTex.anisotropy = 4;
+  return _stageChassisBumpTex;
 }
 
 let _roofGravelTex = null;
@@ -6738,23 +8476,53 @@ export function createHighDetailCourtAsphaltTexture() {
   c.height = 2048;
   const ctx = c.getContext('2d');
 
-  // 1. Base Dark Slate Asphalt (#222530)
-  ctx.fillStyle = '#222530';
+  // 1. Base Dark Slate Asphalt (#1e212b to #222530)
+  ctx.fillStyle = '#20232e';
   ctx.fillRect(0, 0, 2048, 2048);
 
-  // 2. High-Frequency Aggregate Noise Stippling
-  for (let i = 0; i < 600; i++) {
-    const tones = ['rgba(12, 14, 20, 0.50)', 'rgba(48, 54, 70, 0.40)', 'rgba(80, 90, 115, 0.22)'];
-    ctx.fillStyle = tones[i % tones.length];
+  // 2. High-Frequency Fine Mineral Aggregate Speckling (8,000 tactile specks)
+  const speckleTones = [
+    'rgba(12, 14, 20, 0.55)',
+    'rgba(40, 46, 60, 0.45)',
+    'rgba(70, 80, 105, 0.28)',
+    'rgba(130, 145, 175, 0.20)',
+    'rgba(200, 210, 230, 0.12)'
+  ];
+  for (let i = 0; i < 8000; i++) {
+    ctx.fillStyle = speckleTones[i % speckleTones.length];
+    const sz = 1.5 + Math.random() * 3.5;
     ctx.fillRect(
       Math.random() * 2048,
       Math.random() * 2048,
-      10 + Math.random() * 85,
-      5 + Math.random() * 40
+      sz,
+      sz
     );
   }
 
-  // 3. Broad Asphalt Rubber Tire Skids
+  // 3. Oil / Water Puddle Sheen & Damp Pavement Patches
+  const puddleCoords = [
+    { x: 820, y: 1200, rx: 180, ry: 90, rot: -0.2 },
+    { x: 1280, y: 780, rx: 140, ry: 75, rot: 0.3 },
+    { x: 950, y: 880, rx: 90, ry: 50, rot: 0.1 },
+    { x: 620, y: 1420, rx: 160, ry: 80, rot: -0.4 }
+  ];
+  puddleCoords.forEach(({ x, y, rx, ry, rot }) => {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    const pGrad = ctx.createRadialGradient(0, 0, 10, 0, 0, rx);
+    pGrad.addColorStop(0.0, 'rgba(10, 12, 16, 0.65)'); // dark damp asphalt core
+    pGrad.addColorStop(0.6, 'rgba(16, 20, 28, 0.35)');
+    pGrad.addColorStop(0.85, 'rgba(40, 70, 90, 0.18)'); // subtle petrol rainbow sheen
+    pGrad.addColorStop(1.0, 'rgba(10, 12, 16, 0.0)');
+    ctx.fillStyle = pGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  });
+
+  // 4. Broad Asphalt Rubber Tire Skids
   ctx.strokeStyle = 'rgba(10, 12, 18, 0.60)';
   ctx.lineWidth = 46;
   ctx.beginPath();
@@ -6767,9 +8535,9 @@ export function createHighDetailCourtAsphaltTexture() {
   ctx.arc(1024, 1024, 620, 1.2, 2.8);
   ctx.stroke();
 
-  // 4. Streetball Court Lines
+  // 5. Streetball Court Lines & Cypher Ring
   const courtYellow = '#f5c211';
-  const courtWhite = '#ffffff';
+  const courtWhite = '#f4f5f8';
 
   // A. Yellow Basketball Key Rectangle (centered towards stage)
   ctx.strokeStyle = courtYellow;
@@ -6800,12 +8568,23 @@ export function createHighDetailCourtAsphaltTexture() {
   ctx.arc(1024, 1024, 460, 0, Math.PI * 2);
   ctx.stroke();
 
+  // Eroded Stencil Paint Porous Bite: Stipple asphalt pores through cypher paint markings
+  ctx.fillStyle = '#20232e';
+  for (let a = 0; a < Math.PI * 2; a += 0.015) {
+    if (Math.sin(a * 42) > 0.3) {
+      const rOffset = (Math.random() - 0.5) * 16;
+      const px = 1024 + (460 + rOffset) * Math.cos(a);
+      const py = 1024 + (460 + rOffset) * Math.sin(a);
+      ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+    }
+  }
+
   // Outer yellow boundary square
-  ctx.strokeStyle = 'rgba(245, 194, 20, 0.65)';
+  ctx.strokeStyle = 'rgba(245, 194, 20, 0.70)';
   ctx.lineWidth = 12;
   ctx.strokeRect(380, 380, 1288, 1288);
 
-  // 5. Authentic Street Graffiti Decals ("DJ KRONOS", "BEATDOWN", "RHYTHM!")
+  // 6. Authentic Street Graffiti Decals ("DJ KRONOS", "BEATDOWN", "RHYTHM!")
   // Decal 1: "DJ KRONOS"
   ctx.save();
   ctx.translate(680, 940);
@@ -6860,17 +8639,17 @@ export function createHighDetailCourtAsphaltTexture() {
   ctx.fillText('RHYTHM!', 0, 0);
   ctx.restore();
 
-  // 6. Branching Crevice Cracks
+  // 7. Branching Crevice Cracks (48 branched lines)
   ctx.strokeStyle = '#0e1017';
-  ctx.lineWidth = 4;
-  for (let i = 0; i < 32; i++) {
+  for (let i = 0; i < 48; i++) {
+    ctx.lineWidth = 2.5 + Math.random() * 2.5;
     ctx.beginPath();
     let x = Math.random() * 2048;
     let y = Math.random() * 2048;
     ctx.moveTo(x, y);
-    for (let s = 0; s < 5; s++) {
-      x += (Math.random() - 0.5) * 120;
-      y += (Math.random() - 0.5) * 120;
+    for (let s = 0; s < 6; s++) {
+      x += (Math.random() - 0.5) * 110;
+      y += (Math.random() - 0.5) * 110;
       ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -6878,7 +8657,121 @@ export function createHighDetailCourtAsphaltTexture() {
 
   _courtAsphaltTex = new THREE.CanvasTexture(c);
   _courtAsphaltTex.colorSpace = THREE.SRGBColorSpace;
+  _courtAsphaltTex.anisotropy = 4;
+
+  if (typeof window !== 'undefined' && window.floorMesh && window.floorMesh.material) {
+    window.floorMesh.material.map = _courtAsphaltTex;
+    window.floorMesh.material.bumpMap = createCourtAsphaltBumpMap();
+    window.floorMesh.material.bumpScale = 0.04;
+    _courtAsphaltTex.anisotropy = 4;
+  }
+
   return _courtAsphaltTex;
+}
+
+let _courtAsphaltBumpTex = null;
+export function createCourtAsphaltBumpMap() {
+  if (_courtAsphaltBumpTex) return _courtAsphaltBumpTex;
+  const c = document.createElement('canvas');
+  c.width = 2048;
+  c.height = 2048;
+  const ctx = c.getContext('2d');
+
+  // 1. Base Neutral Mid-Gray (#808080 = 128/255 height)
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 2048, 2048);
+
+  // 2. High-Frequency Mineral Aggregate Speckling (8,000 tactile specks)
+  for (let i = 0; i < 8000; i++) {
+    const val = 100 + Math.floor(Math.random() * 55); // height 100 to 155
+    ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+    const sz = 1.5 + Math.random() * 3.5;
+    ctx.fillRect(Math.random() * 2048, Math.random() * 2048, sz, sz);
+  }
+
+  // 3. Raised Court Paint Lines (Height ~175-190 with etched dark boundary bevel ~90)
+  function drawRaisedPaintLine(drawFn, lineWidth) {
+    ctx.strokeStyle = '#555555';
+    ctx.lineWidth = lineWidth + 6;
+    drawFn();
+    ctx.strokeStyle = '#b8b8b8';
+    ctx.lineWidth = lineWidth;
+    drawFn();
+  }
+
+  // Basketball key rect
+  drawRaisedPaintLine(() => {
+    ctx.strokeRect(724, 560, 600, 520);
+  }, 14);
+
+  // Free-throw circle arc
+  drawRaisedPaintLine(() => {
+    ctx.beginPath();
+    ctx.arc(1024, 1080, 200, 0, Math.PI);
+    ctx.stroke();
+  }, 14);
+
+  // 3-Point perimeter arc
+  drawRaisedPaintLine(() => {
+    ctx.beginPath();
+    ctx.arc(1024, 480, 680, 0.45, Math.PI - 0.45);
+    ctx.stroke();
+  }, 14);
+
+  // Circular battle cypher ring (r = 460 at 1024, 1024)
+  drawRaisedPaintLine(() => {
+    ctx.beginPath();
+    ctx.arc(1024, 1024, 460, 0, Math.PI * 2);
+    ctx.stroke();
+  }, 18);
+
+  // Outer boundary square
+  drawRaisedPaintLine(() => {
+    ctx.strokeRect(380, 380, 1288, 1288);
+  }, 12);
+
+  // 4. Raised Graffiti Text Relief
+  ctx.save();
+  ctx.translate(680, 940);
+  ctx.rotate(-0.16);
+  ctx.font = '900 85px Impact, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#444444';
+  ctx.fillText('DJ KRONOS', 4, 4);
+  ctx.fillStyle = '#b0b0b0';
+  ctx.fillText('DJ KRONOS', 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.translate(1360, 1140);
+  ctx.rotate(0.22);
+  ctx.font = '900 78px Impact, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#444444';
+  ctx.fillText('BEATDOWN', 4, 4);
+  ctx.fillStyle = '#b0b0b0';
+  ctx.fillText('BEATDOWN', 0, 0);
+  ctx.restore();
+
+  // 5. Deep Etched Crevice Cracks (Height 25 to 50 = deep fissures)
+  ctx.strokeStyle = '#222222';
+  for (let i = 0; i < 48; i++) {
+    ctx.lineWidth = 2.5 + Math.random() * 2.5;
+    ctx.beginPath();
+    let x = Math.random() * 2048;
+    let y = Math.random() * 2048;
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 6; s++) {
+      x += (Math.random() - 0.5) * 110;
+      y += (Math.random() - 0.5) * 110;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  _courtAsphaltBumpTex = new THREE.CanvasTexture(c);
+  _courtAsphaltBumpTex.anisotropy = 4;
+  return _courtAsphaltBumpTex;
 }
 
 let _lightPoolTex = null;
@@ -7143,30 +9036,30 @@ export function createBakedArenaLightMapTexture() {
   ctx.ellipse(stageGlowX, stageGlowY, 150, 60, -0.22, 0, Math.PI * 2);
   ctx.fill();
 
-  // 5. East Bodega Shopfront Window Warm Golden Bounce Pool
-  const eastSpillX = toPxX(9.2);
-  const eastSpillY = toPxY(2.2);
-  const eastSpillGrad = ctx.createRadialGradient(eastSpillX, eastSpillY, 15, eastSpillX, eastSpillY, 160);
-  eastSpillGrad.addColorStop(0.0, 'rgba(255, 184, 54, 0.55)');
-  eastSpillGrad.addColorStop(0.35, 'rgba(255, 160, 40, 0.35)');
-  eastSpillGrad.addColorStop(0.70, 'rgba(255, 130, 30, 0.12)');
-  eastSpillGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
-  ctx.fillStyle = eastSpillGrad;
-  ctx.beginPath();
-  ctx.ellipse(eastSpillX, eastSpillY, 125, 160, -0.22, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 6. East Dual Neon Signs ("BOOMBOX BATTLE") Cyan/Magenta Floor Wash
+  // 5. East Dual Neon Signs ("BOOMBOX BATTLE") Cyan/Magenta Floor Wash
   const neonWashX = toPxX(8.6);
   const neonWashY = toPxY(0.8);
-  const neonWashGrad = ctx.createRadialGradient(neonWashX, neonWashY, 8, neonWashX, neonWashY, 120);
-  neonWashGrad.addColorStop(0.0, 'rgba(36, 229, 255, 0.40)');
-  neonWashGrad.addColorStop(0.40, 'rgba(255, 42, 133, 0.28)');
-  neonWashGrad.addColorStop(0.75, 'rgba(120, 30, 160, 0.10)');
+  const neonWashGrad = ctx.createRadialGradient(neonWashX, neonWashY, 4, neonWashX, neonWashY, 28);
+  neonWashGrad.addColorStop(0.0, 'rgba(36, 229, 255, 0.95)');
+  neonWashGrad.addColorStop(0.35, 'rgba(36, 229, 255, 0.75)');
+  neonWashGrad.addColorStop(0.70, 'rgba(255, 42, 133, 0.35)');
   neonWashGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
   ctx.fillStyle = neonWashGrad;
   ctx.beginPath();
-  ctx.ellipse(neonWashX, neonWashY, 95, 120, -0.15, 0, Math.PI * 2);
+  ctx.arc(neonWashX, neonWashY, 28, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 6. East Bodega Shopfront Window Warm Golden Bounce Pool
+  const eastSpillX = toPxX(9.2);
+  const eastSpillY = toPxY(2.2);
+  const eastSpillGrad = ctx.createRadialGradient(eastSpillX, eastSpillY, 4, eastSpillX, eastSpillY, 32);
+  eastSpillGrad.addColorStop(0.0, 'rgba(255, 184, 54, 0.95)');
+  eastSpillGrad.addColorStop(0.40, 'rgba(255, 160, 40, 0.65)');
+  eastSpillGrad.addColorStop(0.75, 'rgba(255, 130, 30, 0.25)');
+  eastSpillGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0.0)');
+  ctx.fillStyle = eastSpillGrad;
+  ctx.beginPath();
+  ctx.arc(eastSpillX, eastSpillY, 32, 0, Math.PI * 2);
   ctx.fill();
 
   _arenaLightMapTex = new THREE.CanvasTexture(c);
@@ -7259,18 +9152,31 @@ export function createFlightCase(w = 1.1, h = 0.85, d = 0.85, color = 0x181820, 
 export function createJerseyBarrier(w = 2.2, h = 0.88, d = 0.62) {
   const barrierGroup = new THREE.Group();
   const tex = createJerseyBarrierTexture();
+  const bump = createJerseyBarrierBumpMap();
 
-  // Use 0xffffff so concrete texture is not darkened, with Track 4 creviceAO
-  const basePlinth = createHiFiMesh(new THREE.BoxGeometry(w, 0.28, d), 0xffffff, 0.038, tex, 0x000000, { creviceAO: true });
+  // Use 0xffffff so concrete texture is not darkened, with Track 4 creviceAO & chipped concrete bump relief
+  const basePlinth = createHiFiMesh(new THREE.BoxGeometry(w, 0.28, d), 0xffffff, 0.038, tex, 0x000000, {
+    creviceAO: true,
+    bumpMap: bump,
+    bumpScale: 0.04
+  });
   basePlinth.name = 'jersey_barrier_mesh';
   basePlinth.position.y = 0.14;
   barrierGroup.add(basePlinth);
 
-  const midSlope = createHiFiMesh(new THREE.BoxGeometry(w, 0.22, d * 0.70), 0xffffff, 0.035, tex);
+  // Angled mid-slope section with concrete aggregate and crack relief
+  const midSlope = createHiFiMesh(new THREE.BoxGeometry(w, 0.22, d * 0.70), 0xffffff, 0.035, tex, 0x000000, {
+    bumpMap: bump,
+    bumpScale: 0.035
+  });
   midSlope.position.y = 0.39;
   barrierGroup.add(midSlope);
 
-  const stem = createHiFiMesh(new THREE.BoxGeometry(w, 0.38, d * 0.38), 0xffffff, 0.035, tex);
+  // Upper vertical stem section with warning stripe bump relief
+  const stem = createHiFiMesh(new THREE.BoxGeometry(w, 0.38, d * 0.38), 0xffffff, 0.035, tex, 0x000000, {
+    bumpMap: bump,
+    bumpScale: 0.035
+  });
   stem.position.y = 0.69;
   barrierGroup.add(stem);
 
@@ -7311,14 +9217,26 @@ export function buildBoomboxStage(scene) {
 
   // 1. Main Boombox Truck Base & Center Booth Cabinet
   const stageChassisTex = createStageChassisTexture();
-  const stageBase = createHiFiMesh(new THREE.BoxGeometry(8.6, 1.35, 3.2), 0xffffff, 0.03, stageChassisTex, 0x120f20, { creviceAO: true });
+  const stageChassisBump = createStageChassisBumpMap();
+  const stageBase = createHiFiMesh(new THREE.BoxGeometry(8.6, 1.35, 3.2), 0xffffff, 0.03, stageChassisTex, 0x120f20, {
+    creviceAO: true,
+    bumpMap: stageChassisBump,
+    bumpScale: 0.035,
+    isMetallic: true,
+    castShadow: true,
+    receiveShadow: true
+  });
   stageBase.position.set(0, 0.68, 0);
   soundRigGroup.add(stageBase);
 
-  // Front Trailer Skirt Graphic Plane
+  // Front Trailer Skirt Graphic Plane with Cel Material and Ribbed Bump Relief
   const skirtPlane = new THREE.Mesh(
     new THREE.PlaneGeometry(8.55, 1.30),
-    new THREE.MeshBasicMaterial({ map: stageChassisTex })
+    createCelMaterial(0xffffff, stageChassisTex, 0x000000, {
+      bumpMap: stageChassisBump,
+      bumpScale: 0.035,
+      isMetallic: true
+    })
   );
   skirtPlane.position.set(0, 0.68, 1.61);
   soundRigGroup.add(skirtPlane);
@@ -7348,7 +9266,7 @@ export function buildBoomboxStage(scene) {
     soundRigGroup.add(outriggerGroup);
   });
 
-  const centerCabinet = createHiFiMesh(new THREE.BoxGeometry(3.5, 3.6, 2.5), 0x201a38, 0.035);
+  const centerCabinet = createHiFiMesh(new THREE.BoxGeometry(3.5, 3.6, 2.5), 0x201a38, 0.035, null, 0x000000, { castShadow: true });
   centerCabinet.position.set(0, 3.1, -0.1);
   soundRigGroup.add(centerCabinet);
 
@@ -7471,6 +9389,15 @@ export function buildBoomboxStage(scene) {
   const kSpring = 145.0;
   const cDamp = 16.5;
 
+  const cachedVuGradL = vuCtx.createRadialGradient(256, 310, 20, 256, 240, 210);
+  cachedVuGradL.addColorStop(0.0, '#fff4cc');
+  cachedVuGradL.addColorStop(0.55, '#f7ca5e');
+  cachedVuGradL.addColorStop(1.0, '#d19726');
+  const cachedVuGradR = vuCtx.createRadialGradient(768, 310, 20, 768, 240, 210);
+  cachedVuGradR.addColorStop(0.0, '#fff4cc');
+  cachedVuGradR.addColorStop(0.55, '#f7ca5e');
+  cachedVuGradR.addColorStop(1.0, '#d19726');
+
   // 4B. Upward-Tilted Stage Canopy Roof Awning (~25° tilt) with Perimeter Amber Chase Bulbs
   const canopyGroup = new THREE.Group();
   canopyGroup.position.set(0, 4.88, 0.40);
@@ -7534,8 +9461,13 @@ export function buildBoomboxStage(scene) {
 
   const marqueePlane = new THREE.Mesh(
     new THREE.PlaneGeometry(4.25, 1.05),
-    new THREE.MeshBasicMaterial({ map: createMarqueeTexture() })
+    new THREE.MeshBasicMaterial({
+      map: createMarqueeTexture(),
+      fog: false,
+      toneMapped: false
+    })
   );
+  marqueePlane.name = 'stage_marquee_banner';
   marqueePlane.position.set(0, 1.25, 0.84);
   canopyGroup.add(marqueePlane);
 
@@ -7560,7 +9492,7 @@ export function buildBoomboxStage(scene) {
     wing.rotation.y = side * -0.35;
 
     // 1. Aerodynamic Wing Truss Fairing with Neon Trim
-    const wingTruss = createHiFiMesh(new THREE.BoxGeometry(2.45, 3.65, 2.1), 0x1a162b, 0.04);
+    const wingTruss = createHiFiMesh(new THREE.BoxGeometry(2.45, 3.65, 2.1), 0x1a162b, 0.04, null, 0x000000, { castShadow: true });
     wing.add(wingTruss);
 
     const neonFrame = createHiFiMesh(
@@ -7998,11 +9930,36 @@ export function buildBoomboxStage(scene) {
   });
 
   let lastUpdateTime = performance.now();
+  let canvasUpdateAccum = 1.0;
 
   function updateStageDisplays(freqData, bass, beatPulse, dtArg) {
     const now = performance.now();
     const dt = dtArg !== undefined ? dtArg : Math.min((now - lastUpdateTime) * 0.001, 0.05) || 0.016;
     lastUpdateTime = now;
+
+    const targetL = -0.75 + Math.min(1.50, Math.pow(bass * 1.15 + beatPulse * 0.40, 1.2) * 1.35);
+    const rightHighEnergy = freqData ? (freqData[12] || 100) / 255 : 0.4;
+    const targetR = -0.75 + Math.min(1.50, Math.pow(bass * 0.95 + rightHighEnergy * 0.65, 1.2) * 1.35);
+
+    const safeDt = Math.min(dt, 0.033);
+    const aL = kSpring * (targetL - vuBallistics.angleL) - cDamp * vuBallistics.velL;
+    vuBallistics.velL += aL * safeDt;
+    vuBallistics.angleL += vuBallistics.velL * safeDt;
+
+    const aR = kSpring * (targetR - vuBallistics.angleR) - cDamp * vuBallistics.velR;
+    vuBallistics.velR += aR * safeDt;
+    vuBallistics.angleR += vuBallistics.velR * safeDt;
+
+    brassHorns.forEach(({ hGroup, baseScale }) => {
+      const pump = baseScale * (1.0 + beatPulse * 0.08 + bass * 0.06);
+      hGroup.scale.setScalar(pump);
+    });
+
+    // Throttled to <= 20 Hz (0.055s = 18.18 Hz) with zero ctx.shadowBlur in per-frame EQ/VU canvas redraws
+    const STAGE_DISPLAY_THROTTLE_SEC = 0.055;
+    canvasUpdateAccum += safeDt;
+    if (canvasUpdateAccum < STAGE_DISPLAY_THROTTLE_SEC) return;
+    canvasUpdateAccum = 0;
 
     // A. Update 20-Column Segmented Equalizer Display
     eqCtx.fillStyle = '#080812';
@@ -8038,20 +9995,14 @@ export function buildBoomboxStage(scene) {
         if (isActive) {
           if (s < 4) {
             eqCtx.fillStyle = '#00f5ff';
-            eqCtx.shadowColor = '#00e5ff';
           } else if (s < 8) {
             eqCtx.fillStyle = '#2ef064';
-            eqCtx.shadowColor = '#2ef064';
           } else if (s < 11) {
             eqCtx.fillStyle = '#ffdd00';
-            eqCtx.shadowColor = '#ffdd00';
           } else {
             eqCtx.fillStyle = '#ff204e';
-            eqCtx.shadowColor = '#ff204e';
           }
-          eqCtx.shadowBlur = 6;
           eqCtx.fillRect(x, y, colW, segH);
-          eqCtx.shadowBlur = 0;
         } else {
           eqCtx.fillStyle = '#101422';
           eqCtx.fillRect(x, y, colW, segH);
@@ -8065,42 +10016,22 @@ export function buildBoomboxStage(scene) {
       if (pIdx > 0 && pIdx < numSegs) {
         const py = baseY - pIdx * (segH + segGap);
         eqCtx.fillStyle = '#ffffff';
-        eqCtx.shadowColor = '#ff3898';
-        eqCtx.shadowBlur = 8;
         eqCtx.fillRect(x, py, colW, 4);
-        eqCtx.shadowBlur = 0;
       }
     }
     eqTex.needsUpdate = true;
 
-    // B. Update Dual Analog VU Meters with Galvanometer Ballistics
-    const targetL = -0.75 + Math.min(1.50, Math.pow(bass * 1.15 + beatPulse * 0.40, 1.2) * 1.35);
-    const rightHighEnergy = freqData ? (freqData[12] || 100) / 255 : 0.4;
-    const targetR = -0.75 + Math.min(1.50, Math.pow(bass * 0.95 + rightHighEnergy * 0.65, 1.2) * 1.35);
-
-    const safeDt = Math.min(dt, 0.033);
-    const aL = kSpring * (targetL - vuBallistics.angleL) - cDamp * vuBallistics.velL;
-    vuBallistics.velL += aL * safeDt;
-    vuBallistics.angleL += vuBallistics.velL * safeDt;
-
-    const aR = kSpring * (targetR - vuBallistics.angleR) - cDamp * vuBallistics.velR;
-    vuBallistics.velR += aR * safeDt;
-    vuBallistics.angleR += vuBallistics.velR * safeDt;
-
+    // B. Update Dual Analog VU Meters with Cached Radial Gradients
     vuCtx.fillStyle = '#100d1c';
     vuCtx.fillRect(0, 0, 1024, 360);
 
     const vuCenters = [
-      { cx: 256, label: 'CH-L // MASTER', angle: vuBallistics.angleL },
-      { cx: 768, label: 'CH-R // BASS', angle: vuBallistics.angleR }
+      { cx: 256, label: 'CH-L // MASTER', angle: vuBallistics.angleL, grad: cachedVuGradL },
+      { cx: 768, label: 'CH-R // BASS', angle: vuBallistics.angleR, grad: cachedVuGradR }
     ];
 
-    vuCenters.forEach(({ cx, label, angle }) => {
-      const radGrad = vuCtx.createRadialGradient(cx, 310, 20, cx, 240, 210);
-      radGrad.addColorStop(0.0, '#fff4cc');
-      radGrad.addColorStop(0.55, '#f7ca5e');
-      radGrad.addColorStop(1.0, '#d19726');
-      vuCtx.fillStyle = radGrad;
+    vuCenters.forEach(({ cx, label, angle, grad }) => {
+      vuCtx.fillStyle = grad;
       vuCtx.fillRect(cx - 225, 20, 450, 315);
 
       vuCtx.lineWidth = 8;
@@ -8196,12 +10127,21 @@ export function buildBoomboxStage(scene) {
     });
     vuTex.needsUpdate = true;
 
-    // C. Pump brass horns dynamically on beat transients
-    brassHorns.forEach(({ hGroup, baseScale }) => {
-      const pump = baseScale * (1.0 + beatPulse * 0.08 + bass * 0.06);
-      hGroup.scale.setScalar(pump);
-    });
   }
+
+  turntablePlatters.forEach((p) => mergeStaticGroupMeshes(p));
+  wooferCones.forEach((w) => mergeStaticGroupMeshes(w));
+  brassHorns.forEach(({ hGroup }) => mergeStaticGroupMeshes(hGroup));
+
+  const preservedStageSet = new Set([
+    ...turntablePlatters,
+    ...wooferCones,
+    ...brassHorns.map((h) => h.hGroup),
+    eqScreen,
+    vuPanel,
+    marqueePlane
+  ]);
+  mergeStaticGroupMeshes(soundRigGroup, (obj) => preservedStageSet.has(obj));
 
   return {
     soundRigGroup,
@@ -8393,10 +10333,9 @@ export function buildClampedPowerCables(scene) {
     // Low-profile molded anti-slip tread grooves across rubber conduit
     for (let s = -0.36; s <= 0.36; s += 0.12) {
       const rib = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.022, 0.28),
+        new THREE.BoxGeometry(0.022, 0.002, 0.28),
         new THREE.MeshBasicMaterial({ color: 0x111216 })
       );
-      rib.rotation.x = -Math.PI / 2;
       rib.position.set(0, 0.046, s);
       rampGroup.add(rib);
     }
@@ -8404,10 +10343,9 @@ export function buildClampedPowerCables(scene) {
     // Small, subtle muted-amber safety edge tabs (0x9e7220) blending with stage floor
     [-0.41, 0.41].forEach((sz) => {
       const edgeMarker = new THREE.Mesh(
-        new THREE.PlaneGeometry(0.12, 0.018),
+        new THREE.BoxGeometry(0.12, 0.002, 0.018),
         new THREE.MeshBasicMaterial({ color: 0x9e7220 })
       );
-      edgeMarker.rotation.x = -Math.PI / 2;
       edgeMarker.position.set(0, 0.042, sz);
       rampGroup.add(edgeMarker);
     });
@@ -8415,6 +10353,7 @@ export function buildClampedPowerCables(scene) {
     cableGroup.add(rampGroup);
   });
 
+  mergeStaticGroupMeshes(cableGroup);
   scene.add(cableGroup);
   return cableGroup;
 }
@@ -8433,7 +10372,16 @@ export function buildIndustrialBuilding(scene) {
 
   // 1. Main Two-Story Warehouse Facade (11.2m x 8.8m x 2.2m) with Running-Bond Brickwork
   // Thin depth 2.2m prevents back-wall camera orbit occlusion at X = -13.5
-  const mainFacade = createHiFiMesh(new THREE.BoxGeometry(11.2, 8.8, 2.2), 0xffffff, 0.038, brickTex, 0x28140e, { creviceAO: true });
+  const mainFacadeGeo = assignPlanarUV2(new THREE.BoxGeometry(11.2, 8.8, 2.2), null, 'xy');
+  const mainFacade = createHiFiMesh(mainFacadeGeo, 0xffffff, 0.038, brickTex, 0x28140e, {
+    creviceAO: true,
+    bumpMap: createBrickWarehouseBumpMap(),
+    bumpScale: 0.04,
+    aoMap: createBakedArenaAOMapTexture(),
+    aoMapIntensity: 1.0,
+    lightMap: createBakedArenaLightMapTexture(),
+    lightMapIntensity: 1.0
+  });
   mainFacade.position.set(0, 4.4, 1.2);
   building.add(mainFacade);
 
@@ -8527,7 +10475,12 @@ export function buildIndustrialBuilding(scene) {
 
   // 4. Ground Floor Corrugated Roll-Up Shutter Garage Door
   const shutterTex = createCorrugatedShutterTexture();
-  const rollUpDoor = createHiFiMesh(new THREE.BoxGeometry(3.2, 3.2, 0.16), 0xffffff, 0.04, shutterTex, 0x181a24);
+  const shutterBump = createCorrugatedShutterBumpMap();
+  const rollUpDoor = createHiFiMesh(new THREE.BoxGeometry(3.2, 3.2, 0.16), 0xffffff, 0.04, shutterTex, 0x181a24, {
+    bumpMap: shutterBump,
+    bumpScale: 0.045,
+    isMetallic: true
+  });
   rollUpDoor.position.set(0.4, 1.6, 2.32);
   building.add(rollUpDoor);
 
@@ -8581,6 +10534,14 @@ export function buildIndustrialBuilding(scene) {
 
   // 6. Eight Second-Floor Multi-Pane Industrial Loft Windows with Incandescent Amber Glow
   const loftWinTex = createIndustrialLoftWindowTexture();
+  const loftWinBump = createIndustrialLoftWindowBumpMap();
+  const winMat = createCelMaterial(0xffffff, loftWinTex, 0x4a2a10, {
+    bumpMap: loftWinBump,
+    bumpScale: 0.035,
+    glintThreshold: 0.85,
+    glintIntensity: 0.6
+  });
+
   const windowCoords = [
     // Lower tier
     { x: -3.8, y: 5.3 },
@@ -8595,10 +10556,10 @@ export function buildIndustrialBuilding(scene) {
   ];
 
   windowCoords.forEach(({ x, y }) => {
-    // Glass Pane Plane with glowing incandescent loft texture
+    // Glass Pane Plane with glowing incandescent loft texture & bump relief
     const winPlane = new THREE.Mesh(
       new THREE.PlaneGeometry(1.55, 1.62),
-      new THREE.MeshBasicMaterial({ map: loftWinTex })
+      winMat
     );
     winPlane.position.set(x, y, 2.33);
     building.add(winPlane);
@@ -8705,6 +10666,7 @@ export function buildIndustrialBuilding(scene) {
     return spec;
   });
 
+  mergeStaticGroupMeshes(building);
   scene.add(building);
   return { building, balconySpectators };
 }
@@ -8716,80 +10678,258 @@ let _bodegaShopfrontTex = null;
 export function createBodegaShopfrontTexture() {
   if (_bodegaShopfrontTex) return _bodegaShopfrontTex;
   const c = document.createElement('canvas');
-  c.width = 512;
-  c.height = 512;
+  c.width = 1024;
+  c.height = 1024;
   const ctx = c.getContext('2d');
 
   // Warm glowing interior gradient
-  const grad = ctx.createLinearGradient(0, 0, 0, 512);
+  const grad = ctx.createLinearGradient(0, 0, 0, 1024);
   grad.addColorStop(0.0, '#ffe89c'); // Warm ceiling fluorescent glow
   grad.addColorStop(0.2, '#ffbe42');
   grad.addColorStop(0.6, '#ea7818');
   grad.addColorStop(1.0, '#3a1a08'); // Lower floor dark amber
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, 1024, 1024);
 
   // Store shelving display rows
-  const shelfY = [160, 260, 360, 440];
+  const shelfY = [320, 520, 720, 880];
   shelfY.forEach((sy, idx) => {
     // Shelf board
     ctx.fillStyle = '#2a1a14';
-    ctx.fillRect(20, sy, 472, 12);
+    ctx.fillRect(40, sy, 944, 24);
     ctx.fillStyle = '#ffcc66';
-    ctx.fillRect(20, sy - 2, 472, 2);
+    ctx.fillRect(40, sy - 4, 944, 4);
 
     // Products / bottles on shelf
-    const numItems = 14;
+    const numItems = 28;
     for (let i = 0; i < numItems; i++) {
-      const ix = 32 + i * 32;
-      const ih = 28 + ((i * 7) % 24);
+      const ix = 56 + i * 32;
+      const ih = 48 + ((i * 13) % 40);
       const iy = sy - ih;
       const hue = (i * 37 + idx * 73) % 360;
       ctx.fillStyle = `hsl(${hue}, 75%, 60%)`;
-      ctx.fillRect(ix, iy, 20, ih);
+      ctx.fillRect(ix, iy, 24, ih);
       // Highlights
       ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-      ctx.fillRect(ix + 2, iy + 2, 5, ih - 4);
+      ctx.fillRect(ix + 2, iy + 2, 6, ih - 4);
     }
   });
 
   // Hanging glowing neon sign in window: "24/7 BODEGA"
   ctx.fillStyle = 'rgba(10, 15, 25, 0.85)';
-  ctx.fillRect(100, 40, 312, 70);
+  ctx.fillRect(200, 80, 624, 140);
   ctx.strokeStyle = '#24e5ff';
-  ctx.lineWidth = 4;
-  ctx.strokeRect(100, 40, 312, 70);
+  ctx.lineWidth = 8;
+  ctx.strokeRect(200, 80, 624, 140);
 
-  ctx.font = '900 36px "Chakra Petch", Impact, sans-serif';
+  ctx.font = '900 72px "Chakra Petch", Impact, sans-serif';
   ctx.textAlign = 'center';
   ctx.fillStyle = '#ff2a85';
   ctx.shadowColor = '#ff2a85';
-  ctx.shadowBlur = 12;
-  ctx.fillText('24/7 BODEGA', 256, 88);
+  ctx.shadowBlur = 24;
+  ctx.fillText('24/7 BODEGA', 512, 176);
   ctx.shadowBlur = 0;
 
   // Window frame pane dividers / glint reflections
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-  ctx.lineWidth = 6;
+  ctx.lineWidth = 12;
   ctx.beginPath();
-  ctx.moveTo(256, 0);
-  ctx.lineTo(256, 512);
-  ctx.moveTo(0, 240);
-  ctx.lineTo(512, 240);
+  ctx.moveTo(512, 0);
+  ctx.lineTo(512, 1024);
+  ctx.moveTo(0, 480);
+  ctx.lineTo(1024, 480);
   ctx.stroke();
 
   // Diagonal glass reflection highlight
   ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(180, 0);
-  ctx.lineTo(0, 380);
+  ctx.lineTo(360, 0);
+  ctx.lineTo(0, 760);
   ctx.closePath();
   ctx.fill();
 
   _bodegaShopfrontTex = new THREE.CanvasTexture(c);
   _bodegaShopfrontTex.colorSpace = THREE.SRGBColorSpace;
+  _bodegaShopfrontTex.anisotropy = 4;
   return _bodegaShopfrontTex;
+}
+
+let _bodegaShopfrontBump = null;
+export function createBodegaShopfrontBumpMap() {
+  if (_bodegaShopfrontBump) return _bodegaShopfrontBump;
+  const c = document.createElement('canvas');
+  c.width = 1024;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Neutral base
+  ctx.fillStyle = '#808080';
+  ctx.fillRect(0, 0, 1024, 1024);
+
+  // Window mullions (embossed)
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.lineWidth = 16;
+  ctx.beginPath();
+  ctx.moveTo(512, 0);
+  ctx.lineTo(512, 1024);
+  ctx.moveTo(0, 480);
+  ctx.lineTo(1024, 480);
+  ctx.stroke();
+
+  // Outer border frame
+  ctx.lineWidth = 24;
+  ctx.strokeRect(12, 12, 1000, 1000);
+
+  // Shelves (raised)
+  const shelfY = [320, 520, 720, 880];
+  shelfY.forEach((sy) => {
+    ctx.fillStyle = '#b8b8b8';
+    ctx.fillRect(40, sy, 944, 24);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(40, sy - 4, 944, 4);
+
+    // Products
+    for (let i = 0; i < 28; i++) {
+      const ix = 56 + i * 32;
+      const ih = 48 + ((i * 13) % 40);
+      const val = 140 + ((i * 23) % 80);
+      ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+      ctx.fillRect(ix, sy - ih, 24, ih);
+    }
+  });
+
+  // Hanging sign frame & text
+  ctx.fillStyle = '#606060';
+  ctx.fillRect(200, 80, 624, 140);
+  ctx.strokeStyle = '#d8d8d8';
+  ctx.lineWidth = 10;
+  ctx.strokeRect(200, 80, 624, 140);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '900 72px "Chakra Petch", Impact, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('24/7 BODEGA', 512, 176);
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  _bodegaShopfrontBump = tex;
+  return tex;
+}
+
+let _viaductStoneTex = null;
+export function createViaductStoneTexture() {
+  if (_viaductStoneTex) return _viaductStoneTex;
+  const c = document.createElement('canvas');
+  c.width = 2048;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Dark charcoal stone base
+  ctx.fillStyle = '#1c1a22';
+  ctx.fillRect(0, 0, 2048, 1024);
+
+  const rowH = 128;
+  const numRows = 8;
+  for (let r = 0; r < numRows; r++) {
+    const y0 = r * rowH;
+    const rowOffset = (r % 2 === 0) ? 0 : 160;
+    let x = -rowOffset;
+    let blockIdx = 0;
+    while (x < 2048) {
+      const bw = 260 + ((blockIdx * 73 + r * 37) % 120);
+      const lightness = 36 + ((blockIdx * 29 + r * 41) % 18);
+      ctx.fillStyle = `hsl(245, 8%, ${lightness}%)`;
+      ctx.fillRect(x + 4, y0 + 4, bw - 8, rowH - 8);
+
+      // Fine stone aggregate stipple noise
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+      for (let s = 0; s < 40; s++) {
+        const sx = x + 8 + ((s * 47) % (bw - 16));
+        const sy = y0 + 8 + ((s * 31) % (rowH - 16));
+        ctx.fillRect(sx, sy, 3, 2);
+      }
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+      for (let s = 0; s < 40; s++) {
+        const sx = x + 8 + ((s * 59) % (bw - 16));
+        const sy = y0 + 8 + ((s * 43) % (rowH - 16));
+        ctx.fillRect(sx, sy, 4, 2);
+      }
+
+      // Comic ink bottom shadow line on each stone block
+      ctx.strokeStyle = '#0e0c12';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(x + 4, y0 + rowH - 4);
+      ctx.lineTo(x + bw - 4, y0 + rowH - 4);
+      ctx.stroke();
+
+      x += bw;
+      blockIdx++;
+    }
+  }
+
+  // Heavy mortar joint grid overlay
+  ctx.strokeStyle = '#14121a';
+  ctx.lineWidth = 8;
+  for (let r = 0; r <= numRows; r++) {
+    ctx.beginPath();
+    ctx.moveTo(0, r * rowH);
+    ctx.lineTo(2048, r * rowH);
+    ctx.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  _viaductStoneTex = tex;
+  return tex;
+}
+
+let _viaductStoneBump = null;
+export function createViaductStoneBumpMap() {
+  if (_viaductStoneBump) return _viaductStoneBump;
+  const c = document.createElement('canvas');
+  c.width = 2048;
+  c.height = 1024;
+  const ctx = c.getContext('2d');
+
+  // Recessed mortar joints base (very dark)
+  ctx.fillStyle = '#141414';
+  ctx.fillRect(0, 0, 2048, 1024);
+
+  const rowH = 128;
+  const numRows = 8;
+  for (let r = 0; r < numRows; r++) {
+    const y0 = r * rowH;
+    const rowOffset = (r % 2 === 0) ? 0 : 160;
+    let x = -rowOffset;
+    let blockIdx = 0;
+    while (x < 2048) {
+      const bw = 260 + ((blockIdx * 73 + r * 37) % 120);
+      const val = 150 + ((blockIdx * 29 + r * 41) % 40);
+
+      // Block face (raised)
+      ctx.fillStyle = `rgb(${val}, ${val}, ${val})`;
+      ctx.fillRect(x + 5, y0 + 5, bw - 10, rowH - 10);
+
+      // Chiseled stone edge highlight (inner bevel)
+      ctx.strokeStyle = '#d0d0d0';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x + 8, y0 + 8, bw - 16, rowH - 16);
+
+      x += bw;
+      blockIdx++;
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.anisotropy = 4;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  _viaductStoneBump = tex;
+  return tex;
 }
 
 export function buildEastViaductBuilding(scene) {
@@ -9084,6 +11224,7 @@ export function buildEastViaductBuilding(scene) {
 
   viaductGroup.add(cornerGroup);
 
+  mergeStaticGroupMeshes(viaductGroup);
   scene.add(viaductGroup);
   return viaductGroup;
 }
@@ -9278,6 +11419,12 @@ export function buildSouthEntranceAndVan(scene) {
   // 3. Flanking Brick Apartment Facades with Lit Multi-Pane Windows & Fire Escapes
   const aptBrickTex = createApartmentBrickTexture();
   const loftWinTex = createIndustrialLoftWindowTexture();
+  const loftWinBump = createIndustrialLoftWindowBumpMap();
+  const aptWinMat = createCelMaterial(0xffffff, loftWinTex, 0x4a2a10, {
+    bumpMap: loftWinBump,
+    bumpScale: 0.035,
+    side: THREE.DoubleSide
+  });
 
   [-8.6, 8.6].forEach((bx, idx) => {
     const aptGroup = new THREE.Group();
@@ -9302,10 +11449,10 @@ export function buildSouthEntranceAndVan(scene) {
     ];
 
     aptWindowCoords.forEach(({ x, y }) => {
-      // Lit window glass plane facing outward towards arena cypher
+      // Lit window glass plane facing outward towards arena cypher with bump relief
       const winPlane = new THREE.Mesh(
         new THREE.PlaneGeometry(1.25, 1.55),
-        new THREE.MeshBasicMaterial({ map: loftWinTex, side: THREE.DoubleSide })
+        aptWinMat
       );
       winPlane.position.set(x, y, -1.91);
       winPlane.rotation.y = Math.PI;
@@ -9413,6 +11560,7 @@ export function buildSouthEntranceAndVan(scene) {
     group.add(fCase);
   });
 
+  mergeStaticGroupMeshes(group);
   scene.add(group);
   return group;
 }
@@ -9446,9 +11594,10 @@ export function buildArenaEnvironment(scene) {
     bMesh.position.set(...pos);
     bMesh.rotation.y = rotY;
     const face = new THREE.Mesh(
-      new THREE.PlaneGeometry(1.98, 0.95),
+      new THREE.BoxGeometry(1.98, 0.95, 0.002),
       new THREE.MeshBasicMaterial({ map: bannerTex })
     );
+    face.name = 'stage_banner_face';
     face.position.z = 0.09;
     bMesh.add(face);
     scene.add(bMesh);
@@ -9478,12 +11627,16 @@ export function buildArenaEnvironment(scene) {
     { shirt: 0x22242a, pants: 0x342a22, skin: 0xd89c74 }  // Deep Charcoal
   ];
 
+  const perimeterPropsGroup = new THREE.Group();
+  perimeterPropsGroup.name = 'perimeter_barricades_group';
+  scene.add(perimeterPropsGroup);
+
   barricadeAngles.forEach((ang, idx) => {
     const r = 6.8;
     const bar = createSteelBarricadeUnit();
     bar.position.set(Math.sin(ang) * r, 0, -Math.cos(ang) * r + 0.5);
     bar.lookAt(0, 0, 1.5);
-    scene.add(bar);
+    perimeterPropsGroup.add(bar);
 
     // Cheering Crowd Spectator behind South-sector barricades (West & East sectors are populated by animated crowdSpectators in kronos.js)
     if (idx % 2 === 0 && ang > 1.50) {
@@ -9498,7 +11651,7 @@ export function buildArenaEnvironment(scene) {
       spec.rightArm.rotation.set(-2.25 - (idx % 3) * 0.15, 0, 0.22);
       if (spec.leftElbow) spec.leftElbow.rotation.set(-0.85, 0, 0);
       if (spec.rightElbow) spec.rightElbow.rotation.set(-0.40, 0, 0);
-      scene.add(spec.root);
+      perimeterPropsGroup.add(spec.root);
     }
   });
 
@@ -9513,7 +11666,7 @@ export function buildArenaEnvironment(scene) {
   stringCoords.forEach((pts) => {
     const curve = new THREE.CatmullRomCurve3(pts);
     const wireGeo = new THREE.TubeGeometry(curve, 20, 0.02, 6, false);
-    scene.add(new THREE.Mesh(wireGeo, new THREE.MeshBasicMaterial({ color: 0x09080c })));
+    perimeterPropsGroup.add(new THREE.Mesh(wireGeo, new THREE.MeshBasicMaterial({ color: 0x09080c })));
     for (let i = 1; i <= 8; i++) {
       const pt = curve.getPoint(i / 9);
       const bulb = new THREE.Mesh(
@@ -9522,7 +11675,7 @@ export function buildArenaEnvironment(scene) {
       );
       bulb.position.copy(pt);
       bulb.position.y -= 0.08;
-      scene.add(bulb);
+      perimeterPropsGroup.add(bulb);
 
       // Hanging triangular block-party festival pennant flags
       const flagGeo = new THREE.ConeGeometry(0.14, 0.30, 3);
@@ -9533,7 +11686,7 @@ export function buildArenaEnvironment(scene) {
       );
       flag.position.copy(pt);
       flag.position.y -= 0.22;
-      scene.add(flag);
+      perimeterPropsGroup.add(flag);
     }
   });
 
@@ -9546,7 +11699,7 @@ export function buildArenaEnvironment(scene) {
   ].forEach(([lx, ly, lz]) => {
     const lampGroup = new THREE.Group();
     lampGroup.position.set(lx, ly, lz);
-    scene.add(lampGroup);
+    perimeterPropsGroup.add(lampGroup);
 
     const basePedestal = createHiFiMesh(new THREE.CylinderGeometry(0.18, 0.26, 0.65, 10), 0x1a1d28, 0.04);
     basePedestal.position.y = 0.325;
@@ -9570,15 +11723,20 @@ export function buildArenaEnvironment(scene) {
     });
   });
 
-  // 9. Update Arena Floor Mesh with Weathered Asphalt & Graffiti Texture + Baked AO & LightMap
+  mergeStaticGroupMeshes(perimeterPropsGroup);
+
+  // 9. Update Arena Floor Mesh with Weathered Asphalt & Graffiti Texture + Bump Map + Baked AO & LightMap
   const asphaltTex = createWeatheredAsphaltArenaTexture();
+  const courtBump = createCourtAsphaltBumpMap();
   const bakedAOTex = createBakedArenaAOMapTexture();
   const bakedLightMapTex = createBakedArenaLightMapTexture();
   scene.traverse((obj) => {
     if (obj.geometry && obj.geometry.type === 'CircleGeometry' && obj.geometry.parameters && obj.geometry.parameters.radius >= 20) {
       if (obj.material) {
         obj.material.map = asphaltTex;
-        obj.geometry.setAttribute('uv2', obj.geometry.attributes.uv.clone());
+        obj.material.bumpMap = courtBump;
+        obj.material.bumpScale = 0.04;
+        assignPlanarUV2(obj.geometry, null, 'xz');
         obj.material.aoMap = bakedAOTex;
         obj.material.aoMapIntensity = 1.0;
         obj.material.lightMap = bakedLightMapTex;
@@ -9599,6 +11757,64 @@ export function buildArenaEnvironment(scene) {
       }
     }
   });
+
+  if (typeof window !== 'undefined' && window.floorMesh && window.floorMesh.material) {
+    window.floorMesh.material.map = asphaltTex;
+    window.floorMesh.material.bumpMap = courtBump;
+    window.floorMesh.material.bumpScale = 0.04;
+    window.floorMesh.material.aoMap = bakedAOTex;
+    window.floorMesh.material.aoMapIntensity = 1.0;
+    window.floorMesh.material.lightMap = bakedLightMapTex;
+    window.floorMesh.material.lightMapIntensity = 1.0;
+    if (window.floorMesh.geometry && !window.floorMesh.geometry.attributes.uv2) {
+      assignPlanarUV2(window.floorMesh.geometry, null, 'xz');
+    }
+    window.floorMesh.material.needsUpdate = true;
+  }
+}
+
+/**
+ * Procedural Courtyard Cypher Floor with baked asphalt, bump, AO, and lightMap
+ */
+export function buildCourtyardFloor(scene) {
+  const asphaltTex = createWeatheredAsphaltArenaTexture();
+  const courtBump = createCourtAsphaltBumpMap();
+  const bakedAOTex = createBakedArenaAOMapTexture();
+  const bakedLightMapTex = createBakedArenaLightMapTexture();
+
+  const floorGeom = new THREE.CircleGeometry(42, 64);
+  assignPlanarUV2(floorGeom, null, 'xz');
+
+  const floorMat = new THREE.MeshToonMaterial({
+    map: asphaltTex,
+    bumpMap: courtBump,
+    bumpScale: 0.04,
+    aoMap: bakedAOTex,
+    aoMapIntensity: 1.0,
+    lightMap: bakedLightMapTex,
+    lightMapIntensity: 1.0
+  });
+
+  floorMat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <aomap_fragment>',
+      `
+      #include <aomap_fragment>
+      #ifdef USE_AOMAP
+      reflectedLight.directDiffuse *= (ambientOcclusion * 0.65 + 0.35);
+      #endif
+      `
+    );
+  };
+
+  const mesh = new THREE.Mesh(floorGeom, floorMat);
+  mesh.name = 'floorMesh';
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.receiveShadow = true;
+
+  if (scene) scene.add(mesh);
+  if (typeof window !== 'undefined') window.floorMesh = mesh;
+  return mesh;
 }
 
 // ============================================================================
@@ -9732,7 +11948,7 @@ function createPerfectBadgeCanvas() {
     ctx.restore();
   }
 
-  drawBadge('PERFECT!', '#ffe042');
+  drawBadge('PERFECT!', '#ffffff');
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return { tex, updateBadge: (txt, col) => { drawBadge(txt, col); tex.needsUpdate = true; } };
@@ -9749,10 +11965,11 @@ export function buildFloorRhythmDial(scene) {
     new THREE.MeshBasicMaterial({
       map: dialTex,
       transparent: true,
-      opacity: 0.98,
+      opacity: 0.70,
       depthWrite: false
     })
   );
+  basePlane.name = 'floor_dial_base_plane';
   basePlane.rotation.x = -Math.PI / 2;
   dialGroup.add(basePlane);
 
@@ -9762,10 +11979,11 @@ export function buildFloorRhythmDial(scene) {
     color: 0xff3b30,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.70,
     depthWrite: false
   });
   const pulseRing = new THREE.Mesh(pulseGeo, pulseMat);
+  pulseRing.name = 'floor_dial_pulse_ring';
   pulseRing.position.y = 0.01;
   dialGroup.add(pulseRing);
 
@@ -9775,11 +11993,13 @@ export function buildFloorRhythmDial(scene) {
     new THREE.MeshBasicMaterial({
       map: badgeTex,
       transparent: true,
+      opacity: 0.70,
       depthWrite: false
     })
   );
+  badgePlane.name = 'floor_dial_badge_plane';
   badgePlane.rotation.x = -Math.PI / 2;
-  badgePlane.position.set(0.22, 0.02, 0.08);
+  badgePlane.position.set(-0.32, 0.02, -0.125);
   dialGroup.add(badgePlane);
 
   // 3D Red Directional Threat Chevrons pointing toward active attackers
@@ -9933,6 +12153,307 @@ export function spawn3DImpactBurst(scene, contactPoint, vfxType = 'impact-sparks
 }
 
 // ============================================================================
+// 6B. ZERO-ALLOCATION PRE-ALLOCATED 3D COMBAT VFX POOLS
+// ============================================================================
+export class ImpactBurstPool {
+  constructor(scene, capacity = 8) {
+    this.scene = scene;
+    this.capacity = capacity;
+    this.pool = [];
+    this.activeCount = 0;
+
+    // Shared geometries across all pooled bursts
+    const ringGeo = new THREE.RingGeometry(0.08, 0.22, 16);
+    const sparkGeo = new THREE.OctahedronGeometry(0.06, 0);
+
+    for (let i = 0; i < capacity; i++) {
+      const group = new THREE.Group();
+      group.visible = false;
+
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xffe066,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false
+      });
+      const ringMesh = new THREE.Mesh(ringGeo, ringMat);
+      ringMesh.rotation.x = Math.PI / 2;
+      group.add(ringMesh);
+
+      const sparks = [];
+      const sparkMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 1.0,
+        depthWrite: false
+      });
+
+      for (let s = 0; s < 12; s++) {
+        const m = new THREE.Mesh(sparkGeo, sparkMat.clone());
+        m.scale.set(1.0, 1.8, 1.0);
+        m.visible = false;
+        group.add(m);
+        sparks.push({
+          mesh: m,
+          vel: new THREE.Vector3()
+        });
+      }
+
+      this.scene.add(group);
+
+      this.pool.push({
+        group,
+        ringMesh,
+        ringMat,
+        sparks,
+        sparkCount: 8,
+        isRing: false,
+        active: false,
+        life: 0,
+        maxLife: 0.32
+      });
+    }
+  }
+
+  acquire(contactPoint, vfxType = 'impact-sparks') {
+    let burst = null;
+    for (let i = 0; i < this.capacity; i++) {
+      if (!this.pool[i].active) {
+        burst = this.pool[i];
+        break;
+      }
+    }
+    // If all are active, steal the one with lowest remaining life
+    if (!burst) {
+      let minLife = Infinity;
+      for (let i = 0; i < this.capacity; i++) {
+        if (this.pool[i].life < minLife) {
+          minLife = this.pool[i].life;
+          burst = this.pool[i];
+        }
+      }
+    }
+
+    const isRing = vfxType === 'impact-ring';
+    const color = isRing ? 0xff4899 : 0xffe066;
+    const sparkCount = isRing ? 12 : 8;
+
+    burst.isRing = isRing;
+    burst.sparkCount = sparkCount;
+    burst.group.position.copy(contactPoint);
+    burst.ringMat.color.setHex(color);
+    burst.ringMat.opacity = 0.95;
+    burst.ringMesh.scale.set(1.0, 1.0, 1.0);
+    burst.ringMesh.rotation.set(Math.PI / 2, 0, 0);
+
+    for (let i = 0; i < 12; i++) {
+      const spark = burst.sparks[i];
+      if (i < sparkCount) {
+        const angle = (i / sparkCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.3;
+        const speed = 2.4 + Math.random() * 2.2;
+        spark.vel.set(
+          Math.cos(angle) * speed,
+          (Math.random() - 0.2) * 1.8,
+          Math.sin(angle) * speed
+        );
+        spark.mesh.position.set(0, 0, 0);
+        spark.mesh.rotation.set(0, 0, 0);
+        spark.mesh.material.opacity = 1.0;
+        spark.mesh.visible = true;
+      } else {
+        spark.mesh.visible = false;
+      }
+    }
+
+    burst.life = 0.32;
+    burst.maxLife = 0.32;
+    burst.active = true;
+    burst.group.visible = true;
+    this._recomputeActiveCount();
+    return burst;
+  }
+
+  update(dt, cameraPos) {
+    let activeFound = 0;
+    for (let i = 0; i < this.capacity; i++) {
+      const burst = this.pool[i];
+      if (!burst.active) continue;
+
+      burst.life -= dt;
+      if (burst.life <= 0) {
+        burst.active = false;
+        burst.group.visible = false;
+        continue;
+      }
+      activeFound++;
+
+      const progress = 1.0 - (burst.life / burst.maxLife);
+      const ringScale = 1.0 + progress * (burst.isRing ? 6.5 : 4.2);
+      burst.ringMesh.scale.set(ringScale, ringScale, ringScale);
+      burst.ringMat.opacity = Math.max(0, 1.0 - progress * 1.1);
+
+      if (cameraPos) {
+        burst.ringMesh.lookAt(cameraPos);
+      }
+
+      for (let s = 0; s < burst.sparkCount; s++) {
+        const spark = burst.sparks[s];
+        spark.mesh.position.addScaledVector(spark.vel, dt);
+        spark.vel.multiplyScalar(Math.max(0, 1.0 - dt * 6.0));
+        spark.mesh.material.opacity = Math.max(0, 1.0 - progress);
+        spark.mesh.rotation.x += dt * 10;
+        spark.mesh.rotation.y += dt * 8;
+      }
+    }
+    this.activeCount = activeFound;
+  }
+
+  _recomputeActiveCount() {
+    let count = 0;
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.pool[i].active) count++;
+    }
+    this.activeCount = count;
+  }
+
+  getActiveCount() {
+    return this.activeCount;
+  }
+}
+
+export class SmearArcPool {
+  constructor(scene, capacity = 4) {
+    this.scene = scene;
+    this.capacity = capacity;
+    this.pool = [];
+    this.activeCount = 0;
+
+    const punchGeo = new THREE.RingGeometry(1.10 * 0.58, 1.10, 24, 1, -Math.PI * 0.35, Math.PI * 0.85);
+    const kickGeo = new THREE.RingGeometry(1.45 * 0.58, 1.45, 24, 1, -Math.PI * 0.35, Math.PI * 0.85);
+
+    for (let i = 0; i < capacity; i++) {
+      const isKickDefault = i >= Math.floor(capacity / 2);
+      const mat = new THREE.MeshBasicMaterial({
+        color: isKickDefault ? 0xffd15c : 0xff7b29,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.92,
+        depthWrite: false
+      });
+      const mesh = new THREE.Mesh(isKickDefault ? kickGeo : punchGeo, mat);
+      mesh.visible = false;
+      this.scene.add(mesh);
+
+      this.pool.push({
+        mesh,
+        mat,
+        punchGeo,
+        kickGeo,
+        isKick: isKickDefault,
+        active: false,
+        life: 0,
+        maxLife: 0.22
+      });
+    }
+  }
+
+  acquire(originPos, isKick = false) {
+    let smear = null;
+    for (let i = 0; i < this.capacity; i++) {
+      if (!this.pool[i].active && this.pool[i].isKick === isKick) {
+        smear = this.pool[i];
+        break;
+      }
+    }
+    if (!smear) {
+      for (let i = 0; i < this.capacity; i++) {
+        if (!this.pool[i].active) {
+          smear = this.pool[i];
+          break;
+        }
+      }
+    }
+    if (!smear) {
+      let minLife = Infinity;
+      for (let i = 0; i < this.capacity; i++) {
+        if (this.pool[i].life < minLife) {
+          minLife = this.pool[i].life;
+          smear = this.pool[i];
+        }
+      }
+    }
+
+    smear.isKick = isKick;
+    smear.mesh.geometry = isKick ? smear.kickGeo : smear.punchGeo;
+    smear.mat.color.setHex(isKick ? 0xffd15c : 0xff7b29);
+    smear.mat.opacity = 0.92;
+    smear.mesh.scale.set(1.0, 1.0, 1.0);
+    smear.mesh.position.copy(originPos);
+    smear.mesh.position.y += isKick ? 1.15 : 1.38;
+    smear.mesh.rotation.set(
+      isKick ? -0.35 : -1.15,
+      (Math.random() - 0.5) * 0.4,
+      isKick ? 0.65 : -0.25
+    );
+
+    smear.life = 0.22;
+    smear.maxLife = 0.22;
+    smear.active = true;
+    smear.mesh.visible = true;
+    this._recomputeActiveCount();
+    return smear;
+  }
+
+  update(dt) {
+    let activeFound = 0;
+    for (let i = 0; i < this.capacity; i++) {
+      const smear = this.pool[i];
+      if (!smear.active) continue;
+
+      smear.life -= dt;
+      if (smear.life <= 0) {
+        smear.active = false;
+        smear.mesh.visible = false;
+        continue;
+      }
+      activeFound++;
+
+      smear.mat.opacity = Math.max(0, (smear.life / smear.maxLife) * 0.92);
+      smear.mesh.scale.multiplyScalar(1 + dt * 2.2);
+    }
+    this.activeCount = activeFound;
+  }
+
+  _recomputeActiveCount() {
+    let count = 0;
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.pool[i].active) count++;
+    }
+    this.activeCount = count;
+  }
+
+  getActiveCount() {
+    return this.activeCount;
+  }
+}
+
+
+export function buildSubwooferShockwaveRing() {
+  const geo = new THREE.RingGeometry(0.25, 0.55, 48);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xffe042,
+    transparent: true,
+    opacity: 0.95,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.rotation.x = -Math.PI / 2;
+  return mesh;
+}
+
+// ============================================================================
 // 7. BACKWARDS COMPATIBILITY EXPORT ALIASES
 // ============================================================================
 export const createBoomboxStage = buildBoomboxStage;
@@ -9940,4 +12461,4 @@ export const createUrbanArena = buildArenaEnvironment;
 export const createArenaGround = createWeatheredAsphaltArenaTexture;
 export const createAsphaltFloorTexture = createWeatheredAsphaltArenaTexture;
 export const createBossKronosModel = buildKronosBossModel;
-
+export const createShockwaveRing = buildSubwooferShockwaveRing;

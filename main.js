@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { CyberAudioEngine } from './audio.js?v=5';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { CyberAudioEngine } from './audio.js?v=7';
 
 // ============================================================================
 // 1. INITIALIZE SCENE, CAMERA, RENDERER & BLOOM POST-PROCESSING
@@ -25,21 +27,100 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
 container.appendChild(renderer.domElement);
+
+// Neon surfaces are authored above 1.0 (HDR) so the bloom threshold only catches true emitters:
+// rails, lane dashes, pylon strips, tower crowns, the sun and the tail bar. Asphalt, car paint
+// and the wireframe terrain stay crisp instead of smearing into the glow.
+const NEON_HDR = 1.45;
+function neonColor(hex, intensity = NEON_HDR) {
+  return new THREE.Color(hex).multiplyScalar(intensity);
+}
+
+// Half-float, multisampled composer target: MSAA survives post-processing (no jaggies on the
+// wireframe valley) and bloom has real headroom instead of 8-bit banding in the halos.
+const isCoarsePointer = window.matchMedia('(pointer: coarse)').matches;
+const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
+  type: THREE.HalfFloatType,
+  samples: isCoarsePointer ? 2 : 4
+});
 
 const renderScene = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  1.15, // strength
-  0.45, // radius
-  0.22  // threshold
+  0.38, // strength
+  0.28, // radius
+  1.05  // threshold (HDR: only neon / sun / emissive windows cross it)
+);
+const outputPass = new OutputPass(); // AgX tone mapping + sRGB, applied once, after bloom
+
+// Final display-space grade: radial chromatic aberration that breathes with the bass and the
+// boost, fine animated film grain that lives mostly in the shadows, and a soft lens vignette.
+const NightGradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uResolution: { value: new THREE.Vector2(1, 1) },
+    uTime: { value: 0 },
+    uAberration: { value: 0.0012 },
+    uGrain: { value: 0.045 },
+    uVignette: { value: 0.32 }
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform vec2 uResolution;
+    uniform float uTime;
+    uniform float uAberration;
+    uniform float uGrain;
+    uniform float uVignette;
+    varying vec2 vUv;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+    }
+
+    void main() {
+      vec2 c = vUv - 0.5;
+      float r2 = dot(c, c);
+
+      // Lens-like aberration: nothing at the centre, growing toward the edges
+      vec2 shift = c * (uAberration * (0.3 + r2 * 3.2));
+      float cr = texture2D(tDiffuse, vUv + shift).r;
+      float cg = texture2D(tDiffuse, vUv).g;
+      float cb = texture2D(tDiffuse, vUv - shift).b;
+      vec3 col = vec3(cr, cg, cb);
+
+      col *= 1.0 - uVignette * smoothstep(0.18, 0.95, r2 * 2.0);
+
+      float g = hash(vUv * uResolution + fract(uTime * 0.731) * 977.0) - 0.5;
+      float luma = dot(col, vec3(0.299, 0.587, 0.114));
+      col += g * uGrain * (0.35 + 0.65 * (1.0 - clamp(luma, 0.0, 1.0)));
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `
+};
+const gradePass = new ShaderPass(NightGradeShader);
+gradePass.uniforms.uResolution.value.set(
+  window.innerWidth * renderer.getPixelRatio(),
+  window.innerHeight * renderer.getPixelRatio()
 );
 
-const composer = new EffectComposer(renderer);
+const composer = new EffectComposer(renderer, composerTarget);
+composer.setSize(window.innerWidth, window.innerHeight);
 composer.addPass(renderScene);
 composer.addPass(bloomPass);
+composer.addPass(outputPass);
+composer.addPass(gradePass);
+let boostBlend = 0;
 
 // ============================================================================
 // 2. LIGHTING
@@ -47,7 +128,7 @@ composer.addPass(bloomPass);
 const ambientLight = new THREE.AmbientLight(0x28154a, 1.4);
 scene.add(ambientLight);
 
-const horizonLight = new THREE.DirectionalLight(0xff007f, 2.2);
+const horizonLight = new THREE.DirectionalLight(0xff007f, 1.25);
 horizonLight.position.set(0, 35, -260);
 scene.add(horizonLight);
 
@@ -96,6 +177,7 @@ const sunGroup = new THREE.Group();
 const sunGeo = new THREE.PlaneGeometry(125, 125);
 const sunMat = new THREE.MeshBasicMaterial({
   map: createSynthwaveSunTexture(),
+  color: neonColor(0xffffff, 1.25),
   transparent: true,
   fog: false,
   depthWrite: false
@@ -130,7 +212,8 @@ const starMat = new THREE.PointsMaterial({
   vertexColors: true,
   transparent: true,
   opacity: 0.85,
-  fog: false
+  fog: false,
+  sizeAttenuation: true
 });
 const starField = new THREE.Points(starGeo, starMat);
 scene.add(starField);
@@ -145,8 +228,8 @@ const ROAD_WIDTH = 18;
 const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH);
 const roadMat = new THREE.MeshStandardMaterial({
   color: 0x080612,
-  roughness: 0.25,
-  metalness: 0.7
+  roughness: 0.46,
+  metalness: 0.55
 });
 const roadMesh = new THREE.Mesh(roadGeo, roadMat);
 roadMesh.rotation.x = -Math.PI / 2;
@@ -156,7 +239,7 @@ scene.add(roadMesh);
 // Glowing continuous neon shoulder rails (Cyan outer, Magenta inner)
 function createGlowingRail(xPos, colorHex, width = 0.22) {
   const geo = new THREE.PlaneGeometry(width, ROAD_LENGTH);
-  const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+  const mat = new THREE.MeshBasicMaterial({ color: neonColor(colorHex) });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.rotation.x = -Math.PI / 2;
   mesh.position.set(xPos, 0.02, -ROAD_LENGTH / 2 + 25);
@@ -172,8 +255,8 @@ createGlowingRail(ROAD_WIDTH / 2 - 0.5, 0xff007f, 0.1);
 // Scrolling Dashed Lane Dividers (3 lanes)
 const dashObjects = [];
 const dashGeo = new THREE.PlaneGeometry(0.16, 4.2);
-const dashMatCyan = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
-const dashMatPink = new THREE.MeshBasicMaterial({ color: 0xff007f });
+const dashMatCyan = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.3) });
+const dashMatPink = new THREE.MeshBasicMaterial({ color: neonColor(0xff007f, 1.3) });
 
 const laneXPositions = [-3.0, 0.0, 3.0];
 const numDashesPerLane = 28;
@@ -202,8 +285,8 @@ const pylonPostMat = new THREE.MeshStandardMaterial({
   roughness: 0.3
 });
 const neonStripGeo = new THREE.BoxGeometry(0.12, 5.8, 0.14);
-const neonCyanMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
-const neonPinkMat = new THREE.MeshBasicMaterial({ color: 0xff007f });
+const neonCyanMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff) });
+const neonPinkMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff007f) });
 
 for (let i = 0; i < NUM_PYLON_PAIRS; i++) {
   const pairGroup = new THREE.Group();
@@ -367,7 +450,7 @@ for (let i = 0; i < NUM_BUILDINGS; i++) {
     color: 0x090418,
     emissive: 0xffffff,
     emissiveMap: tex,
-    emissiveIntensity: 0.85,
+    emissiveIntensity: 1.15,
     roughness: 0.4,
     metalness: 0.6
   });
@@ -380,7 +463,7 @@ for (let i = 0; i < NUM_BUILDINGS; i++) {
   if (height > 28) {
     const capColor = i % 2 === 0 ? 0x00f3ff : 0xff007f;
     const capGeo = new THREE.BoxGeometry(width * 1.03, 0.55, depth * 1.03);
-    const capMat = new THREE.MeshBasicMaterial({ color: capColor });
+    const capMat = new THREE.MeshBasicMaterial({ color: neonColor(capColor, 1.4) });
     const cap = new THREE.Mesh(capGeo, capMat);
     cap.position.set(x, height - 0.8, zDepth);
     cityGroup.add(cap);
@@ -450,7 +533,7 @@ carGroup.add(hoodMesh);
 
   // Glowing cyan side skirt laser strip
   const skirtGlowGeo = new THREE.BoxGeometry(0.05, 0.05, 3.8);
-  const skirtGlowMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
+  const skirtGlowMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff) });
   const skirtGlow = new THREE.Mesh(skirtGlowGeo, skirtGlowMat);
   skirtGlow.position.set(xSide * 1.15, 0.06, 0.0);
   carGroup.add(skirtGlow);
@@ -487,14 +570,14 @@ carGroup.add(spoilerWing);
 
 // Iconic Full-Width Glowing Cyberpunk Tail Light Bar
 const tailLightBarGeo = new THREE.BoxGeometry(2.14, 0.14, 0.08);
-const tailLightMat = new THREE.MeshBasicMaterial({ color: 0xff0055 });
+const tailLightMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff0055, 1.6) });
 const tailLightBar = new THREE.Mesh(tailLightBarGeo, tailLightMat);
 tailLightBar.position.set(0, 0.36, 2.34);
 carGroup.add(tailLightBar);
 
 // Secondary lower diffuser light strip
 const lowerTailGeo = new THREE.BoxGeometry(1.9, 0.05, 0.08);
-const lowerTailMat = new THREE.MeshBasicMaterial({ color: 0xff5500 });
+const lowerTailMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff5500, 1.3) });
 const lowerTail = new THREE.Mesh(lowerTailGeo, lowerTailMat);
 lowerTail.position.set(0, 0.18, 2.34);
 carGroup.add(lowerTail);
@@ -511,7 +594,7 @@ const exhaustFlames = [];
   const flameGeo = new THREE.ConeGeometry(0.11, 0.75, 12);
   flameGeo.rotateX(Math.PI / 2);
   const flameMat = new THREE.MeshBasicMaterial({
-    color: 0x00f3ff,
+    color: neonColor(0x00f3ff, 1.5),
     transparent: true,
     opacity: 0.9
   });
@@ -529,7 +612,7 @@ const tireMat = new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.8
 
 const rimGeo = new THREE.TorusGeometry(0.24, 0.032, 8, 20);
 rimGeo.rotateY(Math.PI / 2);
-const rimMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
+const rimMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.5) });
 
 const wheelPositions = [
   { x: -1.12, y: -0.04, z: -1.38 },
@@ -554,11 +637,11 @@ wheelPositions.forEach((wp) => {
 });
 
 // Car Neon Underglow & Rear Tail Light PointLight
-const underglowLight = new THREE.PointLight(0x00f3ff, 3.5, 9);
+const underglowLight = new THREE.PointLight(0x00f3ff, 1.6, 9);
 underglowLight.position.set(0, -0.1, 0);
 carGroup.add(underglowLight);
 
-const tailPointLight = new THREE.PointLight(0xff0055, 4.0, 10);
+const tailPointLight = new THREE.PointLight(0xff0055, 1.5, 10);
 tailPointLight.position.set(0, 0.4, 2.8);
 carGroup.add(tailPointLight);
 
@@ -577,6 +660,11 @@ const CAMERA_MODES = [
   { name: 'HELI WIDE', offset: new THREE.Vector3(0, 5.8, 15.5), lookZ: -45 }
 ];
 let currentCameraIdx = 0;
+
+// Start on the chase preset instead of lerping in from the origin: the first frames (and any
+// crawler / share-preview capture) show the highway, not the road plane edge-on from ground level.
+camera.position.copy(CAMERA_MODES[0].offset);
+camera.lookAt(0, 1.8, CAMERA_MODES[0].lookZ);
 
 window.addEventListener('mousemove', (e) => {
   const normX = (e.clientX / window.innerWidth) * 2 - 1;
@@ -654,7 +742,7 @@ if (savedKey) {
 }
 
 audioEngine.onStatusChange = (statusText, isPlaying) => {
-  audioSourcePill.textContent = statusText;
+  if (audioSourcePill) audioSourcePill.textContent = statusText;
   if (isPlaying) {
     audioIcon.textContent = '⏸';
     audioLabel.textContent = 'PLAYING';
@@ -846,7 +934,13 @@ function animate() {
     flame.scale.set(1 + metrics.bass * 0.3, 1 + metrics.bass * 0.3, flameScaleZ);
     flame.position.z = 2.52 + flameScaleZ * 0.22;
   });
-  tailPointLight.intensity = 3.8 + metrics.bass * 4.5 + (isBoosting ? 2.5 : 0);
+  tailPointLight.intensity = 1.5 + metrics.bass * 1.8 + boostBlend * 1.0;
+
+  // Post grade: aberration widens with bass hits and under boost, grain keeps moving
+  boostBlend = THREE.MathUtils.lerp(boostBlend, isBoosting ? 1 : 0, dt * 3);
+  gradePass.uniforms.uTime.value = elapsed;
+  gradePass.uniforms.uAberration.value = 0.0012 + metrics.bass * 0.0016 + boostBlend * 0.003;
+  bloomPass.strength = 0.38 + metrics.bass * 0.1 + boostBlend * 0.08;
 
   // Scroll Highway Lane Dashes
   const totalDashSpan = numDashesPerLane * dashSpacing;
@@ -926,4 +1020,8 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
+  gradePass.uniforms.uResolution.value.set(
+    window.innerWidth * renderer.getPixelRatio(),
+    window.innerHeight * renderer.getPixelRatio()
+  );
 });

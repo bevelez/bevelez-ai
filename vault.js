@@ -39,7 +39,7 @@ const TAPES = [
     title: 'Night Drive',
     desc: 'Endless midnight highway cruiser with procedural synthwave and Gemini Lyria 3.5 soundtrack generation.',
     unlocked: true,
-    url: './night-drive.html',
+    url: './index.html',
     ctaLabel: 'Enter Night Drive',
     shellColor: 0x9e1b3e,
     shellAttenuation: 0x59091e,
