@@ -43,7 +43,7 @@ container.appendChild(renderer.domElement);
 // Neon surfaces are authored above 1.0 (HDR) so the bloom threshold only catches true emitters:
 // rails, lane dashes, pylon strips, tower crowns, the sun and the tail bar. Asphalt, car paint
 // and the wireframe terrain stay crisp instead of smearing into the glow.
-const NEON_HDR = 1.45;
+const NEON_HDR = 1.38;
 function neonColor(hex, intensity = NEON_HDR) {
   return new THREE.Color(hex).multiplyScalar(intensity);
 }
@@ -59,9 +59,9 @@ const composerTarget = new THREE.WebGLRenderTarget(1, 1, {
 const renderScene = new RenderPass(scene, camera);
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(viewportSize().width, viewportSize().height),
-  0.38, // strength
-  0.28, // radius
-  1.05  // threshold (HDR: only neon / sun / emissive windows cross it)
+  0.36, // strength
+  0.3,  // radius
+  1.06  // threshold (HDR: only neon / sun / emissive windows cross it)
 );
 const outputPass = new OutputPass(); // AgX tone mapping + sRGB, applied once, after bloom
 
@@ -137,7 +137,7 @@ let boostBlend = 0;
 const ambientLight = new THREE.AmbientLight(0x28154a, 1.4);
 scene.add(ambientLight);
 
-const horizonLight = new THREE.DirectionalLight(0xff007f, 1.25);
+const horizonLight = new THREE.DirectionalLight(0xff007f, 1.0);
 horizonLight.position.set(0, 35, -260);
 scene.add(horizonLight);
 
@@ -186,7 +186,7 @@ const sunGroup = new THREE.Group();
 const sunGeo = new THREE.PlaneGeometry(125, 125);
 const sunMat = new THREE.MeshBasicMaterial({
   map: createSynthwaveSunTexture(),
-  color: neonColor(0xffffff, 1.25),
+  color: neonColor(0xffffff, 1.24),
   transparent: true,
   fog: false,
   depthWrite: false
@@ -237,8 +237,8 @@ const ROAD_WIDTH = 18;
 const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH);
 const roadMat = new THREE.MeshStandardMaterial({
   color: 0x080612,
-  roughness: 0.46,
-  metalness: 0.55
+  roughness: 0.56,
+  metalness: 0.5
 });
 const roadMesh = new THREE.Mesh(roadGeo, roadMat);
 roadMesh.rotation.x = -Math.PI / 2;
@@ -264,8 +264,8 @@ createGlowingRail(ROAD_WIDTH / 2 - 0.5, 0xff007f, 0.1);
 // Scrolling Dashed Lane Dividers (3 lanes)
 const dashObjects = [];
 const dashGeo = new THREE.PlaneGeometry(0.16, 4.2);
-const dashMatCyan = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.3) });
-const dashMatPink = new THREE.MeshBasicMaterial({ color: neonColor(0xff007f, 1.3) });
+const dashMatCyan = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.15) });
+const dashMatPink = new THREE.MeshBasicMaterial({ color: neonColor(0xff007f, 1.15) });
 
 const laneXPositions = [-3.0, 0.0, 3.0];
 const numDashesPerLane = 28;
@@ -472,7 +472,7 @@ for (let i = 0; i < NUM_BUILDINGS; i++) {
   if (height > 28) {
     const capColor = i % 2 === 0 ? 0x00f3ff : 0xff007f;
     const capGeo = new THREE.BoxGeometry(width * 1.03, 0.55, depth * 1.03);
-    const capMat = new THREE.MeshBasicMaterial({ color: neonColor(capColor, 1.4) });
+    const capMat = new THREE.MeshBasicMaterial({ color: neonColor(capColor, 1.3) });
     const cap = new THREE.Mesh(capGeo, capMat);
     cap.position.set(x, height - 0.8, zDepth);
     cityGroup.add(cap);
@@ -579,14 +579,14 @@ carGroup.add(spoilerWing);
 
 // Iconic Full-Width Glowing Cyberpunk Tail Light Bar
 const tailLightBarGeo = new THREE.BoxGeometry(2.14, 0.14, 0.08);
-const tailLightMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff0055, 1.6) });
+const tailLightMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff0055, 1.45) });
 const tailLightBar = new THREE.Mesh(tailLightBarGeo, tailLightMat);
 tailLightBar.position.set(0, 0.36, 2.34);
 carGroup.add(tailLightBar);
 
 // Secondary lower diffuser light strip
 const lowerTailGeo = new THREE.BoxGeometry(1.9, 0.05, 0.08);
-const lowerTailMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff5500, 1.3) });
+const lowerTailMat = new THREE.MeshBasicMaterial({ color: neonColor(0xff5500, 1.15) });
 const lowerTail = new THREE.Mesh(lowerTailGeo, lowerTailMat);
 lowerTail.position.set(0, 0.18, 2.34);
 carGroup.add(lowerTail);
@@ -603,7 +603,7 @@ const exhaustFlames = [];
   const flameGeo = new THREE.ConeGeometry(0.11, 0.75, 12);
   flameGeo.rotateX(Math.PI / 2);
   const flameMat = new THREE.MeshBasicMaterial({
-    color: neonColor(0x00f3ff, 1.5),
+    color: neonColor(0x00f3ff, 1.4),
     transparent: true,
     opacity: 0.9
   });
@@ -621,7 +621,7 @@ const tireMat = new THREE.MeshStandardMaterial({ color: 0x050508, roughness: 0.8
 
 const rimGeo = new THREE.TorusGeometry(0.24, 0.032, 8, 20);
 rimGeo.rotateY(Math.PI / 2);
-const rimMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.5) });
+const rimMat = new THREE.MeshBasicMaterial({ color: neonColor(0x00f3ff, 1.2) });
 
 const wheelPositions = [
   { x: -1.12, y: -0.04, z: -1.38 },
@@ -949,7 +949,7 @@ function animate() {
   boostBlend = THREE.MathUtils.lerp(boostBlend, isBoosting ? 1 : 0, dt * 3);
   gradePass.uniforms.uTime.value = elapsed;
   gradePass.uniforms.uAberration.value = 0.0012 + metrics.bass * 0.0016 + boostBlend * 0.003;
-  bloomPass.strength = 0.38 + metrics.bass * 0.1 + boostBlend * 0.08;
+  bloomPass.strength = 0.36 + metrics.bass * 0.09 + boostBlend * 0.08;
 
   // Scroll Highway Lane Dashes
   const totalDashSpan = numDashesPerLane * dashSpacing;
