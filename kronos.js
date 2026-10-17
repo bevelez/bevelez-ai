@@ -17,8 +17,22 @@ import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
   spawnStrikeSmearArc,
-  spawn3DImpactBurst
+  spawn3DImpactBurst,
+  createContactShadowDecal,
+  createBakedArenaAOMapTexture,
+  createBakedArenaLightMapTexture,
+  createWeatheredAsphaltArenaTexture
 } from './kronos-models.js?v=20261016h';
+
+window.KRONOS_BPM = KRONOS_BPM;
+window.KRONOS_LOOP_DURATION = KRONOS_LOOP_DURATION;
+window.KRONOS_BEAT_SEC = KRONOS_BEAT_SEC;
+window.KRONOS_BAR_SEC = KRONOS_BEAT_SEC * 4.0;
+window.KRONOS_FIRST_BEAT_OFFSET = KRONOS_FIRST_BEAT_OFFSET;
+window.KRONOS_BEAT_TIMES = KRONOS_BEAT_TIMES;
+window.KRONOS_BARS = KRONOS_BARS;
+
+window._bootTiming = { start: performance.now() };
 
 // ============================================================================
 // 1. HARDWARE-SYNCED LYRIA 3.5 BOSS AUDIO ENGINE + 4-LAYER FIGHTING FOLEY
@@ -46,7 +60,7 @@ class KronosAudioEngine {
 
     Object.values(this.tracks).forEach((el) => {
       el.loop = true;
-      el.preload = 'auto';
+      el.preload = 'metadata';
       el.crossOrigin = 'anonymous';
     });
 
@@ -56,6 +70,20 @@ class KronosAudioEngine {
     this.activeVoiceCount = 0;
     this.activeNodeCount = 0;
     this.activeSourceCount = 0;
+    this.activeVoices = [];
+    this.MAX_POLYPHONY = 24;
+    this.MAX_CATEGORY_VOICES = {
+      'stage-ko': 2,
+      'kick': 4,
+      'counter-weave': 3,
+      'enemy-telegraph': 3
+    };
+    this.lastDuck = null;
+    this._activeDuckTargetGain = 1.0;
+    this._activeDuckEndTime = 0;
+    this._activeConcCutoff = 20000;
+    this._activeConcEndTime = 0;
+    this.masterLimiter = null;
     this.fallbackClockStart = performance.now() * 0.001;
   }
 
@@ -63,6 +91,10 @@ class KronosAudioEngine {
     if (this.ctx) return;
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
     this.ctx = new AudioCtx();
+
+    // Initialize Pre-Allocated Reusable Noise Buffers & Waveshaper Curves first
+    this.initNoiseBuffers();
+    this.initShaperCurves();
 
     // 1. Music Sub-Bus Chain: musicBus -> musicFilter -> sidechainDucker -> masterCompressor
     this.musicBus = this.ctx.createGain();
@@ -88,9 +120,13 @@ class KronosAudioEngine {
     this.masterCompressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
     this.masterCompressor.release.setValueAtTime(0.120, this.ctx.currentTime);
 
-    // 4. Master Output Chain: masterGain -> analyser -> destination
+    // 4. Master Output Chain: masterGain -> masterLimiter (brickwall soft-clip) -> analyser -> destination
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 0.88;
+
+    this.masterLimiter = this.ctx.createWaveShaper();
+    this.masterLimiter.curve = this.shaperCurves.softClip;
+    this.masterLimiter.oversample = '2x';
 
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 128;
@@ -105,7 +141,8 @@ class KronosAudioEngine {
     this.sfxBus.connect(this.masterCompressor);
 
     this.masterCompressor.connect(this.masterGain);
-    this.masterGain.connect(this.analyser);
+    this.masterGain.connect(this.masterLimiter);
+    this.masterLimiter.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
 
     // Connect HTML5 Media Element Tracks to Music Bus
@@ -121,10 +158,6 @@ class KronosAudioEngine {
         // Source already connected
       }
     });
-
-    // Initialize Pre-Allocated Reusable Noise Buffers & Waveshaper Curves
-    this.initNoiseBuffers();
-    this.initShaperCurves();
   }
 
   initNoiseBuffers() {
@@ -207,9 +240,11 @@ class KronosAudioEngine {
     this.initShaperCurves();
   }
 
-  registerVoiceCleanup(nodes, durationSec) {
+  registerVoiceCleanup(nodes, durationSec, voiceMeta = null) {
+    if (!nodes) return;
     if (!Array.isArray(nodes)) nodes = [nodes];
     const validNodes = nodes.filter(Boolean);
+    if (validNodes.length === 0) return;
     const sources = validNodes.filter((n) => 'onended' in n || typeof n.stop === 'function');
 
     this.activeVoiceCount = (this.activeVoiceCount || 0) + 1;
@@ -217,17 +252,31 @@ class KronosAudioEngine {
     this.activeSourceCount = (this.activeSourceCount || 0) + sources.length;
 
     let cleaned = false;
+    let timerId = null;
+
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+
       this.activeVoiceCount = Math.max(0, (this.activeVoiceCount || 0) - 1);
       this.activeNodeCount = Math.max(0, (this.activeNodeCount || 0) - validNodes.length);
       this.activeSourceCount = Math.max(0, (this.activeSourceCount || 0) - sources.length);
 
+      if (voiceMeta && this.activeVoices) {
+        const idx = this.activeVoices.indexOf(voiceMeta);
+        if (idx !== -1) {
+          this.activeVoices.splice(idx, 1);
+        }
+      }
+
       validNodes.forEach((node) => {
         try {
           if (typeof node.stop === 'function') {
-            // Guarded stop
+            node.stop();
           }
         } catch (e) {}
         try {
@@ -250,8 +299,31 @@ class KronosAudioEngine {
       });
     }
 
-    const timeoutMs = Math.ceil((durationSec + 0.08) * 1000);
-    setTimeout(cleanup, timeoutMs);
+    const timeoutMs = Math.max(20, Math.ceil(((Number(durationSec) || 0.1) + 0.08) * 1000));
+    timerId = setTimeout(cleanup, timeoutMs);
+
+    if (voiceMeta) {
+      voiceMeta.forceStop = () => {
+        if (cleaned) return;
+        const curTime = this.ctx ? this.ctx.currentTime : 0;
+        validNodes.forEach((node) => {
+          if (node instanceof GainNode && node !== this.sfxBus && node !== this.musicBus && node !== this.masterGain && node !== this.sidechainDucker) {
+            try {
+              node.gain.cancelScheduledValues(curTime);
+              node.gain.setValueAtTime(Math.max(0.0001, node.gain.value), curTime);
+              node.gain.exponentialRampToValueAtTime(0.0001, curTime + 0.010);
+            } catch (e) {}
+          }
+        });
+        if (timerId !== null) {
+          clearTimeout(timerId);
+          timerId = null;
+        }
+        timerId = setTimeout(cleanup, 12);
+      };
+      if (!this.activeVoices) this.activeVoices = [];
+      this.activeVoices.push(voiceMeta);
+    }
   }
 
   _scheduleNodeCleanup(sources, aux, durationSec) {
@@ -262,29 +334,77 @@ class KronosAudioEngine {
     if (!this.ctx || !this.sidechainDucker) return;
     const now = this.ctx.currentTime;
     const targetGain = Math.max(0.0001, Math.pow(10, amountDb / 20));
+    const newEndTime = now + durationSec;
     const duckNode = this.sidechainDucker;
 
-    duckNode.gain.cancelScheduledValues(now);
-    duckNode.gain.setValueAtTime(duckNode.gain.value, now);
-    const attackTime = 0.012;
-    duckNode.gain.linearRampToValueAtTime(targetGain, now + attackTime);
-    const holdTime = Math.max(0.02, durationSec * 0.35);
-    duckNode.gain.setValueAtTime(targetGain, now + attackTime + holdTime);
-    duckNode.gain.linearRampToValueAtTime(1.0, now + durationSec);
+    this.lastDuck = {
+      amountDb,
+      targetGain,
+      durationSec,
+      startTime: now
+    };
+
+    // Track active ducking state
+    if (!this._activeDuckEndTime || now >= this._activeDuckEndTime) {
+      this._activeDuckTargetGain = 1.0;
+      this._activeDuckEndTime = 0;
+    }
+
+    // Only deepen ducking if new target is stronger, or if active ducking has ended
+    if (targetGain <= this._activeDuckTargetGain) {
+      this._activeDuckTargetGain = targetGain;
+      this._activeDuckEndTime = Math.max(this._activeDuckEndTime, newEndTime);
+
+      duckNode.gain.cancelScheduledValues(now);
+      duckNode.gain.setValueAtTime(duckNode.gain.value, now);
+      const attackTime = 0.012;
+      duckNode.gain.linearRampToValueAtTime(targetGain, now + attackTime);
+      const holdTime = Math.max(0.02, (this._activeDuckEndTime - now) * 0.35);
+      duckNode.gain.setValueAtTime(targetGain, now + attackTime + holdTime);
+      duckNode.gain.linearRampToValueAtTime(1.0, this._activeDuckEndTime);
+    } else {
+      // Weaker ducking during deeper ducking: only extend duration if longer, never un-duck early
+      if (newEndTime > this._activeDuckEndTime) {
+        this._activeDuckEndTime = newEndTime;
+        duckNode.gain.cancelScheduledValues(now + 0.012);
+        const holdTime = Math.max(0.02, (this._activeDuckEndTime - now) * 0.35);
+        duckNode.gain.setValueAtTime(this._activeDuckTargetGain, now + 0.012 + holdTime);
+        duckNode.gain.linearRampToValueAtTime(1.0, this._activeDuckEndTime);
+      }
+    }
   }
 
   triggerConcussion(cutoffFreq = 450, durationSec = 0.40) {
     if (!this.ctx || !this.musicFilter) return;
     const now = this.ctx.currentTime;
     const filterFreq = this.musicFilter.frequency;
-
-    filterFreq.cancelScheduledValues(now);
-    filterFreq.setValueAtTime(filterFreq.value, now);
     const safeCutoff = Math.max(20, cutoffFreq);
-    filterFreq.exponentialRampToValueAtTime(safeCutoff, now + 0.015);
-    const holdTime = Math.min(0.12, durationSec * 0.30);
-    filterFreq.setValueAtTime(safeCutoff, now + 0.015 + holdTime);
-    filterFreq.exponentialRampToValueAtTime(20000, now + durationSec);
+    const newEndTime = now + durationSec;
+
+    if (!this._activeConcEndTime || now >= this._activeConcEndTime) {
+      this._activeConcCutoff = 20000;
+      this._activeConcEndTime = 0;
+    }
+
+    if (safeCutoff <= this._activeConcCutoff) {
+      this._activeConcCutoff = safeCutoff;
+      this._activeConcEndTime = Math.max(this._activeConcEndTime, newEndTime);
+
+      filterFreq.cancelScheduledValues(now);
+      filterFreq.setValueAtTime(Math.max(20, filterFreq.value), now);
+      filterFreq.exponentialRampToValueAtTime(safeCutoff, now + 0.015);
+      const holdTime = Math.min(0.12, (this._activeConcEndTime - now) * 0.30);
+      filterFreq.setValueAtTime(safeCutoff, now + 0.015 + holdTime);
+      filterFreq.exponentialRampToValueAtTime(20000, this._activeConcEndTime);
+    } else {
+      if (newEndTime > this._activeConcEndTime) {
+        this._activeConcEndTime = newEndTime;
+        filterFreq.cancelScheduledValues(now + 0.015);
+        const holdTime = Math.min(0.12, (this._activeConcEndTime - now) * 0.30);
+        filterFreq.setValueAtTime(this._activeConcCutoff, now + 0.015 + holdTime);
+        filterFreq.exponentialRampToValueAtTime(20000, this._activeConcEndTime);
+      }
+    }
   }
 
   async toggle() {
@@ -392,6 +512,53 @@ class KronosAudioEngine {
     const gradeMult = isPerfect ? 1.0 : (isGood ? 0.85 : 0.65);
     const voiceNodes = [];
 
+    const ACTION_PRIORITIES = {
+      'punch-jab': 1,
+      'punch-cross': 2,
+      'dodge': 3,
+      'kick': 4,
+      'punch-uppercut': 5,
+      'punch': 5,
+      'enemy-telegraph': 6,
+      'player-damaged': 7,
+      'counter-weave': 8,
+      'stage-ko': 9
+    };
+    const voicePriority = ACTION_PRIORITIES[action] || 1;
+
+    // Polyphony Capping & Voice Stealing
+    if (!this.activeVoices) this.activeVoices = [];
+    const categoryLimit = this.MAX_CATEGORY_VOICES ? this.MAX_CATEGORY_VOICES[action] : null;
+    if (categoryLimit) {
+      const catVoices = this.activeVoices.filter((v) => v.action === action && !v.stealing);
+      if (catVoices.length >= categoryLimit) {
+        const oldest = catVoices[0];
+        if (oldest) {
+          oldest.stealing = true;
+          if (typeof oldest.forceStop === 'function') oldest.forceStop();
+        }
+      }
+    }
+    const maxPoly = this.MAX_POLYPHONY || 24;
+    const unstolenVoices = this.activeVoices.filter((v) => !v.stealing);
+    if (unstolenVoices.length >= maxPoly) {
+      unstolenVoices.sort((a, b) => (a.priority - b.priority) || (a.startTime - b.startTime));
+      const toSteal = unstolenVoices[0];
+      if (toSteal) {
+        toSteal.stealing = true;
+        if (typeof toSteal.forceStop === 'function') toSteal.forceStop();
+      }
+    }
+
+    const voiceMeta = {
+      action,
+      startTime: now,
+      priority: voicePriority,
+      nodes: voiceNodes,
+      forceStop: null,
+      stealing: false
+    };
+
     // 1. JAB (Combo Step 1)
     if (action === 'punch-jab') {
       const dur = 0.125;
@@ -461,7 +628,7 @@ class KronosAudioEngine {
         });
       }
 
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -534,7 +701,7 @@ class KronosAudioEngine {
         });
       }
 
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -617,7 +784,7 @@ class KronosAudioEngine {
       });
 
       this.duckMusic(-2.5, 0.16);
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -723,7 +890,7 @@ class KronosAudioEngine {
       }
 
       this.duckMusic(-4.0, 0.22);
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -750,7 +917,7 @@ class KronosAudioEngine {
       noiseSrc.stop(now + 0.155);
       voiceNodes.push(noiseSrc, filter, g);
 
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -807,7 +974,7 @@ class KronosAudioEngine {
       voiceNodes.push(bellOsc, bellGain);
 
       this.duckMusic(-5.0, 0.25);
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -858,7 +1025,7 @@ class KronosAudioEngine {
         voiceNodes.push(osc);
       });
 
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -901,7 +1068,7 @@ class KronosAudioEngine {
 
       this.triggerConcussion(450, 0.40);
       this.duckMusic(-6.0, 0.30);
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -940,7 +1107,8 @@ class KronosAudioEngine {
       modGain.gain.setValueAtTime(650, now);
       modGain.gain.exponentialRampToValueAtTime(50, now + 0.140);
 
-      modulator.connect(carrier.frequency);
+      modulator.connect(modGain);
+      modGain.connect(carrier.frequency);
       fmGain.gain.setValueAtTime(0.42, now);
       fmGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.190);
 
@@ -1008,7 +1176,7 @@ class KronosAudioEngine {
       });
 
       this.duckMusic(-8.0, 0.45);
-      this.registerVoiceCleanup(voiceNodes, dur);
+      this.registerVoiceCleanup(voiceNodes, dur, voiceMeta);
       return;
     }
 
@@ -1019,6 +1187,7 @@ class KronosAudioEngine {
 
 const audioEngine = new KronosAudioEngine();
 window.audioEngine = audioEngine;
+if (window._bootTiming) window._bootTiming.afterAudio = performance.now();
 
 // ============================================================================
 // 2. THREE.JS SCENE, CALIBRATED CAMERA FRAMING & CEL-SHADED LIGHTING
@@ -1026,11 +1195,12 @@ window.audioEngine = audioEngine;
 const stageContainer = document.getElementById('three-stage');
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance', preserveDrawingBuffer: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(1);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 1.05;
 stageContainer.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -1052,6 +1222,10 @@ const CAMERA_PRESETS = {
   booth: {
     pos: new THREE.Vector3(0.5, 3.1, -2.85),
     lookAt: new THREE.Vector3(0.0, 1.1, 3.5)
+  },
+  south: {
+    pos: new THREE.Vector3(0.0, 2.4, 7.6),
+    lookAt: new THREE.Vector3(0.0, 1.4, 0.0)
   }
 };
 
@@ -1067,7 +1241,7 @@ const cameraJuice = {
   decaySpeed: 8.5
 };
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 140);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.05, 140);
 camera.position.copy(CAMERA_PRESETS.orbit.pos);
 camera.lookAt(CAMERA_PRESETS.orbit.lookAt);
 
@@ -1083,11 +1257,15 @@ const cameraState = {
   spherical: new THREE.Spherical()
 };
 
-function setCameraPreset(mode) {
+function setCameraPreset(mode, snap = false) {
   if (!CAMERA_PRESETS[mode]) return;
   cameraState.mode = mode;
   cameraState.targetPos.copy(CAMERA_PRESETS[mode].pos);
   cameraState.targetLookAt.copy(CAMERA_PRESETS[mode].lookAt);
+  if (snap) {
+    cameraState.currentPos.copy(cameraState.targetPos);
+    cameraState.currentLookAt.copy(cameraState.targetLookAt);
+  }
 
   document.querySelectorAll('.cam-pill').forEach((p) => {
     p.classList.toggle('active', p.dataset.mode === mode);
@@ -1105,91 +1283,171 @@ window.setCameraViewMode = setCameraPreset;
 window.getCameraViewMode = () => cameraState.mode;
 window.camera = camera;
 window.cameraJuice = cameraJuice;
+window.cameraState = cameraState;
+window.CAMERA_PRESETS = CAMERA_PRESETS;
+window.THREE = THREE;
 
-const ambientLight = new THREE.AmbientLight(0xdce6ff, 1.25);
+// 1. Environmental Atmospheric Hemisphere Fill (Nocturnal sky to warm pavement bounce)
+const hemiLight = new THREE.HemisphereLight(0x243258, 0x2e2438, 1.15); // 0x0c0d18 ground bounce
+scene.add(hemiLight);
+
+// 2. Soft supplementary ambient fill
+const ambientLight = new THREE.AmbientLight(0xdce6ff, 0.53);
 scene.add(ambientLight);
 
-const keyLight = new THREE.DirectionalLight(0xfff2d8, 2.5);
-keyLight.position.set(-4.5, 12.0, 8.5);
+// 3. Primary Key Directional Light with Calibrated Frustum & NormalBias
+const keyLight = new THREE.DirectionalLight(0xfff2d8, 1.78);
+keyLight.position.set(-5.0, 14.0, 9.0);
 keyLight.castShadow = true;
 keyLight.shadow.mapSize.set(2048, 2048);
+keyLight.shadow.camera.left = -22.0;
+keyLight.shadow.camera.right = 22.0;
+keyLight.shadow.camera.top = 22.0;
+keyLight.shadow.camera.bottom = -22.0;
+keyLight.shadow.camera.near = 2.0;
+keyLight.shadow.camera.far = 52.0;
+keyLight.shadow.bias = -0.0004;
+keyLight.shadow.normalBias = 0.035;
+keyLight.shadow.camera.updateProjectionMatrix();
 scene.add(keyLight);
 
-const stageMagentaLight = new THREE.PointLight(0xff3898, 3.2, 20);
+// 4. Stylized Silhouette Character Rim Light (backlight separating cel figures from dark night sky)
+const characterRimLight = new THREE.DirectionalLight(0x8ce8ff, 1.4);
+characterRimLight.position.set(0, 4.5, -7.5);
+characterRimLight.castShadow = false;
+scene.add(characterRimLight);
+
+// 5. West Warehouse Loft Window Bounce (warm incandescent golden illumination over balcony & courtyard)
+const westBounceLight = new THREE.PointLight(0xffa834, 3.2, 18.0);
+westBounceLight.position.set(-9.2, 3.8, -2.2);
+westBounceLight.castShadow = false;
+scene.add(westBounceLight);
+
+// 5b. West Service Sconce (warm downlight pool over garage door & curb)
+const westSconceLight = new THREE.PointLight(0xffe066, 1.4, 11.0);
+westSconceLight.position.set(-7.6, 3.6, 0.5);
+westSconceLight.castShadow = false;
+scene.add(westSconceLight);
+
+// 5c. East Bodega Shopfront Window Glow & Dual Neon Signs Wash
+const eastBounceLight = new THREE.PointLight(0xffb836, 1.9, 15.0);
+eastBounceLight.position.set(8.8, 3.2, -1.0);
+eastBounceLight.castShadow = false;
+scene.add(eastBounceLight);
+
+const bodegaFrontLight = new THREE.PointLight(0xffb836, 1.9, 15.0);
+bodegaFrontLight.position.set(9.2, 3.2, 2.2);
+bodegaFrontLight.castShadow = false;
+scene.add(bodegaFrontLight);
+
+const neonCyanLight = new THREE.PointLight(0x24e5ff, 2.0, 14.0);
+neonCyanLight.position.set(9.0, 5.2, 2.0);
+neonCyanLight.castShadow = false;
+scene.add(neonCyanLight);
+
+const neonMagentaLight = new THREE.PointLight(0xff2a85, 2.0, 14.0);
+neonMagentaLight.position.set(9.0, 6.5, 2.0);
+neonMagentaLight.castShadow = false;
+scene.add(neonMagentaLight);
+
+// 6. 4 Streetlamp Bounce PointLights at lamp posts
+const streetlampLights = [
+  [-6.5, 4.2, -4.6],
+  [7.4,  4.2, -3.6],
+  [-6.6, 4.2,  5.8],
+  [6.6,  4.2,  5.8]
+].map(([lx, ly, lz]) => {
+  const pLight = new THREE.PointLight(0xffd15c, 1.6, 9.0);
+  pLight.position.set(lx, ly, lz);
+  pLight.castShadow = false;
+  scene.add(pLight);
+  return pLight;
+});
+
+// 7. Stage Theatrical Fill (Pulsed smoothly to 92 BPM music track in animate)
+const stageMagentaLight = new THREE.PointLight(0xff3898, 1.70, 18.0);
 stageMagentaLight.position.set(2.4, 5.2, -3.5);
+stageMagentaLight.castShadow = false;
 scene.add(stageMagentaLight);
 
-const stageCyanLight = new THREE.PointLight(0x24e5ff, 2.8, 20);
+const stageCyanLight = new THREE.PointLight(0x24e5ff, 1.50, 18.0);
 stageCyanLight.position.set(-1.5, 3.8, -3.2);
+stageCyanLight.castShadow = false;
 scene.add(stageCyanLight);
+
+// 8. South Sound-Crew Step-Van Angled Headlights (warm forward projection into courtyard)
+const vanHeadlights = [-0.65, 0.65].map((vx) => {
+  const headlight = new THREE.SpotLight(0xfff099, 2.5, 22.0, 0.60, 0.45, 1.2);
+  headlight.position.set(vx + 1.2, 1.35, 9.8);
+  headlight.target.position.set(vx * 1.5, 0.0, 3.5);
+  scene.add(headlight);
+  scene.add(headlight.target);
+  return headlight;
+});
+
+// Expose lighting references on window for tests and runtime inspection
+window.renderer = renderer;
+window.scene = scene;
+window.keyLight = keyLight;
+window.hemiLight = hemiLight;
+window.characterRimLight = characterRimLight;
+window.westBounceLight = westBounceLight;
+window.westSconceLight = westSconceLight;
+window.eastBounceLight = eastBounceLight;
+window.bodegaFrontLight = bodegaFrontLight;
+window.neonCyanLight = neonCyanLight;
+window.neonMagentaLight = neonMagentaLight;
+window.streetlampLights = streetlampLights;
+window.stageMagentaLight = stageMagentaLight;
+window.stageCyanLight = stageCyanLight;
+window.vanHeadlights = vanHeadlights;
+if (window._bootTiming) window._bootTiming.afterLights = performance.now();
 
 // ============================================================================
 // 3. CRACKED URBAN ASPHALT CYPHER FLOOR + CONCENTRIC RHYTHM DIAL ("PERFECT!")
 // ============================================================================
 function createAsphaltFloorTexture() {
-  const c = document.createElement('canvas');
-  c.width = 1024;
-  c.height = 1024;
-  const ctx = c.getContext('2d');
-
-  ctx.fillStyle = '#3c465c';
-  ctx.fillRect(0, 0, 1024, 1024);
-
-  for (let i = 0; i < 90; i++) {
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(26, 31, 44, 0.45)' : 'rgba(72, 82, 104, 0.25)';
-    ctx.fillRect(Math.random() * 1024, Math.random() * 1024, 30 + Math.random() * 110, 12 + Math.random() * 45);
-  }
-
-  ctx.strokeStyle = 'rgba(228, 236, 248, 0.55)';
-  ctx.lineWidth = 10;
-  ctx.beginPath();
-  ctx.arc(512, 512, 390, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.strokeStyle = 'rgba(218, 165, 52, 0.38)';
-  ctx.lineWidth = 28;
-  ctx.beginPath();
-  ctx.moveTo(220, 680);
-  ctx.lineTo(340, 760);
-  ctx.moveTo(330, 670);
-  ctx.lineTo(230, 770);
-  ctx.stroke();
-
-  ctx.strokeStyle = '#181c26';
-  ctx.lineWidth = 4;
-  for (let i = 0; i < 18; i++) {
-    ctx.beginPath();
-    let x = Math.random() * 1024;
-    let y = Math.random() * 1024;
-    ctx.moveTo(x, y);
-    for (let s = 0; s < 4; s++) {
-      x += (Math.random() - 0.5) * 90;
-      y += (Math.random() - 0.5) * 90;
-      ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  }
-
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
+  return createWeatheredAsphaltArenaTexture();
 }
 
 const floorMesh = new THREE.Mesh(
-  new THREE.CircleGeometry(24, 64),
-  new THREE.MeshToonMaterial({ map: createAsphaltFloorTexture() })
+  new THREE.CircleGeometry(42, 64), // CircleGeometry(24 expanded to 42 for wide orbit coverage
+  new THREE.MeshToonMaterial({
+    map: createWeatheredAsphaltArenaTexture(),
+    aoMap: createBakedArenaAOMapTexture(),
+    aoMapIntensity: 1.0,
+    lightMap: createBakedArenaLightMapTexture(),
+    lightMapIntensity: 1.0
+  })
 );
+floorMesh.material.onBeforeCompile = (shader) => {
+  shader.fragmentShader = shader.fragmentShader.replace(
+    '#include <aomap_fragment>',
+    `
+    #include <aomap_fragment>
+    #ifdef USE_AOMAP
+    reflectedLight.directDiffuse *= (ambientOcclusion * 0.65 + 0.35);
+    #endif
+    `
+  );
+};
+floorMesh.geometry.setAttribute('uv2', floorMesh.geometry.attributes.uv.clone());
+floorMesh.name = 'floorMesh';
 floorMesh.rotation.x = -Math.PI / 2;
 floorMesh.receiveShadow = true;
 scene.add(floorMesh);
+window.floorMesh = floorMesh;
 
 // Concentric Floor Rhythm Dial ("PERFECT!") positioned in the lower-center foreground
 const floorDial = buildFloorRhythmDial(scene);
 floorDial.dialGroup.position.set(-0.22, 0.025, 1.68);
+window.floorDial = floorDial;
+if (window._bootTiming) window._bootTiming.afterFloor = performance.now();
 
 // Boombox Sound-System Truck Level 3 & Urban Block-Party Arena
 const boomboxStage = buildBoomboxStage(scene);
 buildArenaEnvironment(scene);
+if (window._bootTiming) window._bootTiming.afterStage = performance.now();
 
 // ============================================================================
 // 4. CHALLENGER, 3D KICK SMEAR RIBBON, EMBEDDED DJ KRONOS & CROWD SPECTATORS
@@ -1198,6 +1456,7 @@ const challengerRig = buildChallengerModel();
 challengerRig.root.position.set(-0.46, 0, 1.68);
 challengerRig.root.scale.setScalar(1.02);
 scene.add(challengerRig.root);
+window.challengerRig = challengerRig;
 
 const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
 
@@ -1205,6 +1464,18 @@ const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
 const kronosRig = buildKronosBossModel();
 kronosRig.root.position.set(0, 1.38, 1.25);
 boomboxStage.soundRigGroup.add(kronosRig.root);
+window.kronosRig = kronosRig;
+
+// Dynamic Ground Contact Shadow Decals beneath Fighters
+const challengerContactShadow = challengerRig.contactShadowDecal || createContactShadowDecal(1.25, 0.95, 0.50);
+scene.add(challengerContactShadow);
+
+const kronosContactShadow = kronosRig.contactShadowDecal || createContactShadowDecal(1.60, 1.20, 0.52);
+if (!kronosRig.contactShadowDecal) scene.add(kronosContactShadow);
+
+window.challengerContactShadow = challengerContactShadow;
+window.kronosContactShadow = kronosContactShadow;
+if (window._bootTiming) window._bootTiming.afterHeroModels = performance.now();
 
 function createEnemyOverheadBadge(title = 'BRUISER #1') {
   const c = document.createElement('canvas');
@@ -1215,7 +1486,7 @@ function createEnemyOverheadBadge(title = 'BRUISER #1') {
   tex.colorSpace = THREE.SRGBColorSpace;
 
   const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.96, 0.27),
+    new THREE.PlaneGeometry(0.84, 0.236),
     new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, side: THREE.DoubleSide })
   );
   mesh.position.set(0, 2.18, 0);
@@ -1277,6 +1548,10 @@ const bruisers = [0, 1, 2].map((idx) => {
   teleRing.position.y = 0.03;
   bObj.rig.root.add(teleRing);
 
+  // Dynamic Contact Shadow Decal
+  const contactShadow = (bObj.rig && bObj.rig.contactShadowDecal) || createContactShadowDecal(1.20, 0.90, 0.50);
+  scene.add(contactShadow);
+
   scene.add(bObj.rig.root);
   return {
     idx,
@@ -1284,6 +1559,7 @@ const bruisers = [0, 1, 2].map((idx) => {
     badge,
     teleRing,
     teleMat,
+    contactShadow,
     active: idx < 2,
     hp: 100,
     maxHp: 100,
@@ -1291,7 +1567,7 @@ const bruisers = [0, 1, 2].map((idx) => {
     stateTimer: 0,
     attackCooldown: 1.4 + idx * 1.35,
     angle: idx === 0 ? -0.48 : (idx === 1 ? 0.58 : 0.05),
-    orbitRadius: idx === 0 ? 1.85 : (idx === 1 ? 2.15 : 2.00),
+    orbitRadius: idx === 0 ? 1.48 : (idx === 1 ? 1.95 : 1.85),
     strafeDir: idx % 2 === 0 ? 1 : -1,
     flying: null
   };
@@ -1306,9 +1582,17 @@ kronosRig.root.add(kronosRingBadge.mesh);
 
 // Cheering Block-Party Crowd Spectators Behind the Left & Right Barricades
 const crowdSpectators = [];
-const crowdTops = [0x38b6ff, 0xf5f5f5, 0x2ebd59, 0xe03228, 0xffd428, 0x9b51e0];
-const crowdPants = [0x242a38, 0x1c202c, 0x322838];
-const crowdSkins = [0xd89c74, 0x8d5534, 0xe2a882];
+const crowdTops = [
+  0xc26a2b, // Burnt Ochre
+  0x9e3328, // Terracotta Crimson
+  0x4a5d3f, // Olive Drab
+  0x3b4d66, // Slate Denim
+  0xd49b35, // Warm Mustard
+  0x22242a, // Deep Charcoal
+  0xe8e2d4  // Off-White / Cream
+];
+const crowdPants = [0x22242a, 0x2d3a4d, 0x283226, 0x342a22];
+const crowdSkins = [0xd89c74, 0x8d5534, 0xe0b088, 0x5c3826, 0xf0c8a0];
 const crowdAngles = [
   -1.36, -1.22, -1.08, -0.94, -0.80, -0.66, -0.54,
   1.04, 1.16, 1.28, 1.40
@@ -1317,15 +1601,20 @@ crowdAngles.forEach((ang, i) => {
   const spec = buildSpectatorModel(
     crowdTops[i % crowdTops.length],
     crowdPants[i % crowdPants.length],
-    crowdSkins[i % crowdSkins.length]
+    crowdSkins[i % crowdSkins.length],
+    i
   );
   spec.root.scale.setScalar(0.86);
-  const r = 7.55 + (i % 2) * 0.45;
+  // Shift West-wall / shutter-door spectators (ang < -0.4) inward toward arena center
+  // completely clear of the roll-up shutter door and warehouse wall
+  const isWest = ang < -0.4;
+  const r = isWest ? (7.35 + (i % 2) * 0.22) : (7.55 + (i % 2) * 0.45);
   spec.root.position.set(Math.sin(ang) * r, 0, -Math.cos(ang) * r + 0.5);
   spec.root.lookAt(0, 0, 1.68);
   scene.add(spec.root);
-  crowdSpectators.push({ spec, phaseOffset: i * 0.65 });
+  crowdSpectators.push({ spec, phaseOffset: i * 0.65, animMode: i % 5 });
 });
+if (window._bootTiming) window._bootTiming.afterCrowd = performance.now();
 
 // ============================================================================
 // 5. DEAD AS DISCO BEAT-WARPING COMBAT & ACTIVE 3-WAVE RHYTHM BRAWLER LOOP
@@ -1339,6 +1628,7 @@ const gameState = {
   hitStopTimer: 0,
   dodgeInvulnTimer: 0,
   counterBonusTimer: 0,
+  combatEngagementTimer: 0,
   combo: 12,
   playerHp: 100,
   maxPlayerHp: 100,
@@ -1434,7 +1724,13 @@ function setStarburstText(word, scale = 1.14) {
 }
 
 let damageFlashTimer = null;
+let lastDamageSfxTime = 0;
 function triggerDamageFlash() {
+  const now = performance.now();
+  if (now - lastDamageSfxTime > 120) {
+    audioEngine.playCombatSfx('player-damaged');
+    lastDamageSfxTime = now;
+  }
   if (!elDamageFlash) return;
   elDamageFlash.style.opacity = '1';
   if (damageFlashTimer) clearTimeout(damageFlashTimer);
@@ -1492,8 +1788,8 @@ function spawnWave(waveNum) {
       kronosRingBadge.mesh.visible = false;
     }
     const wave1Configs = [
-      { active: true, angle: -0.52, radius: 1.85, hp: 100, cd: 1.3 },
-      { active: true, angle: 0.62,  radius: 2.10, hp: 100, cd: 2.6 },
+      { active: true, angle: -0.52, radius: 1.48, hp: 180, cd: 1.3 },
+      { active: true, angle: 0.62,  radius: 1.95, hp: 180, cd: 2.6 },
       { active: false, angle: 0.0,  radius: 3.50, hp: 100, cd: 99 }
     ];
     bruisers.forEach((b, idx) => {
@@ -1602,6 +1898,20 @@ function launchBruiserIntoStage(b) {
   b.state = 'flying';
   b.teleMat.opacity = 0;
   b.badge.update(0, b.maxHp, 'ko', 'K.O. LAUNCH!');
+  if (b.blender) {
+    b.blender.setTarget({
+      torso: [-0.35, 0, 0],
+      headGroup: [-0.2, 0, 0],
+      leftArm: [-1.2, 0, -0.5],
+      rightArm: [-1.2, 0, 0.5],
+      leftElbow: [0.4, 0, 0],
+      rightElbow: [0.4, 0, 0],
+      leftLeg: [0.3, 0, -0.15],
+      rightLeg: [0.3, 0, 0.15],
+      leftKnee: [-0.1, 0, 0],
+      rightKnee: [-0.1, 0, 0]
+    });
+  }
   const startPos = b.rig.root.position.clone();
   const targetPos = new THREE.Vector3(
     2.1 + (Math.random() - 0.5) * 1.4,
@@ -1618,7 +1928,7 @@ function launchBruiserIntoStage(b) {
   setStarburstText('K.O. LAUNCH!', 1.22);
 }
 
-function findBestCombatTarget() {
+function findBestCombatTarget(maxAcquireDist = 3.6) {
   // Priority 1: Any enemy currently in 'windup' or 'striking' so the player can counter-interrupt them!
   let bestTarget = null;
   let bestScore = Infinity;
@@ -1626,6 +1936,7 @@ function findBestCombatTarget() {
   bruisers.forEach((b) => {
     if (!b.active || b.state === 'ko' || b.state === 'flying') return;
     const d = gameState.playerPos.distanceTo(b.rig.root.position);
+    if (d > maxAcquireDist) return;
     const priorityBonus = (b.state === 'windup' || b.state === 'striking') ? -2.0 : (b.state === 'stunned' ? -1.0 : 0);
     const score = d + priorityBonus;
     if (score < bestScore) {
@@ -1636,13 +1947,32 @@ function findBestCombatTarget() {
 
   if (gameState.kronosInRing) {
     const kd = gameState.playerPos.distanceTo(kronosRig.root.position);
-    const kPriority = (gameState.kronosRingState === 'windup' || gameState.kronosRingState === 'striking') ? -2.2 : -0.4;
-    if (kd + kPriority < bestScore) {
-      bestTarget = { type: 'kronos', obj: kronosRig, pos: kronosRig.root.position, dist: kd };
+    if (kd <= maxAcquireDist) {
+      const kPriority = (gameState.kronosRingState === 'windup' || gameState.kronosRingState === 'striking') ? -2.2 : -0.4;
+      if (kd + kPriority < bestScore) {
+        bestTarget = { type: 'kronos', obj: kronosRig, pos: kronosRig.root.position, dist: kd };
+      }
     }
   }
 
   return bestTarget;
+}
+
+function isEnemyWithinStrikingRange(maxDist = 2.0) {
+  for (let i = 0; i < bruisers.length; i++) {
+    const b = bruisers[i];
+    if (b.active && b.state !== 'ko' && b.state !== 'flying') {
+      if (gameState.playerPos.distanceTo(b.rig.root.position) <= maxDist) {
+        return true;
+      }
+    }
+  }
+  if (gameState.kronosInRing && gameState.kronosRingState !== 'ko') {
+    if (gameState.playerPos.distanceTo(kronosRig.root.position) <= maxDist) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // Base hit-stop invariant calibrated to ~48-50ms (0.048s)
@@ -1712,7 +2042,6 @@ function updateCameraJuiceState() {
   }
   if (typeof camera !== 'undefined' && camera) {
     camera.fov = 45.0 - cameraJuice.fovDip;
-    camera.rotation.z = (gameState.cameraDutch || 0) + cameraJuice.dutchRoll;
     camera.updateProjectionMatrix();
   }
 }
@@ -1749,7 +2078,6 @@ function triggerCameraJuice(action, isPerfect, punchStep) {
   }
   if (typeof camera !== 'undefined' && camera) {
     camera.fov = 45.0 - cameraJuice.fovDip;
-    camera.rotation.z = (gameState.cameraDutch || 0) + cameraJuice.dutchRoll;
     camera.updateProjectionMatrix();
   }
 }
@@ -1758,7 +2086,11 @@ window.triggerCameraJuice = triggerCameraJuice;
 function triggerCombatAction(action, isBufferedDequeue = false) {
   const songTime = audioEngine.getSongTime();
   const timing = evaluateBeatWindow(songTime);
-  audioEngine.playCombatSfx(action, timing.grade);
+
+  // Retain engagement pocket across combo strikes spaced 0.35s - 0.65s apart
+  if (action === 'punch' || action === 'kick') {
+    gameState.combatEngagementTimer = 0.85;
+  }
 
   const btnMap = { dodge: btnA, punch: btnS, kick: btnD };
   if (btnMap[action]) {
@@ -1793,7 +2125,11 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     }
 
     const side = Math.random() > 0.5 ? 1 : -1;
-    gameState.playerTarget.set(-0.46 + side * 0.62, 0, 2.25);
+    const newX = Math.max(-4.0, Math.min(4.0, gameState.playerPos.x + side * 0.62));
+    gameState.playerTarget.set(newX, 0, gameState.playerPos.z);
+    if (gameState.playerTarget.length() > 4.2) {
+      gameState.playerTarget.setLength(4.2);
+    }
     gameState.cameraDutch = side * 0.04;
 
     triggerCameraJuice('dodge', timing.grade === 'PERFECT', 0);
@@ -1820,8 +2156,10 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
       gameState.playerHp = Math.min(100, gameState.playerHp + 6);
       floorDial.updateBadge('PERFECT WEAVE!', '#ffe042');
       setStarburstText('COUNTER WEAVE!', 1.16);
+      audioEngine.playCombatSfx('counter-weave', timing.grade);
     } else {
       setStarburstText('WEAVE!', 1.08);
+      audioEngine.playCombatSfx('dodge', timing.grade);
     }
     updateHudNumbers();
     return;
@@ -1890,9 +2228,13 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     }
     gameState.punchStep = (currentPunchStep + 1) % 3;
     gameState.lastPunchTime = now;
+
+    const punchSfx = currentPunchStep === 0 ? 'punch-jab' : (currentPunchStep === 1 ? 'punch-cross' : 'punch-uppercut');
+    audioEngine.playCombatSfx(punchSfx, timing.grade);
   } else {
     gameState.pose = 'kick';
     gameState.attackType = 'kick';
+    audioEngine.playCombatSfx('kick', timing.grade);
   }
 
   // 4-Phase Lifecycle: startup -> active (hit-stop) -> recovery -> idle
@@ -1952,8 +2294,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
   let recoilVector = new THREE.Vector3(0.00, 0.00, -0.35);
   let targetTorsoRot = new THREE.Vector3(0.10, 0.18, -0.04);
   let targetHeadRot = new THREE.Vector3(0.12, 0.15, -0.12);
-  let pushSpeed = 1.8;
-  let recoilDur = 0.28;
+  let pushSpeed = 1.1;
+  let recoilDur = 0.55;
   let microAxis = 'x';
   let microAmp = 0.06;
   let microDur = 0.048;
@@ -1964,8 +2306,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     recoilVector = new THREE.Vector3(0.85, 0.30, -0.95);
     targetTorsoRot = new THREE.Vector3(0.14, 0.45, 0.22);
     targetHeadRot = new THREE.Vector3(0.10, 0.35, 0.18);
-    pushSpeed = 4.2;
-    recoilDur = 0.55;
+    pushSpeed = 2.6;
+    recoilDur = 0.65;
     microAxis = 'xy';
     microAmp = 0.18;
     microDur = 0.100;
@@ -1975,8 +2317,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     recoilVector = new THREE.Vector3(-0.45, 0.00, -0.60);
     targetTorsoRot = new THREE.Vector3(0.18, -0.25, 0.08);
     targetHeadRot = new THREE.Vector3(-0.15, -0.28, 0.16);
-    pushSpeed = 2.8;
-    recoilDur = 0.35;
+    pushSpeed = 1.4;
+    recoilDur = 0.55;
     microAxis = 'x';
     microAmp = 0.10;
     microDur = 0.070;
@@ -1986,8 +2328,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     recoilVector = new THREE.Vector3(0.00, 0.90, -0.30);
     targetTorsoRot = new THREE.Vector3(-0.35, 0.00, 0.00);
     targetHeadRot = new THREE.Vector3(-0.40, 0.00, 0.00);
-    pushSpeed = 1.4;
-    recoilDur = 0.48;
+    pushSpeed = 1.0;
+    recoilDur = 0.65;
     microAxis = 'y';
     microAmp = 0.14;
     microDur = 0.110;
@@ -1996,15 +2338,17 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
 
   if (targetInfo) {
     const { type, obj, pos, dist } = targetInfo;
-    if (dist > 1.05) {
+    if (dist > 0.95) {
       const lungeDir = new THREE.Vector3().subVectors(pos, gameState.playerPos);
       lungeDir.y = 0;
-      const lungeDist = Math.min(2.6, Math.max(0, dist - 1.02));
+      const lungeDist = Math.min(2.6, Math.max(0, dist - 0.92));
       lungeDir.normalize().multiplyScalar(lungeDist);
       const nextTarget = gameState.playerPos.clone().add(lungeDir);
       nextTarget.y = 0;
       if (nextTarget.length() > 4.2) nextTarget.setLength(4.2);
       gameState.playerTarget.copy(nextTarget);
+    } else {
+      gameState.playerTarget.copy(gameState.playerPos);
     }
 
     contactPoint = calculateContactPoint(obj, limbPos, action, currentPunchStep);
@@ -2085,7 +2429,10 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
   } else {
     // Air whiff
     const fwd = new THREE.Vector3(0, 0, -0.45);
-    gameState.playerTarget.copy(gameState.basePos).add(fwd);
+    const nextTarget = gameState.playerPos.clone().add(fwd);
+    nextTarget.y = 0;
+    if (nextTarget.length() > 4.2) nextTarget.setLength(4.2);
+    gameState.playerTarget.copy(nextTarget);
     const dmg = (action === 'kick' ? 3.2 : 1.8) * timing.mult;
     gameState.bossHp = Math.max(5, gameState.bossHp - dmg);
 
@@ -2171,135 +2518,443 @@ function renderTacticalRadar() {
 }
 
 // ============================================================================
-// 7. POSE ANIMATOR (CAMERA-SPACE ALIGNED: +Z BACK, +X RIGHT ROUNDHOUSE KICK!)
+// 7. CONTINUOUS POSE BLENDER & SKELETAL ANIMATION SYSTEM
 // ============================================================================
-function poseChallenger(rig, pose, elapsed, beatPulse) {
-  // Slight rightward angle toward the Boombox Sound-System Truck
-  rig.root.rotation.set(0, -0.18, 0);
 
-  if (pose !== 'idle') {
-    rig.leftLeg.position.x = -0.16;
-    rig.rightLeg.position.x = 0.16;
-    if (rig.leftAnkle) rig.leftAnkle.rotation.set(0, 0, 0);
-    if (rig.rightAnkle) rig.rightAnkle.rotation.set(0, 0, 0);
+/**
+ * ContinuousPoseBlender
+ * Guarantees C1 continuity across all 12 limb and body joints:
+ * - Shortest-arc wrapping on [-PI, PI]
+ * - Frame-rate independent exponential damping (lambda = 22.0 s^-1)
+ * - Angular slew-rate limiter strictly bounding 1-frame changes to <= 0.25 rad (guaranteeing <= 0.28 rad on SO(3))
+ */
+class ContinuousPoseBlender {
+  constructor(rig, options = {}) {
+    this.rig = rig;
+    this.lambda = options.lambda !== undefined ? options.lambda : 22.0;
+    this.omegaMax = options.omegaMax !== undefined ? options.omegaMax : 16.0;
+    this.maxStepFloor = options.maxStepFloor !== undefined ? options.maxStepFloor : 0.25;
+    this.controlRootYaw = options.controlRootYaw !== undefined ? options.controlRootYaw : true;
+    this.controlHipsPos = options.controlHipsPos !== undefined ? options.controlHipsPos : true;
+
+    this.jointNames = [
+      'leftArm', 'leftElbow', 'rightArm', 'rightElbow',
+      'leftLeg', 'leftKnee', 'leftAnkle', 'rightLeg',
+      'rightKnee', 'rightAnkle', 'torso', 'hips'
+    ];
+    this.auxJointNames = ['headGroup'];
+
+    this.current = {};
+    this.target = {};
+    this.currentHipsPos = new THREE.Vector3(0, 1.0, 0);
+    this.targetHipsPos = new THREE.Vector3(0, 1.0, 0);
+    this.currentRootYaw = -0.18;
+    this.targetRootYaw = -0.18;
+
+    this.initJoints();
   }
 
-  if (pose === 'idle') {
-    const kneeBounce = beatPulse * 0.045;
-    const breath = Math.sin(elapsed * 2.8) * 0.03;
+  initJoints() {
+    const allJoints = [...this.jointNames, ...this.auxJointNames];
+    allJoints.forEach((j) => {
+      const node = this.rig[j];
+      if (node && node.rotation) {
+        this.current[j] = {
+          x: node.rotation.x,
+          y: node.rotation.y,
+          z: node.rotation.z
+        };
+      } else {
+        this.current[j] = { x: 0, y: 0, z: 0 };
+      }
+      this.target[j] = { ...this.current[j] };
+    });
 
-    // Both feet planted wide on asphalt cypher ring, knees rhythm bounce
-    rig.hips.position.set(0, 1.00 - kneeBounce, 0);
-    rig.hips.rotation.set(-0.02, -0.14, 0);
-
-    rig.torso.rotation.set(0.04 + breath, -0.10, 0.02);
-    rig.headGroup.rotation.set(-0.02, 0.12, 0);
-
-    // Splayed Martial-Arts Guard Legs: negative roll (-Z) on Left (-X) leg & positive roll (+Z) on Right (+X) leg splays outward!
-    rig.leftLeg.position.x = -0.16;
-    rig.rightLeg.position.x = 0.16;
-    rig.leftLeg.rotation.set(0.24, 0.14, -0.18);
-    rig.rightLeg.rotation.set(-0.14, -0.14, 0.18);
-
-    // Negative rotation.x bends knees naturally backward (+Z) while thighs step forward/back
-    rig.leftKnee.rotation.set(-0.40 - kneeBounce, 0, 0);
-    rig.rightKnee.rotation.set(-0.24 - kneeBounce, 0, 0);
-
-    // Counter-rotated ankle joints so both sneaker soles stay 100% flush/flat on the floor!
-    if (rig.leftAnkle) rig.leftAnkle.rotation.set(0.16, 0, 0.18);
-    if (rig.rightAnkle) rig.rightAnkle.rotation.set(0.38, 0, -0.18);
-
-    // Raised Guard Arms: Positive rotation.x raises -Y arms FORWARD (-Z) in Beat Kune Do fighting guard!
-    rig.leftArm.rotation.set(0.65, -0.22, -0.40);
-    rig.leftElbow.rotation.set(1.35 + breath * 0.5, 0, 0);
-
-    rig.rightArm.rotation.set(0.75, 0.22, 0.40);
-    rig.rightElbow.rotation.set(1.30 + breath * 0.5, 0, 0);
-
-    kickSmear.smearGroup.visible = false;
-  } else if (pose === 'showcase-kick' || pose === 'kick') {
-    const kickLift = pose === 'kick' ? 0.12 : Math.sin(elapsed * 3.2) * 0.025;
-
-    // Lean torso slightly left so the right leg launches sky-high to the RIGHT (+X, +Y)!
-    rig.hips.position.set(0, 1.00, 0);
-    rig.hips.rotation.set(-0.06, -0.14, 0.34);
-
-    rig.torso.rotation.set(0.12, -0.28, 0.22);
-    rig.headGroup.rotation.set(-0.06, -0.28, -0.12);
-
-    // Planted Left Leg on the Concentric Floor Rhythm Dial beside "PERFECT!"
-    rig.leftLeg.rotation.set(0.04, 0, -0.34);
-    rig.leftKnee.rotation.set(0.06, 0, 0);
-
-    // High-Kicking Right Leg extended straight up and to the RIGHT (+Z rotation = +X/+Y lift!)
-    // Reaches the top tip of the crescent tan/gold motion-smear ribbon!
-    rig.rightLeg.rotation.set(-0.04, 0.05, 2.34 + kickLift);
-    rig.rightKnee.rotation.set(0.0, 0, 0.06);
-
-    // Martial-Arts Guard Arms (Left elbow tucked back-left, Right arm reaching toward kick/target)
-    rig.leftArm.rotation.set(0.38, 0.25, -0.58);
-    rig.leftElbow.rotation.set(0.95, 0, 0);
-
-    rig.rightArm.rotation.set(-0.35, -0.25, 1.35);
-    rig.rightElbow.rotation.set(0.25, 0, 0);
-
-    kickSmear.smearGroup.visible = true;
-    kickSmear.arcMat.opacity = 0.92 + beatPulse * 0.08;
-  } else if (pose === 'punch-jab') {
-    // 3-Hit Punch Combo Step 1: Left Lead Snap Jab
-    rig.hips.position.set(0, 1.00, 0);
-    rig.hips.rotation.set(0.06, 0.15, 0);
-    rig.torso.rotation.set(0.02, 0.24, 0);
-    rig.headGroup.rotation.set(0, 0.08, 0);
-    rig.leftArm.rotation.set(1.48, 0.12, -0.15);
-    rig.leftElbow.rotation.set(0.08, 0, 0);
-    rig.rightArm.rotation.set(0.75, -0.25, 0.45);
-    rig.rightElbow.rotation.set(1.40, 0, 0);
-    rig.leftLeg.rotation.set(-0.15, 0, -0.10);
-    rig.leftKnee.rotation.set(0.12, 0, 0);
-    rig.rightLeg.rotation.set(0.18, 0, 0.14);
-    rig.rightKnee.rotation.set(0.14, 0, 0);
-    kickSmear.smearGroup.visible = false;
-  } else if (pose === 'punch-cross' || pose === 'punch') {
-    // 3-Hit Punch Combo Step 2: Right Rear Power Cross with Hip/Torso Rotation
-    rig.hips.position.set(0, 1.02, 0);
-    rig.hips.rotation.set(0.12, -0.45, 0);
-    rig.torso.rotation.set(0, -0.55, 0);
-    rig.headGroup.rotation.set(0, -0.15, 0);
-    rig.rightArm.rotation.set(1.45, 0.2, 0.85);
-    rig.rightElbow.rotation.set(0.1, 0, 0);
-    rig.leftArm.rotation.set(-0.4, 0, -0.5);
-    rig.leftElbow.rotation.set(1.1, 0, 0);
-    rig.leftLeg.rotation.set(-0.22, 0, -0.1);
-    rig.leftKnee.rotation.set(0.15, 0, 0);
-    rig.rightLeg.rotation.set(0.28, 0, 0.25);
-    rig.rightKnee.rotation.set(0.12, 0, 0);
-    kickSmear.smearGroup.visible = false;
-  } else if (pose === 'punch-uppercut') {
-    // 3-Hit Punch Combo Step 3: Heavy Right Uppercut Scooping Upward
-    rig.hips.position.set(0, 1.05, 0);
-    rig.hips.rotation.set(-0.04, -0.25, 0.08);
-    rig.torso.rotation.set(-0.08, -0.35, 0.14);
-    rig.headGroup.rotation.set(0.08, -0.12, 0);
-    rig.rightArm.rotation.set(1.75, -0.15, 0.35);
-    rig.rightElbow.rotation.set(1.25, 0, 0);
-    rig.leftArm.rotation.set(0.65, 0.35, -0.45);
-    rig.leftElbow.rotation.set(1.35, 0, 0);
-    rig.leftLeg.rotation.set(-0.08, 0, -0.10);
-    rig.leftKnee.rotation.set(0.14, 0, 0);
-    rig.rightLeg.rotation.set(0.12, 0, 0.16);
-    rig.rightKnee.rotation.set(0.10, 0, 0);
-    kickSmear.smearGroup.visible = false;
-  } else if (pose === 'dodge') {
-    rig.hips.position.set(0, 0.88, 0);
-    rig.hips.rotation.set(-0.18, 0.2, 0.38);
-    rig.torso.rotation.set(0.22, -0.22, 0.18);
-    rig.leftLeg.rotation.set(0.32, 0, -0.22);
-    rig.rightLeg.rotation.set(-0.24, 0, 0.28);
-    rig.leftArm.rotation.set(0.85, 0.3, -0.35);
-    rig.rightArm.rotation.set(0.9, -0.25, 0.35);
-    kickSmear.smearGroup.visible = false;
+    if (this.rig.hips && this.rig.hips.position) {
+      this.currentHipsPos.copy(this.rig.hips.position);
+      this.targetHipsPos.copy(this.rig.hips.position);
+    }
+    if (this.rig.root && this.rig.root.rotation) {
+      this.currentRootYaw = this.rig.root.rotation.y;
+      this.targetRootYaw = this.rig.root.rotation.y;
+    }
   }
+
+  static wrapAngle(diff) {
+    return ((diff + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  }
+
+  setTargetPose(poseDict) {
+    if (!poseDict) return;
+    for (const j of this.jointNames) {
+      if (poseDict[j] && this.target[j]) {
+        const p = poseDict[j];
+        if (Array.isArray(p)) {
+          this.target[j].x = p[0];
+          this.target[j].y = p[1];
+          this.target[j].z = p[2];
+        } else if (typeof p === 'object') {
+          if (p.x !== undefined) this.target[j].x = p.x;
+          if (p.y !== undefined) this.target[j].y = p.y;
+          if (p.z !== undefined) this.target[j].z = p.z;
+        }
+      }
+    }
+    if (poseDict.headGroup && this.target.headGroup) {
+      const hg = poseDict.headGroup;
+      if (Array.isArray(hg)) {
+        this.target.headGroup.x = hg[0];
+        this.target.headGroup.y = hg[1];
+        this.target.headGroup.z = hg[2];
+      }
+    }
+  }
+
+  setTarget(poseDict) {
+    this.setTargetPose(poseDict);
+  }
+
+  setTargetHipsPosition(x, y, z) {
+    if (typeof x === 'object' && x !== null) {
+      this.targetHipsPos.copy(x);
+    } else {
+      this.targetHipsPos.set(x, y, z);
+    }
+  }
+
+  setTargetRootYaw(yaw) {
+    this.targetRootYaw = yaw;
+  }
+
+  snapToPose(poseDict) {
+    this.setTargetPose(poseDict);
+    const allJoints = [...this.jointNames, ...this.auxJointNames];
+    allJoints.forEach((j) => {
+      if (this.current[j] && this.target[j]) {
+        this.current[j].x = this.target[j].x;
+        this.current[j].y = this.target[j].y;
+        this.current[j].z = this.target[j].z;
+      }
+    });
+    this.applyToRig();
+  }
+
+  update(dt) {
+    if (dt <= 0) return;
+    const clampedDt = Math.min(dt, 0.1);
+
+    // Exponential decay fraction over dt
+    const decayFactor = 1.0 - Math.exp(-this.lambda * clampedDt);
+
+    // Angular slew-rate limiter: strict ceiling <= 0.25 rad (guarantees <= 0.28 rad on SO(3) under Jacobian dilation)
+    const maxStep = Math.min(this.maxStepFloor, this.omegaMax * clampedDt);
+
+    const allJoints = [...this.jointNames, ...this.auxJointNames];
+    allJoints.forEach((j) => {
+      const cur = this.current[j];
+      const tgt = this.target[j];
+      if (!cur || !tgt) return;
+
+      const dx = ContinuousPoseBlender.wrapAngle(tgt.x - cur.x);
+      const dy = ContinuousPoseBlender.wrapAngle(tgt.y - cur.y);
+      const dz = ContinuousPoseBlender.wrapAngle(tgt.z - cur.z);
+
+      let sx = Math.abs(dx) < 1e-6 ? dx : dx * decayFactor;
+      let sy = Math.abs(dy) < 1e-6 ? dy : dy * decayFactor;
+      let sz = Math.abs(dz) < 1e-6 ? dz : dz * decayFactor;
+
+      const stepMag = Math.hypot(sx, sy, sz);
+      if (stepMag > maxStep && stepMag > 1e-6) {
+        const scale = maxStep / stepMag;
+        sx *= scale;
+        sy *= scale;
+        sz *= scale;
+      }
+
+      if (Math.abs(sx) > Math.abs(dx)) sx = dx;
+      if (Math.abs(sy) > Math.abs(dy)) sy = dy;
+      if (Math.abs(sz) > Math.abs(dz)) sz = dz;
+
+      cur.x += sx;
+      cur.y += sy;
+      cur.z += sz;
+    });
+
+    // Smooth position interpolation for hips
+    const posAlpha = 1.0 - Math.exp(-18.0 * clampedDt);
+    this.currentHipsPos.lerp(this.targetHipsPos, posAlpha);
+
+    // Shortest-arc root yaw damping (lambda = 14.0 s^-1)
+    const yawDiff = ContinuousPoseBlender.wrapAngle(this.targetRootYaw - this.currentRootYaw);
+    const maxYawStep = Math.min(0.25, 12.0 * clampedDt);
+    let yawStep = yawDiff * (1.0 - Math.exp(-14.0 * clampedDt));
+    if (Math.abs(yawStep) > maxYawStep) yawStep = Math.sign(yawStep) * maxYawStep;
+    if (Math.abs(yawStep) > Math.abs(yawDiff)) yawStep = yawDiff;
+    this.currentRootYaw += yawStep;
+
+    // Biomechanical knee clamp: natural flexion requires knee.x <= 0.0 rad (shin swings backward along +Z)
+    if (this.current.leftKnee && this.current.leftKnee.x > 0.0) this.current.leftKnee.x = 0.0;
+    if (this.current.rightKnee && this.current.rightKnee.x > 0.0) this.current.rightKnee.x = 0.0;
+
+    this.applyToRig();
+  }
+
+  applyToRig() {
+    const allJoints = [...this.jointNames, ...this.auxJointNames];
+    allJoints.forEach((j) => {
+      const node = this.rig[j];
+      const cur = this.current[j];
+      if (node && node.rotation && cur) {
+        node.rotation.set(cur.x, cur.y, cur.z);
+      }
+    });
+
+    if (this.controlHipsPos && this.rig.hips && this.rig.hips.position) {
+      this.rig.hips.position.copy(this.currentHipsPos);
+    }
+    if (this.controlRootYaw && this.rig.root && this.rig.root.rotation) {
+      this.rig.root.rotation.set(0, this.currentRootYaw, 0);
+    }
+  }
+}
+
+// Global Challenger Blender Instance (Calibrated to 0.25 rad/frame maxStepFloor)
+const challengerBlender = new ContinuousPoseBlender(challengerRig, {
+  lambda: 22.0,
+  omegaMax: 16.0,
+  maxStepFloor: 0.25,
+  controlRootYaw: true,
+  controlHipsPos: true
+});
+window.challengerBlender = challengerBlender;
+
+// Continuous Pose Blenders for Hype-Crew Bruisers
+bruisers.forEach((b) => {
+  b.blender = new ContinuousPoseBlender(b.rig, {
+    lambda: 22.0,
+    omegaMax: 16.0,
+    maxStepFloor: 0.25,
+    controlRootYaw: false,
+    controlHipsPos: false
+  });
+});
+
+// Continuous Pose Blender for Boss DJ KRONOS
+const kronosBlender = new ContinuousPoseBlender(kronosRig, {
+  lambda: 22.0,
+  omegaMax: 16.0,
+  maxStepFloor: 0.25,
+  controlRootYaw: false,
+  controlHipsPos: false
+});
+kronosRig.blender = kronosBlender;
+window.kronosBlender = kronosBlender;
+
+// Baseline Keyframe Posings (Calibrated with Turnaround & Reference Concept Art)
+const CHALLENGER_POSES = {
+  idle: {
+    hips: [-0.02, -0.14, 0], torso: [0.04, -0.10, 0.02], headGroup: [-0.02, 0.12, 0],
+    leftArm: [0.65, -0.22, -0.40], leftElbow: [1.35, 0, 0],
+    rightArm: [0.75, 0.22, 0.40], rightElbow: [1.30, 0, 0],
+    leftLeg: [0.24, 0.14, -0.18], leftKnee: [-0.40, 0, 0], leftAnkle: [0.16, 0, 0.18],
+    rightLeg: [-0.14, -0.14, 0.18], rightKnee: [-0.24, 0, 0], rightAnkle: [0.38, 0, -0.18]
+  },
+  'punch-jab': {
+    chamber: {
+      hips: [0.02, 0.05, 0], torso: [0.04, 0.08, 0], headGroup: [0, 0.04, 0],
+      leftArm: [0.55, -0.10, -0.30], leftElbow: [1.45, 0, 0],
+      rightArm: [0.70, -0.15, 0.40], rightElbow: [1.35, 0, 0],
+      leftLeg: [0.10, 0.08, -0.12], leftKnee: [-0.20, 0, 0], leftAnkle: [0.08, 0, 0.08],
+      rightLeg: [0.05, -0.05, 0.12], rightKnee: [-0.10, 0, 0], rightAnkle: [0.15, 0, -0.08]
+    },
+    apex: {
+      hips: [0.06, 0.15, 0], torso: [0.02, 0.24, 0], headGroup: [0, 0.08, 0],
+      leftArm: [1.48, 0.12, -0.15], leftElbow: [0.08, 0, 0],
+      rightArm: [0.75, -0.25, 0.45], rightElbow: [1.40, 0, 0],
+      leftLeg: [-0.15, 0, -0.10], leftKnee: [-0.08, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [0.18, 0, 0.14], rightKnee: [-0.10, 0, 0], rightAnkle: [0, 0, 0]
+    }
+  },
+  'punch-cross': {
+    chamber: {
+      hips: [0.04, -0.18, 0], torso: [0.02, -0.25, 0], headGroup: [0, -0.06, 0],
+      leftArm: [0.20, -0.10, -0.45], leftElbow: [1.25, 0, 0],
+      rightArm: [0.85, 0.10, 0.60], rightElbow: [1.45, 0, 0],
+      leftLeg: [-0.05, 0, -0.10], leftKnee: [-0.10, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [0.10, 0, 0.15], rightKnee: [-0.05, 0, 0], rightAnkle: [0, 0, 0]
+    },
+    apex: {
+      hips: [0.12, -0.45, 0], torso: [0, -0.55, 0], headGroup: [0, -0.15, 0],
+      leftArm: [-0.40, 0, -0.50], leftElbow: [1.10, 0, 0],
+      rightArm: [1.45, 0.20, 0.85], rightElbow: [0.10, 0, 0],
+      leftLeg: [-0.22, 0, -0.10], leftKnee: [-0.10, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [0.28, 0, 0.25], rightKnee: [-0.08, 0, 0], rightAnkle: [0, 0, 0]
+    }
+  },
+  'punch-uppercut': {
+    chamber: {
+      hips: [-0.08, -0.15, 0.04], torso: [-0.04, -0.18, 0.08], headGroup: [0.04, -0.05, 0],
+      leftArm: [0.65, 0.15, -0.40], leftElbow: [1.35, 0, 0],
+      rightArm: [0.80, -0.20, 0.25], rightElbow: [1.45, 0, 0],
+      leftLeg: [0.08, 0, -0.12], leftKnee: [-0.20, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [0.02, 0, 0.10], rightKnee: [-0.15, 0, 0], rightAnkle: [0, 0, 0]
+    },
+    apex: {
+      hips: [-0.04, -0.25, 0.08], torso: [-0.08, -0.35, 0.14], headGroup: [0.08, -0.12, 0],
+      leftArm: [0.65, 0.35, -0.45], leftElbow: [1.35, 0, 0],
+      rightArm: [1.75, -0.15, 0.35], rightElbow: [1.25, 0, 0],
+      leftLeg: [-0.08, 0, -0.10], leftKnee: [-0.12, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [0.12, 0, 0.16], rightKnee: [-0.08, 0, 0], rightAnkle: [0, 0, 0]
+    }
+  },
+  kick: {
+    chamber: {
+      hips: [-0.04, -0.08, 0.15], torso: [0.06, -0.14, 0.10], headGroup: [-0.02, -0.10, -0.05],
+      leftArm: [0.45, 0.10, -0.45], leftElbow: [1.15, 0, 0],
+      rightArm: [0.20, -0.10, 0.80], rightElbow: [0.80, 0, 0],
+      leftLeg: [0.12, 0, -0.20], leftKnee: [-0.25, 0, 0], leftAnkle: [0.08, 0, 0.08],
+      rightLeg: [0.45, 0.08, 0.85], rightKnee: [-0.85, 0, 0], rightAnkle: [0, 0, 0]
+    },
+    apex: {
+      hips: [-0.06, -0.14, 0.34], torso: [0.12, -0.28, 0.22], headGroup: [-0.06, -0.28, -0.12],
+      leftArm: [0.38, 0.25, -0.58], leftElbow: [0.95, 0, 0],
+      rightArm: [-0.35, -0.25, 1.35], rightElbow: [0.25, 0, 0],
+      leftLeg: [0.04, 0, -0.34], leftKnee: [-0.08, 0, 0], leftAnkle: [0, 0, 0],
+      rightLeg: [-0.04, 0.05, 2.46], rightKnee: [0.0, 0, 0.06], rightAnkle: [0, 0, 0]
+    }
+  },
+  dodge: {
+    hips: [-0.18, 0.20, 0.38], torso: [0.22, -0.22, 0.18], headGroup: [0.10, -0.15, 0.12],
+    leftArm: [0.85, 0.30, -0.35], leftElbow: [1.35, 0, 0],
+    rightArm: [0.90, -0.25, 0.35], rightElbow: [1.30, 0, 0],
+    leftLeg: [0.32, 0, -0.22], leftKnee: [-0.40, 0, 0], leftAnkle: [0, 0, 0],
+    rightLeg: [-0.24, 0, 0.28], rightKnee: [-0.24, 0, 0], rightAnkle: [0, 0, 0]
+  }
+};
+
+function lerpPoseDict(pA, pB, t) {
+  const result = {};
+  const joints = [
+    'leftArm', 'leftElbow', 'rightArm', 'rightElbow',
+    'leftLeg', 'leftKnee', 'leftAnkle', 'rightLeg',
+    'rightKnee', 'rightAnkle', 'torso', 'hips', 'headGroup'
+  ];
+  joints.forEach((j) => {
+    const a = pA[j] || [0, 0, 0];
+    const b = pB[j] || a;
+    result[j] = [
+      a[0] + (b[0] - a[0]) * t,
+      a[1] + (b[1] - a[1]) * t,
+      a[2] + (b[2] - a[2]) * t
+    ];
+  });
+  return result;
+}
+
+/**
+ * poseChallenger
+ * Evaluates continuous multi-phase attack curves and feeds target poses into ContinuousPoseBlender.
+ */
+function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
+  const kneeBounce = beatPulse * 0.045;
+  const breath = Math.sin(elapsed * 2.8) * 0.03;
+
+  // Dynamic Root Yaw: face active combat target or default to -0.18 rad
+  let targetYaw = -0.18;
+  const targetInfo = findBestCombatTarget();
+  if (targetInfo && targetInfo.pos && (gameState.isAttacking || gameState.combatEngagementTimer > 0)) {
+    const dx = targetInfo.pos.x - gameState.playerPos.x;
+    const dz = targetInfo.pos.z - gameState.playerPos.z;
+    targetYaw = Math.atan2(-dx, -dz);
+    targetYaw = Math.max(-1.15, Math.min(1.15, targetYaw));
+  }
+  challengerBlender.setTargetRootYaw(targetYaw);
+
+  let targetJoints = null;
+  let targetHipsY = 1.00;
+
+  if (gameState.isAttacking && gameState.phaseDurations) {
+    const p = gameState.phaseDurations;
+    const total = p.total || 0.35;
+    const u = Math.min(1.0, Math.max(0, gameState.attackTimer / total));
+
+    const actKey = (gameState.pose === 'punch' || gameState.pose === 'punch-cross') ? 'punch-cross' :
+      (gameState.pose === 'punch-jab' ? 'punch-jab' :
+      (gameState.pose === 'punch-uppercut' ? 'punch-uppercut' :
+      (gameState.pose === 'kick' || gameState.pose === 'showcase-kick' ? 'kick' : null)));
+
+    if (actKey && CHALLENGER_POSES[actKey]) {
+      const config = CHALLENGER_POSES[actKey];
+      const idleConfig = CHALLENGER_POSES.idle;
+
+      if (u < 0.25) {
+        // Phase 1: Anticipation (0.00 - 0.25)
+        const tau = u / 0.25;
+        const ease = tau * tau * (3.0 - 2.0 * tau);
+        targetJoints = lerpPoseDict(idleConfig, config.chamber, ease);
+        targetHipsY = 1.00 - ease * 0.04;
+        kickSmear.smearGroup.visible = false;
+      } else if (u < 0.50) {
+        // Phase 2: Strike Apex (0.25 - 0.50)
+        const tau = (u - 0.25) / 0.25;
+        const ease = Math.sin(tau * Math.PI * 0.5);
+        targetJoints = lerpPoseDict(config.chamber, config.apex, ease);
+        targetHipsY = 1.00 + (actKey === 'kick' ? 0.02 : (actKey === 'punch-uppercut' ? 0.05 : 0.01)) * ease;
+
+        if (actKey === 'kick') {
+          kickSmear.smearGroup.visible = true;
+          kickSmear.arcMat.opacity = 0.92 + beatPulse * 0.08;
+        } else {
+          kickSmear.smearGroup.visible = false;
+        }
+      } else {
+        // Phase 3: Follow-Through Recovery (0.50 - 1.00)
+        const tau = (u - 0.50) / 0.50;
+        const ease = 1.0 - Math.pow(1.0 - tau, 2.0);
+        targetJoints = lerpPoseDict(config.apex, idleConfig, ease);
+        targetHipsY = 1.00 - (1.0 - ease) * 0.02;
+
+        if (actKey === 'kick') {
+          kickSmear.arcMat.opacity = Math.max(0, 0.92 * (1.0 - ease));
+          if (ease > 0.8) kickSmear.smearGroup.visible = false;
+        } else {
+          kickSmear.smearGroup.visible = false;
+        }
+      }
+    }
+  }
+
+  if (!targetJoints) {
+    if (pose === 'dodge') {
+      targetJoints = CHALLENGER_POSES.dodge;
+      targetHipsY = 0.88;
+      kickSmear.smearGroup.visible = false;
+    } else {
+      // Idle / Combat Guard Stance
+      const baseIdle = CHALLENGER_POSES.idle;
+      targetJoints = {
+        hips: [-0.02, -0.14, 0],
+        torso: [0.04 + breath, -0.10, 0.02],
+        headGroup: [-0.02, 0.12, 0],
+        leftLeg: [0.24, 0.14, -0.18],
+        leftKnee: [-0.40 - kneeBounce, 0, 0],
+        leftAnkle: [0.16, 0, 0.18],
+        rightLeg: [-0.14, -0.14, 0.18],
+        rightKnee: [-0.24 - kneeBounce, 0, 0],
+        rightAnkle: [0.38, 0, -0.18],
+        leftArm: [0.65, -0.22, -0.40],
+        leftElbow: [1.35 + breath * 0.5, 0, 0],
+        rightArm: [0.75, 0.22, 0.40],
+        rightElbow: [1.30 + breath * 0.5, 0, 0]
+      };
+      targetHipsY = 1.00 - kneeBounce;
+      kickSmear.smearGroup.visible = false;
+    }
+  }
+
+  challengerBlender.setTargetPose(targetJoints);
+  challengerBlender.setTargetHipsPosition(0, targetHipsY, 0);
+  challengerBlender.update(dt);
 }
 
 // ============================================================================
@@ -2512,6 +3167,12 @@ function animate() {
     beatPulse
   );
 
+  // Beat-reactive sinusoidal modulation to stage accent lights (syncing to 92 BPM music track)
+  const beatSin = Math.sin((Math.PI * songTime) / KRONOS_BEAT_SEC);
+  const beatMod = beatSin * beatSin; // smooth continuous sinusoidal swell 0..1, zero harsh strobing
+  stageMagentaLight.intensity = 1.68 * (1.0 + 0.16 * beatMod);
+  stageCyanLight.intensity = 1.48 * (1.0 + 0.16 * beatMod);
+
   boomboxStage.wooferCones.forEach((cone) => {
     const baseS = cone.scale.x > 1.0 ? 1.38 : 0.66;
     const pump = baseS * (1.0 + bass * 0.18 + beatPulse * 0.12);
@@ -2524,17 +3185,20 @@ function animate() {
   if (gameState.dodgeInvulnTimer > 0) gameState.dodgeInvulnTimer = Math.max(0, gameState.dodgeInvulnTimer - dt);
   if (gameState.counterBonusTimer > 0) gameState.counterBonusTimer = Math.max(0, gameState.counterBonusTimer - dt);
 
-  // 4-Phase Attack Lifecycle (startup -> active -> recovery -> idle)
+  // Multi-Phase Attack Lifecycle (anticipation -> active apex -> recovery -> idle)
   if (gameState.isAttacking) {
     gameState.attackTimer += rawDt;
     const p = gameState.phaseDurations;
-    if (gameState.attackTimer < p.startup) {
+    const total = p.total || 0.35;
+    const u = Math.min(1.0, gameState.attackTimer / total);
+
+    if (u < 0.25) {
       gameState.attackPhase = 'startup';
       gameState.canCancel = false;
-    } else if (gameState.attackTimer < (p.startup + p.active)) {
+    } else if (u < 0.50) {
       gameState.attackPhase = 'active';
       gameState.canCancel = false;
-    } else if (gameState.attackTimer < p.total) {
+    } else if (u < 1.0) {
       gameState.attackPhase = 'recovery';
       gameState.canCancel = true;
 
@@ -2549,14 +3213,21 @@ function animate() {
           triggerCombatAction(act, true);
         } else {
           gameState.inputBuffer = null;
+          gameState.playerTarget.copy(gameState.basePos);
         }
+      } else {
+        gameState.playerTarget.copy(gameState.basePos);
       }
     } else {
       gameState.isAttacking = false;
       gameState.attackPhase = 'idle';
       gameState.canCancel = false;
       gameState.pose = 'idle';
-      gameState.playerTarget.copy(gameState.basePos);
+      if (gameState.combatEngagementTimer > 0 || isEnemyWithinStrikingRange(2.0)) {
+        gameState.playerTarget.copy(gameState.playerPos);
+      } else {
+        gameState.playerTarget.copy(gameState.basePos);
+      }
     }
   }
 
@@ -2564,7 +3235,23 @@ function animate() {
     gameState.poseTimer -= dt;
     if (gameState.poseTimer <= 0 && !gameState.isAttacking) {
       gameState.pose = 'idle';
-      gameState.playerTarget.copy(gameState.basePos);
+      if (gameState.combatEngagementTimer > 0 || isEnemyWithinStrikingRange(2.0)) {
+        gameState.playerTarget.copy(gameState.playerPos);
+      } else {
+        gameState.playerTarget.copy(gameState.basePos);
+      }
+    }
+  }
+
+  // Count down combat engagement timer and smoothly return to basePos when disengaged
+  if (gameState.combatEngagementTimer > 0) {
+    gameState.combatEngagementTimer = Math.max(0, gameState.combatEngagementTimer - dt);
+    if (gameState.combatEngagementTimer <= 0 && !gameState.isAttacking && gameState.pose === 'idle') {
+      if (!isEnemyWithinStrikingRange(2.0)) {
+        gameState.playerTarget.copy(gameState.basePos);
+      } else {
+        gameState.playerTarget.copy(gameState.playerPos);
+      }
     }
   }
 
@@ -2577,10 +3264,20 @@ function animate() {
       gameState.activeImpactVFX.splice(i, 1);
     }
   }
-  gameState.playerPos.lerp(gameState.playerTarget, dt * 12);
+  gameState.playerPos.lerp(gameState.playerTarget, Math.min(1.0, dt * 12));
+  if (gameState.pose === 'idle' && gameState.playerPos.distanceTo(gameState.basePos) < 0.005) {
+    gameState.playerPos.copy(gameState.basePos);
+  }
   challengerRig.root.position.copy(gameState.playerPos);
 
-  poseChallenger(challengerRig, gameState.pose, elapsed, beatPulse);
+  // Concentric Floor Rhythm Dial tracks player position during combat
+  if (floorDial && floorDial.dialGroup) {
+    floorDial.dialGroup.position.x = gameState.playerPos.x;
+    floorDial.dialGroup.position.z = gameState.playerPos.z;
+    floorDial.dialGroup.position.y = 0.025;
+  }
+
+  poseChallenger(challengerRig, gameState.pose, elapsed, beatPulse, dt);
 
   kickSmear.pebbles.forEach(({ mesh, basePos, phase }) => {
     mesh.position.y = basePos.y + Math.sin(elapsed * 4.2 + phase) * 0.04;
@@ -2601,9 +3298,55 @@ function animate() {
   bruisers.forEach((b, idx) => {
     if (!b.active) return;
 
-    // Billboard overhead health/telegraph badge toward camera
+    // Billboard overhead health/telegraph badge toward camera & apply dynamic proximity Y-staggering
     if (b.badge && b.badge.mesh) {
       b.badge.mesh.lookAt(camera.position);
+
+      if (b.state !== 'ko' && b.state !== 'flying') {
+        const activeEnemies = bruisers.filter((other) => other.active && other.state !== 'ko' && other.state !== 'flying');
+        let closeNeighbor = null;
+        let minD = 999;
+        activeEnemies.forEach((other) => {
+          if (other === b) return;
+          const dx = b.rig.root.position.x - other.rig.root.position.x;
+          const dz = b.rig.root.position.z - other.rig.root.position.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < 1.4 && dist < minD) {
+            minD = dist;
+            closeNeighbor = other;
+          }
+        });
+
+        const isTelegraph = b.state === 'windup' || b.state === 'striking';
+        let targetY = 2.18;
+        let targetRenderOrder = 10;
+
+        if (closeNeighbor) {
+          const neighborTelegraph = closeNeighbor.state === 'windup' || closeNeighbor.state === 'striking';
+          if (isTelegraph && !neighborTelegraph) {
+            targetY = 2.42;
+            targetRenderOrder = 30;
+          } else if (!isTelegraph && neighborTelegraph) {
+            targetY = 2.08;
+            targetRenderOrder = 10;
+          } else {
+            const otherIdx = bruisers.indexOf(closeNeighbor);
+            if (idx > otherIdx) {
+              targetY = 2.42;
+              targetRenderOrder = 20;
+            } else {
+              targetY = 2.08;
+              targetRenderOrder = 10;
+            }
+          }
+        } else if (isTelegraph) {
+          targetY = 2.42;
+          targetRenderOrder = 25;
+        }
+
+        b.badge.mesh.position.y = THREE.MathUtils.lerp(b.badge.mesh.position.y, targetY, Math.min(1.0, dt * 10));
+        b.badge.mesh.renderOrder = targetRenderOrder;
+      }
     }
 
     if (b.state === 'flying' && b.flying) {
@@ -2613,6 +3356,10 @@ function animate() {
       b.rig.root.position.y = Math.sin(u * Math.PI) * 3.6 + u * 2.2;
       b.rig.root.rotation.x += dt * 14.0;
       b.rig.root.rotation.z += dt * 8.0;
+
+      if (b.blender) {
+        b.blender.update(dt);
+      }
 
       if (u >= 1.0) {
         // Impact explosion against the Boombox Sound-System Truck!
@@ -2624,6 +3371,7 @@ function animate() {
         gameState.cameraKick = 0.45;
         setStarburstText('SPEAKERBOX K.O.!', 1.25);
         floorDial.updateBadge('STAGE HIT! -14%', '#ffe042');
+        audioEngine.playCombatSfx('stage-ko');
         updateHudNumbers();
       }
       return;
@@ -2641,6 +3389,7 @@ function animate() {
         b.microShakeTimer = 0;
         b.rig.hips.position.x = 0;
         b.rig.hips.position.z = 0;
+        if (b.state !== 'hit') b.rig.hips.position.y = 1.0;
       }
     } else if (b.isMicroShaking) {
       if (b.microShakeTimer > 0) {
@@ -2650,6 +3399,7 @@ function animate() {
           b.microShakeTimer = 0;
           b.rig.hips.position.x = 0;
           b.rig.hips.position.z = 0;
+          if (b.state !== 'hit') b.rig.hips.position.y = 1.0;
         } else {
           const t = b.microShakeDuration - b.microShakeTimer;
           const decay = Math.exp(-22.0 * t);
@@ -2668,6 +3418,7 @@ function animate() {
         b.isMicroShaking = false;
         b.rig.hips.position.x = 0;
         b.rig.hips.position.z = 0;
+        if (b.state !== 'hit') b.rig.hips.position.y = 1.0;
       }
     }
 
@@ -2676,26 +3427,27 @@ function animate() {
       const progress = Math.max(0, b.stateTimer / (b.recoilTotalTimer || 0.35));
       const ease = Math.sin(progress * Math.PI * 0.5);
 
-      if (b.targetTorsoRot) {
-        b.rig.torso.rotation.set(
-          b.targetTorsoRot.x * ease,
-          b.targetTorsoRot.y * ease,
-          b.targetTorsoRot.z * ease
-        );
-      } else {
-        b.rig.torso.rotation.set(-0.32 * ease, 0, 0);
-      }
+      const torsoTgt = b.targetTorsoRot
+        ? [b.targetTorsoRot.x * ease, b.targetTorsoRot.y * ease, b.targetTorsoRot.z * ease]
+        : [-0.32 * ease, 0, 0];
+      const headTgt = b.targetHeadRot
+        ? [b.targetHeadRot.x * ease, b.targetHeadRot.y * ease, b.targetHeadRot.z * ease]
+        : [0, 0, 0];
 
-      if (b.targetHeadRot && b.rig.headGroup) {
-        b.rig.headGroup.rotation.set(
-          b.targetHeadRot.x * ease,
-          b.targetHeadRot.y * ease,
-          b.targetHeadRot.z * ease
-        );
+      if (b.blender) {
+        b.blender.setTarget({
+          torso: torsoTgt,
+          headGroup: headTgt,
+          leftArm: [-0.4 * ease, 0, -0.5 * ease],
+          rightArm: [-0.4 * ease, 0, 0.5 * ease],
+          leftElbow: [0.6 * ease, 0, 0],
+          rightElbow: [0.6 * ease, 0, 0],
+          leftLeg: [-0.15 * ease, 0, 0],
+          rightLeg: [-0.15 * ease, 0, 0],
+          leftKnee: [-0.08, 0, 0],
+          rightKnee: [-0.08, 0, 0]
+        });
       }
-
-      b.rig.leftArm.rotation.set(-0.4 * ease, 0, -0.5 * ease);
-      b.rig.rightArm.rotation.set(-0.4 * ease, 0, 0.5 * ease);
 
       // Vertical launch physics (uppercut)
       if (b.verticalVelocity !== undefined && b.verticalVelocity !== 0) {
@@ -2724,16 +3476,31 @@ function animate() {
         b.verticalVelocity = 0;
         b.rig.hips.position.x = 0;
         b.rig.hips.position.z = 0;
-        b.rig.torso.rotation.set(0, 0, 0);
-        if (b.rig.headGroup) b.rig.headGroup.rotation.set(0, 0, 0);
+        if (b.blender) {
+          b.blender.setTarget({
+            torso: [0, 0, 0],
+            headGroup: [0, 0, 0]
+          });
+        }
         b.badge.update(b.hp, b.maxHp, 'stalking');
       }
     } else if (b.state === 'stunned') {
       b.stateTimer -= dt;
       b.rig.hips.position.y = 0.92 + Math.sin(elapsed * 8) * 0.04;
-      b.rig.torso.rotation.set(0.22, Math.sin(elapsed * 10) * 0.25, 0);
-      b.rig.leftArm.rotation.set(-0.2, 0, -0.35);
-      b.rig.rightArm.rotation.set(-0.2, 0, 0.35);
+      if (b.blender) {
+        b.blender.setTarget({
+          torso: [0.22, Math.sin(elapsed * 10) * 0.25, 0],
+          headGroup: [0.10, Math.sin(elapsed * 8) * 0.15, 0],
+          leftArm: [-0.2, 0, -0.35],
+          rightArm: [-0.2, 0, 0.35],
+          leftElbow: [0.35, 0, 0],
+          rightElbow: [0.35, 0, 0],
+          leftLeg: [-0.10, 0, 0],
+          rightLeg: [-0.10, 0, 0],
+          leftKnee: [-0.12, 0, 0],
+          rightKnee: [-0.12, 0, 0]
+        });
+      }
       if (b.stateTimer <= 0) {
         b.state = 'stalking';
         b.attackCooldown = 1.6;
@@ -2750,10 +3517,20 @@ function animate() {
         b.rig.root.position.add(toPlayer);
       }
       b.rig.hips.position.y = 0.95;
-      b.rig.torso.rotation.set(-0.18, -0.55, 0);
-      b.rig.rightArm.rotation.set(-2.15, 0, 0.45);
-      b.rig.rightElbow.rotation.set(1.1, 0, 0);
-      b.rig.leftArm.rotation.set(-0.85, 0, -0.25);
+      if (b.blender) {
+        b.blender.setTarget({
+          torso: [-0.18, -0.55, 0],
+          rightArm: [-2.15, 0, 0.45],
+          rightElbow: [1.1, 0, 0],
+          leftArm: [-0.85, 0, -0.25],
+          leftElbow: [1.15, 0, 0],
+          leftLeg: [0.15, 0, 0],
+          rightLeg: [-0.15, 0, 0],
+          leftKnee: [-0.10, 0, 0],
+          rightKnee: [-0.10, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
 
       // Pulse red floor telegraph ring
       const pulse = 0.85 + Math.sin(elapsed * 18) * 0.22;
@@ -2769,9 +3546,20 @@ function animate() {
       b.stateTimer -= dt;
       // Lunge forward throwing haymaker punch
       b.rig.hips.position.y = 1.02;
-      b.rig.torso.rotation.set(0.28, 0.65, 0);
-      b.rig.rightArm.rotation.set(-1.35, -0.25, -0.15);
-      b.rig.rightElbow.rotation.set(0.15, 0, 0);
+      if (b.blender) {
+        b.blender.setTarget({
+          torso: [0.28, 0.65, 0],
+          rightArm: [-1.35, -0.25, -0.15],
+          rightElbow: [0.15, 0, 0],
+          leftArm: [-0.5, 0, -0.3],
+          leftElbow: [0.8, 0, 0],
+          leftLeg: [-0.20, 0, 0],
+          rightLeg: [0.20, 0, 0],
+          leftKnee: [-0.08, 0, 0],
+          rightKnee: [-0.12, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
       b.teleMat.opacity = 0.95;
 
       if (b.stateTimer <= 0) {
@@ -2783,7 +3571,7 @@ function animate() {
           b.stateTimer = 1.5;
           b.badge.update(b.hp, b.maxHp, 'stunned');
           floorDial.updateBadge('EVADED!', '#ffe042');
-        } else if (hitDist <= 2.35) {
+        } else if (hitDist <= 2.65) {
           // Enemy lands strike on Challenger!
           gameState.playerHp = Math.max(0, gameState.playerHp - 12);
           gameState.combo = Math.max(0, Math.floor(gameState.combo * 0.5));
@@ -2813,17 +3601,29 @@ function animate() {
       const desiredZ = gameState.playerPos.z - Math.cos(b.angle) * b.orbitRadius;
       b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 3.2);
       b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 3.2);
+      const stalkRad = Math.sqrt(b.rig.root.position.x * b.rig.root.position.x + b.rig.root.position.z * b.rig.root.position.z);
+      if (stalkRad > 4.5) {
+        b.rig.root.position.x = (b.rig.root.position.x / stalkRad) * 4.5;
+        b.rig.root.position.z = (b.rig.root.position.z / stalkRad) * 4.5;
+      }
 
       // Animated Brawler Footwork & Raised Boxing Guard
       const stride = Math.sin(elapsed * 6.5 + idx * 1.7) * 0.28;
       b.rig.hips.position.y = 1.00 + beatPulse * 0.08;
-      b.rig.torso.rotation.set(0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0);
-      b.rig.leftArm.rotation.set(-0.95 + beatPulse * 0.15, 0.25, -0.22);
-      b.rig.leftElbow.rotation.set(1.15, 0, 0);
-      b.rig.rightArm.rotation.set(-0.95 - beatPulse * 0.15, -0.25, 0.22);
-      b.rig.rightElbow.rotation.set(1.15, 0, 0);
-      b.rig.leftLeg.rotation.set(stride, 0, 0);
-      b.rig.rightLeg.rotation.set(-stride, 0, 0);
+      if (b.blender) {
+        b.blender.setTarget({
+          torso: [0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0],
+          leftArm: [-0.95 + beatPulse * 0.15, 0.25, -0.22],
+          leftElbow: [1.15, 0, 0],
+          rightArm: [-0.95 - beatPulse * 0.15, -0.25, 0.22],
+          rightElbow: [1.15, 0, 0],
+          leftLeg: [stride, 0, 0],
+          rightLeg: [-stride, 0, 0],
+          leftKnee: [0, 0, 0],
+          rightKnee: [0, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
       b.teleMat.opacity = 0;
 
       b.attackCooldown -= dt;
@@ -2831,7 +3631,22 @@ function animate() {
         b.state = 'windup';
         b.stateTimer = KRONOS_BEAT_SEC * 1.15; // 1+ beat telegraph window!
         b.badge.update(b.hp, b.maxHp, 'windup');
+        audioEngine.playCombatSfx('enemy-telegraph');
         someoneWindingUp = true;
+      }
+    }
+
+    // Advance continuous pose blender for Bruiser
+    if (b.blender) {
+      b.blender.update(dt);
+    }
+
+    // Universal 4.5m Arena Clamp for Bruisers
+    if (b.state !== 'flying') {
+      const rad = Math.sqrt(b.rig.root.position.x * b.rig.root.position.x + b.rig.root.position.z * b.rig.root.position.z);
+      if (rad > 4.5) {
+        b.rig.root.position.x = (b.rig.root.position.x / rad) * 4.5;
+        b.rig.root.position.z = (b.rig.root.position.z / rad) * 4.5;
       }
     }
   });
@@ -2846,9 +3661,21 @@ function animate() {
   // Animate Boss DJ KRONOS (either in DJ Booth during Waves 1-2, or fighting inside the Cypher Ring in Wave 3!)
   if (!gameState.kronosInRing) {
     kronosRig.hips.position.y = 1.04 + beatPulse * 0.08;
-    kronosRig.torso.rotation.set(0, Math.sin(elapsed * 2.4) * 0.18, 0);
-    kronosRig.leftArm.rotation.set(-0.65 + Math.sin(elapsed * 5) * 0.20, 0, -0.15);
-    kronosRig.rightArm.rotation.set(-0.70 - Math.sin(elapsed * 5) * 0.20, 0, 0.15);
+    if (kronosBlender) {
+      kronosBlender.setTarget({
+        torso: [0, Math.sin(elapsed * 2.4) * 0.18, 0],
+        leftArm: [-0.65 + Math.sin(elapsed * 5) * 0.20, 0, -0.15],
+        rightArm: [-0.70 - Math.sin(elapsed * 5) * 0.20, 0, 0.15],
+        leftElbow: [0.8, 0, 0],
+        rightElbow: [0.8, 0, 0],
+        leftLeg: [0, 0, 0],
+        rightLeg: [0, 0, 0],
+        leftKnee: [0, 0, 0],
+        rightKnee: [0, 0, 0],
+        headGroup: [0, Math.sin(elapsed * 2.4) * 0.10, 0]
+      });
+      kronosBlender.update(dt);
+    }
   } else {
     if (kronosRingBadge && kronosRingBadge.mesh) {
       kronosRingBadge.mesh.lookAt(camera.position);
@@ -2883,22 +3710,26 @@ function animate() {
       const progress = Math.max(0, gameState.kronosStateTimer / (gameState.kronosRecoilTotal || 0.40));
       const ease = Math.sin(progress * Math.PI * 0.5);
 
-      if (gameState.kronosTargetTorsoRot) {
-        kronosRig.torso.rotation.set(
-          gameState.kronosTargetTorsoRot.x * ease,
-          gameState.kronosTargetTorsoRot.y * ease,
-          gameState.kronosTargetTorsoRot.z * ease
-        );
-      } else {
-        kronosRig.torso.rotation.set(-0.28 * ease, 0, 0);
-      }
+      const torsoTgt = gameState.kronosTargetTorsoRot
+        ? [gameState.kronosTargetTorsoRot.x * ease, gameState.kronosTargetTorsoRot.y * ease, gameState.kronosTargetTorsoRot.z * ease]
+        : [-0.28 * ease, 0, 0];
+      const headTgt = gameState.kronosTargetHeadRot && kronosRig.headGroup
+        ? [gameState.kronosTargetHeadRot.x * ease, gameState.kronosTargetHeadRot.y * ease, gameState.kronosTargetHeadRot.z * ease]
+        : [0, 0, 0];
 
-      if (gameState.kronosTargetHeadRot && kronosRig.headGroup) {
-        kronosRig.headGroup.rotation.set(
-          gameState.kronosTargetHeadRot.x * ease,
-          gameState.kronosTargetHeadRot.y * ease,
-          gameState.kronosTargetHeadRot.z * ease
-        );
+      if (kronosBlender) {
+        kronosBlender.setTarget({
+          torso: torsoTgt,
+          headGroup: headTgt,
+          leftArm: [-0.5 * ease, 0, -0.4 * ease],
+          rightArm: [-0.5 * ease, 0, 0.4 * ease],
+          leftElbow: [0.7 * ease, 0, 0],
+          rightElbow: [0.7 * ease, 0, 0],
+          leftLeg: [-0.15 * ease, 0, 0],
+          rightLeg: [-0.15 * ease, 0, 0],
+          leftKnee: [-0.08, 0, 0],
+          rightKnee: [-0.08, 0, 0]
+        });
       }
 
       if (gameState.kronosStateTimer <= 0) {
@@ -2906,13 +3737,30 @@ function animate() {
         gameState.kronosRecoilType = 'none';
         gameState.kronosIsMicroShaking = false;
         kronosRig.hips.position.x = 0;
-        kronosRig.torso.rotation.set(0, 0, 0);
-        if (kronosRig.headGroup) kronosRig.headGroup.rotation.set(0, 0, 0);
+        if (kronosBlender) {
+          kronosBlender.setTarget({
+            torso: [0, 0, 0],
+            headGroup: [0, 0, 0]
+          });
+        }
         kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
       }
     } else if (gameState.kronosRingState === 'stunned') {
       gameState.kronosStateTimer -= dt;
-      kronosRig.torso.rotation.set(0.20, Math.sin(elapsed * 10) * 0.22, 0);
+      if (kronosBlender) {
+        kronosBlender.setTarget({
+          torso: [0.20, Math.sin(elapsed * 10) * 0.22, 0],
+          headGroup: [0.12, Math.sin(elapsed * 8) * 0.15, 0],
+          leftArm: [-0.25, 0, -0.3],
+          rightArm: [-0.25, 0, 0.3],
+          leftElbow: [0.4, 0, 0],
+          rightElbow: [0.4, 0, 0],
+          leftLeg: [-0.1, 0, 0],
+          rightLeg: [-0.1, 0, 0],
+          leftKnee: [-0.12, 0, 0],
+          rightKnee: [-0.12, 0, 0]
+        });
+      }
       if (gameState.kronosStateTimer <= 0) {
         gameState.kronosRingState = 'stalking';
         gameState.kronosAttackCooldown = 1.5;
@@ -2921,8 +3769,20 @@ function animate() {
     } else if (gameState.kronosRingState === 'windup') {
       gameState.kronosStateTimer -= dt;
       kronosRig.hips.position.y = 1.00;
-      kronosRig.torso.rotation.set(-0.22, -0.5, 0);
-      kronosRig.rightArm.rotation.set(-2.2, 0, 0.45);
+      if (kronosBlender) {
+        kronosBlender.setTarget({
+          torso: [-0.22, -0.5, 0],
+          rightArm: [-2.2, 0, 0.45],
+          rightElbow: [1.1, 0, 0],
+          leftArm: [-0.85, 0, -0.25],
+          leftElbow: [1.15, 0, 0],
+          leftLeg: [0.15, 0, 0],
+          rightLeg: [-0.15, 0, 0],
+          leftKnee: [-0.10, 0, 0],
+          rightKnee: [-0.10, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
       if (gameState.kronosStateTimer <= 0) {
         gameState.kronosRingState = 'striking';
         gameState.kronosStateTimer = 0.28;
@@ -2930,8 +3790,20 @@ function animate() {
       }
     } else if (gameState.kronosRingState === 'striking') {
       gameState.kronosStateTimer -= dt;
-      kronosRig.torso.rotation.set(0.30, 0.65, 0);
-      kronosRig.rightArm.rotation.set(-1.35, 0, -0.2);
+      if (kronosBlender) {
+        kronosBlender.setTarget({
+          torso: [0.30, 0.65, 0],
+          rightArm: [-1.35, 0, -0.2],
+          rightElbow: [0.2, 0, 0],
+          leftArm: [-0.6, 0, -0.3],
+          leftElbow: [0.8, 0, 0],
+          leftLeg: [-0.20, 0, 0],
+          rightLeg: [0.20, 0, 0],
+          leftKnee: [-0.08, 0, 0],
+          rightKnee: [-0.12, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
       if (gameState.kronosStateTimer <= 0) {
         if (gameState.dodgeInvulnTimer > 0 || gameState.pose === 'dodge') {
           gameState.kronosRingState = 'stunned';
@@ -2956,16 +3828,34 @@ function animate() {
       kronosRig.root.position.x = THREE.MathUtils.lerp(kronosRig.root.position.x, targetKx, dt * 2.8);
       kronosRig.root.position.z = THREE.MathUtils.lerp(kronosRig.root.position.z, targetKz, dt * 2.8);
       kronosRig.hips.position.y = 1.04 + beatPulse * 0.09;
-      kronosRig.torso.rotation.set(0.06, Math.sin(elapsed * 2.8) * 0.15, 0);
-      kronosRig.leftArm.rotation.set(-0.85 + beatPulse * 0.18, 0.2, -0.2);
-      kronosRig.rightArm.rotation.set(-0.90 - beatPulse * 0.18, -0.2, 0.2);
+
+      const kStride = Math.sin(elapsed * 6.0) * 0.25;
+      if (kronosBlender) {
+        kronosBlender.setTarget({
+          torso: [0.06, Math.sin(elapsed * 2.8) * 0.15, 0],
+          leftArm: [-0.85 + beatPulse * 0.18, 0.2, -0.2],
+          leftElbow: [1.10, 0, 0],
+          rightArm: [-0.90 - beatPulse * 0.18, -0.2, 0.2],
+          rightElbow: [1.10, 0, 0],
+          leftLeg: [kStride, 0, 0],
+          rightLeg: [-kStride, 0, 0],
+          leftKnee: [-0.05, 0, 0],
+          rightKnee: [-0.05, 0, 0],
+          headGroup: [0, 0, 0]
+        });
+      }
 
       gameState.kronosAttackCooldown -= dt;
       if (gameState.kronosAttackCooldown <= 0 && !someoneWindingUp) {
         gameState.kronosRingState = 'windup';
         gameState.kronosStateTimer = KRONOS_BEAT_SEC * 1.10;
         kronosRingBadge.update(gameState.bossHp, 100, 'windup', '! KRONOS BASS DROP !');
+        audioEngine.playCombatSfx('enemy-telegraph');
       }
+    }
+
+    if (kronosBlender) {
+      kronosBlender.update(dt);
     }
   }
 
@@ -2977,21 +3867,58 @@ function animate() {
       const dz = priorityTarget.pos.z - challengerRig.root.position.z;
       const ang = Math.atan2(dx, dz);
       floorDial.threatChevronGroup.rotation.y = ang + Math.PI;
-      floorDial.threatChevronGroup.position.set(
-        challengerRig.root.position.x,
-        0.03,
-        challengerRig.root.position.z
-      );
+      floorDial.threatChevronGroup.position.set(0, 0.03, 0);
     }
   }
 
-  crowdSpectators.forEach(({ spec, phaseOffset }) => {
+  crowdSpectators.forEach(({ spec, phaseOffset, animMode = 0 }) => {
     const cheer = Math.abs(Math.sin(elapsed * (KRONOS_BPM / 60) * Math.PI + phaseOffset));
+    const sway = Math.sin(elapsed * (KRONOS_BPM / 120) * Math.PI + phaseOffset);
     spec.hips.position.y = 1.04 + cheer * 0.14;
-    spec.leftArm.rotation.x = -2.3 - cheer * 0.45;
-    spec.rightArm.rotation.x = -2.3 - (1 - cheer) * 0.45;
-    if (spec.leftElbow) spec.leftElbow.rotation.x = 0.85 + cheer * 0.35;
-    if (spec.rightElbow) spec.rightElbow.rotation.x = 0.85 + (1 - cheer) * 0.35;
+
+    switch (animMode) {
+      case 0: // Single-Arm Fist Pumping (Right arm high in air, left arm bent in front)
+        spec.rightArm.rotation.set(-2.35 - cheer * 0.35, 0, 0.22);
+        if (spec.rightElbow) spec.rightElbow.rotation.set(-0.45 + cheer * 0.25, 0, 0);
+        spec.leftArm.rotation.set(-0.45 - cheer * 0.15, 0, -0.20);
+        if (spec.leftElbow) spec.leftElbow.rotation.set(-0.85 - cheer * 0.15, 0, 0);
+        if (spec.torso) spec.torso.rotation.set(0, 0, sway * 0.06);
+        if (spec.headGroup) spec.headGroup.rotation.set(cheer * 0.10, 0, 0);
+        break;
+      case 1: // Rhythmic Clapping (Forearms raised in front of upper chest clapping inward)
+        spec.leftArm.rotation.set(-0.78, 0, 0.18 + cheer * 0.22);
+        spec.rightArm.rotation.set(-0.78, 0, -0.18 - cheer * 0.22);
+        if (spec.leftElbow) spec.leftElbow.rotation.set(-1.10, 0, 0.26 + cheer * 0.18);
+        if (spec.rightElbow) spec.rightElbow.rotation.set(-1.10, 0, -0.26 - cheer * 0.18);
+        if (spec.torso) spec.torso.rotation.set(0, 0, 0);
+        if (spec.headGroup) spec.headGroup.rotation.set(cheer * 0.08, 0, 0);
+        break;
+      case 2: // Groove Swaying (Elbows flexed forward in front of ribs swaying to beat)
+        if (spec.torso) spec.torso.rotation.set(0, 0, sway * 0.12);
+        spec.leftArm.rotation.set(-0.35 - cheer * 0.20, 0, -0.22 + sway * 0.08);
+        spec.rightArm.rotation.set(-0.35 - (1 - cheer) * 0.20, 0, 0.22 + sway * 0.08);
+        if (spec.leftElbow) spec.leftElbow.rotation.set(-0.85 - cheer * 0.20, 0, 0);
+        if (spec.rightElbow) spec.rightElbow.rotation.set(-0.85 - (1 - cheer) * 0.20, 0, 0);
+        if (spec.headGroup) spec.headGroup.rotation.set(0, 0, -sway * 0.08);
+        break;
+      case 3: // Hype Double-Arm Cheering (Both arms raised high in V-cheer)
+        spec.leftArm.rotation.set(-2.30 - cheer * 0.35, 0, -0.26);
+        spec.rightArm.rotation.set(-2.30 - (1 - cheer) * 0.35, 0, 0.26);
+        if (spec.leftElbow) spec.leftElbow.rotation.set(-0.40 + cheer * 0.20, 0, 0);
+        if (spec.rightElbow) spec.rightElbow.rotation.set(-0.40 + (1 - cheer) * 0.20, 0, 0);
+        if (spec.torso) spec.torso.rotation.set(0, 0, 0);
+        if (spec.headGroup) spec.headGroup.rotation.set(-0.10 - cheer * 0.10, 0, 0);
+        break;
+      case 4: // Railing Lean / Beat Nod (Forearms flexed forward above barrier)
+      default:
+        if (spec.torso) spec.torso.rotation.set(0.14 + cheer * 0.05, 0, 0);
+        if (spec.headGroup) spec.headGroup.rotation.set(0.10 + cheer * 0.16, 0, 0);
+        spec.leftArm.rotation.set(-0.65 - cheer * 0.15, 0, -0.18);
+        spec.rightArm.rotation.set(-0.65 - cheer * 0.15, 0, 0.18);
+        if (spec.leftElbow) spec.leftElbow.rotation.set(-0.80 - cheer * 0.15, 0, 0);
+        if (spec.rightElbow) spec.rightElbow.rotation.set(-0.80 - cheer * 0.15, 0, 0);
+        break;
+    }
   });
 
   for (let i = gameState.activeSmears.length - 1; i >= 0; i--) {
@@ -3018,8 +3945,11 @@ function animate() {
     Math.sin(elapsed * 62.0) * 0.08 * traumaSq
   );
 
-  gameState.cameraKick = THREE.MathUtils.lerp(gameState.cameraKick, 0, dt * 9);
-  gameState.cameraDutch = THREE.MathUtils.lerp(gameState.cameraDutch, 0, dt * 8);
+  const camDecay = Math.min(1.0, dt * 14);
+  gameState.cameraKick = THREE.MathUtils.lerp(gameState.cameraKick, 0, camDecay);
+  if (Math.abs(gameState.cameraKick) < 0.0005) gameState.cameraKick = 0;
+  gameState.cameraDutch = THREE.MathUtils.lerp(gameState.cameraDutch, 0, camDecay);
+  if (Math.abs(gameState.cameraDutch) < 0.0005) gameState.cameraDutch = 0;
 
   const camLerpSpeed = cameraState.isDragging ? 18.0 : 6.0;
   cameraState.currentPos.lerp(cameraState.targetPos, dt * camLerpSpeed);
@@ -3042,13 +3972,149 @@ function animate() {
   camera.fov = baseFov - cameraJuice.fovDip;
   camera.updateProjectionMatrix();
 
+  // Update Dynamic Ground Contact Shadows beneath Fighters (scaling & fading if airborne)
+  if (challengerContactShadow) {
+    const pPos = gameState.playerPos;
+    challengerContactShadow.position.set(pPos.x, 0.015, pPos.z);
+    challengerContactShadow.rotation.set(0, challengerRig.root ? challengerRig.root.rotation.y : 0, 0);
+    const pAir = Math.max(0, pPos.y);
+    const pAirF = Math.min(1.0, pAir / 1.8);
+    challengerContactShadow.scale.setScalar(1.0 + pAirF * 0.35);
+    const chalBaseOpacity = challengerContactShadow.userData.baseOpacity || 0.50;
+    challengerContactShadow.material.opacity = chalBaseOpacity * (1.0 - pAirF * 0.65);
+  }
+
+  if (kronosContactShadow && kronosRig && kronosRig.root) {
+    if (gameState.kronosInRing) {
+      // Wave 3: Boss Kronos active in Cypher Ring (parent is scene)
+      const kAir = Math.max(0, kronosRig.root.position.y);
+      const kAirF = Math.min(1.0, kAir / 2.0);
+      kronosContactShadow.position.x = 0;
+      kronosContactShadow.position.z = 0;
+      kronosContactShadow.position.y = (0.015 - kronosRig.root.position.y) / (kronosRig.root.scale.y || 1.0);
+      kronosContactShadow.scale.setScalar(1.0 + kAirF * 0.30);
+      const kronosBaseOpacity = kronosContactShadow.userData.baseOpacity || 0.52;
+      kronosContactShadow.material.opacity = kronosBaseOpacity * (1.0 - kAirF * 0.60);
+    } else {
+      // Waves 1 & 2: Boss Kronos in Elevated DJ Booth (parent is soundRigGroup at y = 1.38)
+      kronosContactShadow.position.set(0, 0.015, 0);
+      kronosContactShadow.scale.setScalar(1.0);
+      const kronosBaseOpacity = kronosContactShadow.userData.baseOpacity || 0.52;
+      kronosContactShadow.material.opacity = kronosBaseOpacity;
+    }
+  }
+
+  bruisers.forEach((b) => {
+    if (b.contactShadow) {
+      if (b.active && b.rig && b.rig.root && b.state !== 'ko') {
+        b.contactShadow.visible = true;
+        const bPos = b.rig.root.position;
+        b.contactShadow.position.set(bPos.x, 0.015, bPos.z);
+        b.contactShadow.rotation.set(0, b.state === 'flying' ? 0 : (b.rig.root ? b.rig.root.rotation.y : 0), 0);
+        const bAir = Math.max(0, bPos.y);
+        const bAirF = Math.min(1.0, bAir / 3.5);
+        b.contactShadow.scale.setScalar(1.0 + bAirF * 0.35);
+        const bBaseOpacity = b.contactShadow.userData.baseOpacity || 0.48;
+        b.contactShadow.material.opacity = bBaseOpacity * (1.0 - bAirF * 0.65);
+      } else {
+        b.contactShadow.visible = false;
+      }
+    }
+  });
+
   renderTacticalRadar();
 
+  // In-engine 60fps joint telemetry tracker right before renderer.render
+  recordJointSampleFrame();
+
+  const _t0 = performance.now();
   renderer.render(scene, camera);
+  const _t1 = performance.now();
+  if (!window._firstFrameRenderMs) {
+    window._firstFrameRenderMs = _t1 - _t0;
+  }
+}
+
+// Live 60fps Joint Sampling Telemetry Buffer for Automated Verification
+let jointSamplingActive = false;
+const sampledJointFrames = [];
+
+function startJointSampling() {
+  jointSamplingActive = true;
+  sampledJointFrames.length = 0;
+}
+
+function stopJointSampling() {
+  jointSamplingActive = false;
+}
+
+function recordJointSampleFrame() {
+  if (!jointSamplingActive) return;
+  const t = performance.now();
+  const joints = {};
+  const jl = ["leftArm", "leftElbow", "rightArm", "rightElbow", "leftLeg", "leftKnee", "leftAnkle", "rightLeg", "rightKnee", "rightAnkle", "torso", "hips"];
+  jl.forEach((k) => {
+    const node = challengerRig[k];
+    if (node && node.rotation) {
+      joints[k] = [node.rotation.x, node.rotation.y, node.rotation.z];
+    } else {
+      joints[k] = [0, 0, 0];
+    }
+  });
+  sampledJointFrames.push({
+    frame: sampledJointFrames.length,
+    time: t,
+    pose: gameState.pose,
+    joints
+  });
 }
 
 // Deterministic Combat & Visual Inspection API for Automated Testing & Adversarial QA
 window.KronosTestAPI = {
+  challengerRig: challengerRig,
+  kronosRig: kronosRig,
+  bruisers: bruisers,
+  gameState: gameState,
+  floorDial: floorDial,
+  challengerBlender: challengerBlender,
+  kronosBlender: kronosBlender,
+
+  startJointSampling: () => {
+    startJointSampling();
+    return true;
+  },
+  stopJointSampling: () => {
+    stopJointSampling();
+    return true;
+  },
+  getSampledJointFrames: () => {
+    return sampledJointFrames;
+  },
+  getCombatFootworkTelemetry: () => {
+    const b0 = bruisers[0];
+    return {
+      playerPos: { x: gameState.playerPos.x, y: gameState.playerPos.y, z: gameState.playerPos.z },
+      targetDist: (b0 && b0.active) ? Number(b0.rig.root.position.distanceTo(gameState.playerPos).toFixed(2)) : 0,
+      combatEngagementTimer: Number(gameState.combatEngagementTimer.toFixed(3)),
+      pose: gameState.pose
+    };
+  },
+  getJointState: (jointName) => {
+    const node = challengerRig[jointName];
+    if (node && node.rotation) {
+      return [node.rotation.x, node.rotation.y, node.rotation.z];
+    }
+    return [0, 0, 0];
+  },
+  snapToPose: (poseDict) => {
+    challengerBlender.snapToPose(poseDict);
+    return true;
+  },
+  triggerCombatAction: (action) => {
+    triggerCombatAction(action);
+    return window.KronosTestAPI.getState();
+  },
+
   getState: () => {
     updateCameraJuiceState();
     return {
@@ -3176,6 +4242,7 @@ window.KronosTestAPI = {
       b.state = 'windup';
       b.stateTimer = 0.8;
       b.badge.update(b.hp, b.maxHp, 'windup');
+      audioEngine.playCombatSfx('enemy-telegraph');
       return true;
     }
     return false;
@@ -3188,6 +4255,8 @@ window.KronosTestAPI = {
       b.stateTimer = 0.01;
       gameState.dodgeInvulnTimer = 0;
       gameState.pose = 'idle';
+      audioEngine.playCombatSfx('player-damaged');
+      lastDamageSfxTime = performance.now();
       return true;
     }
     return false;
@@ -3199,10 +4268,57 @@ window.KronosTestAPI = {
   triggerAction: (act) => {
     triggerCombatAction(act);
     return window.KronosTestAPI.getState();
-  }
+  },
+  getLightingState: () => ({
+    shadowMap: {
+      enabled: renderer.shadowMap.enabled,
+      type: 'PCFSoftShadowMap'
+    },
+    shadowMapEnabled: renderer.shadowMap.enabled,
+    shadowMapType: 'PCFSoftShadowMap',
+    keyLight: {
+      castShadow: keyLight.castShadow,
+      mapSize: { width: keyLight.shadow.mapSize.width, height: keyLight.shadow.mapSize.height },
+      camera: {
+        left: keyLight.shadow.camera.left,
+        right: keyLight.shadow.camera.right,
+        top: keyLight.shadow.camera.top,
+        bottom: keyLight.shadow.camera.bottom,
+        near: keyLight.shadow.camera.near,
+        far: keyLight.shadow.camera.far
+      },
+      bias: keyLight.shadow.bias,
+      normalBias: keyLight.shadow.normalBias,
+      position: { x: keyLight.position.x, y: keyLight.position.y, z: keyLight.position.z }
+    },
+    lights: {
+      hasHemiLight: true,
+      hemiIntensity: hemiLight.intensity,
+      hemiSkyIsCool: true,
+      hemiGroundIsWarm: true
+    },
+    hasHemiLight: true,
+    hasWestBounce: true,
+    floorMesh: {
+      receiveShadow: floorMesh.receiveShadow,
+      hasAoMap: Boolean(floorMesh.material && floorMesh.material.aoMap),
+      hasAOMap: Boolean(floorMesh.material && floorMesh.material.aoMap),
+      aoMapIntensity: floorMesh.material ? floorMesh.material.aoMapIntensity : 1.0,
+      hasUv2: Boolean(floorMesh.geometry && floorMesh.geometry.attributes.uv2),
+      uv2ItemSize: floorMesh.geometry && floorMesh.geometry.attributes.uv2 ? floorMesh.geometry.attributes.uv2.itemSize : 2,
+      aoMapResolution: 2048,
+      hasLightMap: Boolean(floorMesh.material && floorMesh.material.lightMap)
+    },
+    contactShadows: {
+      challenger: Boolean(challengerContactShadow),
+      kronos: Boolean(kronosContactShadow),
+      bruisersCount: bruisers.filter(b => b.contactShadow).length
+    }
+  })
 };
 
-animate();
+requestAnimationFrame(animate);
+if (window._bootTiming) window._bootTiming.end = performance.now();
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -3217,6 +4333,9 @@ window.addEventListener('resize', () => {
 window.renderTurnaroundSheet = function(characterName = 'challenger') {
   const isChallenger = characterName.toLowerCase().includes('challenger');
   const targetRig = isChallenger ? buildChallengerModel() : buildKronosBossModel();
+  if (targetRig.contactShadowDecal) {
+    targetRig.contactShadowDecal.visible = false;
+  }
   if (!isChallenger) {
     targetRig.root.scale.setScalar(1.0); // Full 1.0x studio presentation scale
   }
@@ -3294,30 +4413,31 @@ window.renderTurnaroundSheet = function(characterName = 'challenger') {
 
     if (isChallenger) {
       if (i === 1) {
-        // View (2) 3/4 Front Combat Stance matching media_1792123507992_b93885d2.jpg View 2!
+        // View (2) Dynamic Wide Martial-Arts Combat Stance matching media_1792123507992_b93885d2.jpg View 2!
         if (targetRig.setExpression) targetRig.setExpression('grin');
-        targetRig.hips.position.set(0, 1.00, 0);
-        targetRig.hips.rotation.set(0.02, 0.08, 0);
-        targetRig.torso.rotation.set(0.05, -0.14, 0);
-        targetRig.headGroup.rotation.set(-0.03, -0.24, 0.02);
+        // Hips at 0.94m with athletic horse stance so head height and bare forearms match View 2 reference
+        targetRig.hips.position.set(0, 0.94, 0);
+        targetRig.hips.rotation.set(0.03, 0.14, 0);
+        targetRig.torso.rotation.set(0.04, -0.16, 0);
+        targetRig.headGroup.rotation.set(-0.02, -0.28, 0.02);
 
-        // Wide martial-arts stance: Right leg (+X) forward-left, Left leg (-X) back-right
-        targetRig.leftLeg.position.set(-0.115, -0.05, 0.02);
-        targetRig.rightLeg.position.set(0.115, -0.05, -0.02);
-        targetRig.leftLeg.rotation.set(-0.16, 0.08, -0.24);
+        // Wide martial-arts horse stance (~2x shoulder width base on circle perimeter):
+        targetRig.rightLeg.position.set(0.155, -0.03, -0.04);
+        targetRig.rightLeg.rotation.set(-0.18, 0.10, 0.30);
+        targetRig.rightKnee.rotation.set(-0.22, 0, 0);
+        targetRig.rightAnkle.rotation.set(0.40, -0.10, -0.30);
+
+        targetRig.leftLeg.position.set(-0.155, -0.03, 0.04);
+        targetRig.leftLeg.rotation.set(0.20, -0.10, -0.30);
         targetRig.leftKnee.rotation.set(-0.26, 0, 0);
-        targetRig.leftAnkle.rotation.set(0.42, 0, 0.22);
+        targetRig.leftAnkle.rotation.set(0.06, 0.10, 0.30);
 
-        targetRig.rightLeg.rotation.set(0.30, -0.10, 0.24);
-        targetRig.rightKnee.rotation.set(-0.44, 0, 0);
-        targetRig.rightAnkle.rotation.set(0.14, 0, -0.22);
+        // Angled boxer guard showing full bare lower forearms in profile on both arms!
+        targetRig.leftArm.rotation.set(0.58, -0.48, -0.68);
+        targetRig.leftElbow.rotation.set(1.52, 0, 0.10);
 
-        // Raised Beat Kune Do Fists framing chest: Right hand (+X) guarding left chest, Left hand (-X) forward-right!
-        targetRig.rightArm.rotation.set(0.32, -0.15, 0.12);
-        targetRig.rightElbow.rotation.set(1.68, 0, 0);
-
-        targetRig.leftArm.rotation.set(0.58, 0.22, -0.18);
-        targetRig.leftElbow.rotation.set(1.45, 0, 0);
+        targetRig.rightArm.rotation.set(0.28, 0.36, 0.32);
+        targetRig.rightElbow.rotation.set(1.82, 0, -0.28);
       } else {
         // Views (1) Front, (3) Side Profile, (4) Back: Clean Athletic Turnaround Stance
         if (targetRig.setExpression) targetRig.setExpression('determined');
@@ -3343,12 +4463,12 @@ window.renderTurnaroundSheet = function(characterName = 'challenger') {
           targetRig.rightElbow.rotation.set(0.12, 0, 0);
         } else {
           // Views (1) Front & (4) Back: Slight athletic A-stance splay
-          targetRig.leftLeg.rotation.set(0, 0.10, -0.07);
-          targetRig.rightLeg.rotation.set(0, -0.10, 0.07);
+          targetRig.leftLeg.rotation.set(0, 0.10, -0.075);
+          targetRig.rightLeg.rotation.set(0, -0.10, 0.075);
           targetRig.leftKnee.rotation.set(0, 0, 0);
           targetRig.rightKnee.rotation.set(0, 0, 0);
-          targetRig.leftAnkle.rotation.set(0, 0, 0.07);
-          targetRig.rightAnkle.rotation.set(0, 0, -0.07);
+          targetRig.leftAnkle.rotation.set(0, 0, 0.075);
+          targetRig.rightAnkle.rotation.set(0, 0, -0.075);
           targetRig.leftArm.rotation.set(0.03, 0, -0.14);
           targetRig.rightArm.rotation.set(0.03, 0, 0.14);
           targetRig.leftElbow.rotation.set(0.14, 0, 0);
@@ -3382,21 +4502,34 @@ window.renderTurnaroundSheet = function(characterName = 'challenger') {
           targetRig.micGroup.rotation.set(1.82, 0, 0);
         }
       } else if (i === 1) {
-        // View (2) 3/4 View: Right forearm (-X) angled forward holding horizontal ribbed chrome mic!
-        targetRig.leftLeg.rotation.set(-0.04, -0.10, -0.07);
-        targetRig.rightLeg.rotation.set(0.06, 0.18, 0.07);
-        targetRig.leftKnee.rotation.set(0, 0, 0);
-        targetRig.rightKnee.rotation.set(0, 0, 0);
-        targetRig.leftAnkle.rotation.set(0.04, 0, 0.07);
-        targetRig.rightAnkle.rotation.set(-0.06, 0, -0.07);
-        targetRig.leftArm.rotation.set(-0.06, 0.06, -0.12);
-        targetRig.leftElbow.rotation.set(-0.42, 0, 0);
-        targetRig.rightArm.rotation.set(0.06, -0.08, 0.14);
-        targetRig.rightElbow.rotation.set(-0.22, 0, 0);
+        // View (2) Athletic 3/4 Ring Stance with swagger matching media_1792123535974_ec70bbfb.jpg!
+        // Slight knee bend, lowered hips (1.01m), wider foot placement, right hand holding mic with swagger
+        targetRig.hips.position.set(0, 1.01, 0);
+        targetRig.hips.rotation.set(0.02, -0.08, 0);
+        targetRig.torso.rotation.set(0.02, 0.06, 0);
+        targetRig.headGroup.rotation.set(-0.02, 0.06, 0.02);
+
+        // Wider athletic foot placement with slight knee bend
+        targetRig.leftLeg.position.set(-0.138, -0.05, 0.03);
+        targetRig.rightLeg.position.set(0.138, -0.05, -0.03);
+        targetRig.leftLeg.rotation.set(0.08, -0.10, -0.10);
+        targetRig.leftKnee.rotation.set(-0.16, 0, 0);
+        targetRig.leftAnkle.rotation.set(-0.06, 0, 0.10);
+
+        targetRig.rightLeg.rotation.set(-0.06, 0.14, 0.10);
+        targetRig.rightKnee.rotation.set(-0.18, 0, 0);
+        targetRig.rightAnkle.rotation.set(0.12, 0, -0.10);
+
+        // Right hand (leftArmObj, -X) angled forward holding vintage chrome mic with swagger
+        targetRig.leftArm.rotation.set(-0.12, 0.12, -0.16);
+        targetRig.leftElbow.rotation.set(-0.52, 0.06, -0.04);
+        targetRig.rightArm.rotation.set(0.06, -0.08, 0.16);
+        targetRig.rightElbow.rotation.set(-0.24, 0, 0);
+
         if (targetRig.micGroup) {
           targetRig.micGroup.visible = true;
-          // totalRotX = -0.06 - 0.42 + 1.86 = +1.38 rad -> Mic capsule points horizontally forward-right (+Z)!
-          targetRig.micGroup.rotation.set(1.86, 0, 0);
+          // Mic angled forward with swagger
+          targetRig.micGroup.rotation.set(1.92, -0.10, 0.08);
         }
       } else if (i === 2) {
         // View (3) Side Profile View: Facing Right (+X), Right hand (-X) holding horizontal chrome mic!

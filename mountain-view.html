@@ -1,0 +1,1198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Digital Twin: Mountain View, CA — Epsilon CityScope | bevelez.ai</title>
+  <meta name="description" content="Interactive 3D City Planning Digital Twin of Mountain View, California. Bridging GIS and Gemini with a 3D Spatial Viewport, Real-Time Telemetry Pipeline, and Multi-Physics Simulation Engines." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --bg-void: #0a0d12;
+      --ivory: #ece8df;
+      --ivory-dim: rgba(236, 232, 223, 0.78);
+      --muted: rgba(212, 218, 224, 0.58);
+      --hairline: rgba(226, 230, 236, 0.22);
+      --hairline-strong: rgba(226, 230, 236, 0.42);
+      --cyan: #48ecff;
+      --emerald: #46e094;
+      --amber: #f2ae49;
+      --crimson: #f25c54;
+      --brass: #d9b87c;
+      --panel-bg: rgba(11, 15, 21, 0.76);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--bg-void);
+      color: var(--ivory);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      touch-action: none;
+    }
+
+    /* 3D Spatial Viewport Canvas */
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      cursor: grab;
+    }
+
+    #canvas-container:active {
+      cursor: grabbing;
+    }
+
+    /* Subtle Dark Studio Table Vignette matching North Star */
+    .vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse at 50% 48%, transparent 56%, rgba(5, 7, 10, 0.72) 100%),
+        linear-gradient(180deg, rgba(8, 11, 16, 0.65) 0%, transparent 64px);
+    }
+
+    /* 3D Landmark Callout SVG & Pin Layer */
+    #callout-svg {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+
+    #callout-pins {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+    }
+
+    /* 1:1 North Star Floating Architectural Callouts (No Opaque Boxes) */
+    .landmark-callout {
+      position: absolute;
+      pointer-events: auto;
+      cursor: pointer;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: transparent;
+      border: none;
+      padding: 0;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    .landmark-callout:hover {
+      opacity: 0.92;
+    }
+
+    .landmark-callout .callout-title {
+      font-size: 0.74rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: rgba(240, 238, 232, 0.94);
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.95), 0 0 14px rgba(0, 0, 0, 0.85);
+      line-height: 1.25;
+    }
+
+    .landmark-callout .callout-sub {
+      font-size: 0.62rem;
+      font-weight: 400;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      text-shadow: 0 1px 6px rgba(0, 0, 0, 0.95), 0 0 12px rgba(0, 0, 0, 0.85);
+      line-height: 1.25;
+    }
+
+    /* Top Angled Callouts: Title sits above the SVG horizontal segment, Subtitle sits right-aligned below it */
+    .landmark-callout.callout-top-left,
+    .landmark-callout.callout-top-right {
+      transform: translate(0, -50%);
+    }
+
+    .landmark-callout.callout-top-left .callout-title,
+    .landmark-callout.callout-top-right .callout-title {
+      padding-bottom: 3px;
+    }
+
+    .landmark-callout.callout-top-left .callout-sub,
+    .landmark-callout.callout-top-right .callout-sub {
+      padding-top: 2px;
+      text-align: right;
+    }
+
+    /* Bottom Vertical Callouts: Sit cleanly beside the bottom tip of the vertical leader line */
+    .landmark-callout.callout-bottom-left {
+      transform: translate(-100%, -76%);
+      text-align: right;
+      padding-right: 7px;
+    }
+
+    .landmark-callout.callout-bottom-right {
+      transform: translate(0, -76%);
+      text-align: left;
+      padding-left: 7px;
+    }
+
+    .water-label {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 0.78rem;
+      font-weight: 400;
+      letter-spacing: 0.11em;
+      color: rgba(236, 232, 223, 0.86);
+      text-transform: uppercase;
+      text-shadow: 0 2px 10px rgba(0, 0, 0, 0.92);
+      white-space: nowrap;
+    }
+
+    /* Main Architectural UI Layer */
+    .ui-shell {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 11px 22px 18px;
+    }
+
+    /* Top Hairline Header matching Visual North Star 1:1 */
+    .top-header {
+      display: flex;
+      flex-direction: column;
+      pointer-events: auto;
+    }
+
+    .top-hairline-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(226, 230, 236, 0.24);
+    }
+
+    .title-cluster {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      cursor: pointer;
+    }
+
+    .twin-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: 0.98rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(236, 232, 223, 0.92);
+    }
+
+    .title-pipe {
+      color: rgba(212, 218, 224, 0.48);
+      font-size: 0.86rem;
+    }
+
+    .twin-subtitle {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: 0.94rem;
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(236, 232, 223, 0.74);
+    }
+
+    .coord-cluster {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: 0.92rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: rgba(236, 232, 223, 0.78);
+      cursor: pointer;
+    }
+
+    .coord-mono {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-variant-numeric: lining-nums tabular-nums;
+      font-size: 0.92rem;
+      letter-spacing: 0.06em;
+      color: rgba(236, 232, 223, 0.78);
+    }
+
+    /* Reusable Pill Button Styling inside Simulation Drawer */
+    .layer-pills,
+    .camera-pills {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .group-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-right: 3px;
+    }
+
+    .arch-pill {
+      appearance: none;
+      background: rgba(14, 20, 28, 0.78);
+      border: 1px solid var(--hairline);
+      color: var(--ivory-dim);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all 0.18s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .arch-pill:hover {
+      border-color: var(--hairline-strong);
+      color: var(--ivory);
+    }
+
+    .arch-pill.active {
+      border-color: var(--cyan);
+      color: var(--ivory);
+      background: rgba(72, 236, 255, 0.14);
+    }
+
+    .arch-pill.amber-active {
+      border-color: var(--amber);
+      color: var(--ivory);
+      background: rgba(242, 174, 73, 0.16);
+    }
+
+    .arch-link {
+      text-decoration: none;
+    }
+
+    /* Bottom Telemetry & Scenario Architecture */
+    .bottom-hud {
+      display: grid;
+      grid-template-columns: 164px minmax(0, 1fr) 144px;
+      align-items: end;
+      gap: 16px;
+      width: 100%;
+    }
+
+    /* Left Telemetry Box (Matches North Star LIVE TRAFFIC FLOW 1:1) */
+    .telemetry-box {
+      pointer-events: auto;
+      cursor: pointer;
+      background: rgba(12, 16, 22, 0.76);
+      border: 1px solid rgba(226, 230, 236, 0.24);
+      border-radius: 4px;
+      padding: 10px 13px 11px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      font-family: 'JetBrains Mono', monospace;
+      transition: border-color 0.2s ease;
+    }
+
+    .telemetry-box:hover {
+      border-color: rgba(226, 230, 236, 0.42);
+    }
+
+    .telemetry-box-header {
+      font-size: 0.66rem;
+      font-weight: 400;
+      letter-spacing: 0.07em;
+      color: rgba(226, 230, 236, 0.78);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      white-space: nowrap;
+    }
+
+    .traffic-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: flex-start;
+      gap: 7px;
+      font-size: 1.02rem;
+      line-height: 1.34;
+      letter-spacing: 0.01em;
+    }
+
+    .traffic-corridor {
+      color: var(--ivory);
+      font-weight: 400;
+    }
+
+    .status-high {
+      color: #f05a54;
+      font-weight: 500;
+    }
+
+    .status-moderate {
+      color: #ebb048;
+      font-weight: 500;
+    }
+
+    .status-low {
+      color: var(--emerald);
+      font-weight: 500;
+    }
+
+    /* Provenance Badging & Anti-Hallucination Indicators (Layer 3) */
+    .prov-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.48rem;
+      letter-spacing: 0.06em;
+      padding: 1px 4px;
+      border-radius: 2px;
+      text-transform: uppercase;
+      font-weight: 500;
+    }
+
+    .prov-badge.live {
+      background: rgba(70, 224, 148, 0.16);
+      color: var(--emerald);
+      border: 1px solid rgba(70, 224, 148, 0.36);
+    }
+
+    .prov-badge.cached {
+      background: rgba(242, 174, 73, 0.15);
+      color: var(--amber);
+      border: 1px solid rgba(242, 174, 73, 0.32);
+    }
+
+    .prov-badge.baseline,
+    .prov-badge.model {
+      background: rgba(72, 236, 255, 0.12);
+      color: var(--cyan);
+      border: 1px solid rgba(72, 236, 255, 0.28);
+    }
+
+    .telemetry-provenance-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      margin-top: 5px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(226, 230, 236, 0.12);
+      font-size: 0.46rem;
+      color: var(--muted);
+      overflow: hidden;
+    }
+
+    .prov-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+
+    .prov-dot {
+      font-size: 0.52rem;
+      line-height: 1;
+    }
+
+    .prov-dot.live {
+      color: var(--emerald);
+      text-shadow: 0 0 4px var(--emerald);
+    }
+
+    .prov-dot.cached {
+      color: var(--amber);
+    }
+
+    .prov-dot.baseline {
+      color: var(--cyan);
+    }
+
+    /* Right Stacked Metric Cards (Matches North Star GREENSPACE % and POPULATION 1:1) */
+    .right-metrics-stack {
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .metric-card {
+      cursor: pointer;
+      background: rgba(12, 16, 22, 0.76);
+      border: 1px solid rgba(226, 230, 236, 0.24);
+      border-radius: 4px;
+      padding: 9px 13px 10px;
+      text-align: right;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      font-family: 'JetBrains Mono', monospace;
+      transition: border-color 0.2s ease;
+    }
+
+    .metric-card.greenspace-card {
+      background: rgba(10, 24, 19, 0.76);
+      border-color: rgba(70, 224, 148, 0.38);
+    }
+
+    .metric-card:hover {
+      border-color: rgba(226, 230, 236, 0.45);
+    }
+
+    .metric-label {
+      font-size: 0.67rem;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: rgba(226, 230, 236, 0.78);
+      display: flex;
+      align-items: baseline;
+      justify-content: flex-end;
+      white-space: nowrap;
+    }
+
+    .metric-label.emerald-text {
+      color: #54e098;
+    }
+
+    .metric-value {
+      font-size: 1.62rem;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      line-height: 1.16;
+      margin-top: 3px;
+      color: #f4f1ea;
+    }
+
+    .metric-value.emerald-val {
+      color: #54e098;
+    }
+
+    /* Center Scenario & Gemini Simulation Command Dock */
+    .center-dock {
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    /* Collapsible Simulation & Parcel Inspector Drawer (Hidden at rest for 1:1 North Star parity) */
+    .sim-drawer {
+      pointer-events: auto;
+      width: 100%;
+      background: rgba(8, 12, 18, 0.92);
+      border: 1px solid var(--hairline-strong);
+      border-radius: 6px;
+      padding: 11px 14px;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+      transition: opacity 0.22s ease, transform 0.22s ease, visibility 0.22s ease;
+    }
+
+    .sim-drawer.collapsed {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(10px);
+    }
+
+    .drawer-nav-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--hairline);
+    }
+
+    .drawer-top-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+
+    .sliders-column {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px 12px;
+    }
+
+    .slider-group {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .slider-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.56rem;
+      letter-spacing: 0.05em;
+      color: var(--ivory-dim);
+      text-transform: uppercase;
+    }
+
+    .slider-val {
+      color: var(--cyan);
+      font-weight: 500;
+    }
+
+    .twin-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 2px;
+      background: rgba(236, 232, 223, 0.22);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .twin-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan);
+      cursor: pointer;
+    }
+
+    /* Extended Telemetry Micro-Rows inside Drawer */
+    .drawer-telemetry-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding-top: 6px;
+      border-top: 1px solid var(--hairline);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .telemetry-micro-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 6px;
+      font-size: 0.56rem;
+      color: var(--muted);
+      line-height: 1.35;
+      white-space: nowrap;
+    }
+
+    .telemetry-micro-row > span {
+      white-space: nowrap;
+    }
+
+    .telemetry-micro-val {
+      color: var(--ivory-dim);
+      white-space: nowrap;
+    }
+
+    .drawer-sub-metrics {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .metric-sub {
+      font-size: 0.54rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .metric-delta {
+      font-size: 0.54rem;
+      color: var(--cyan);
+      white-space: nowrap;
+    }
+
+    /* Parcel Inspector Panel inside Drawer */
+    .parcel-inspector {
+      border-left: 1px solid var(--hairline);
+      padding-left: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .inspector-title {
+      font-size: 0.58rem;
+      letter-spacing: 0.07em;
+      color: var(--amber);
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .inspector-meta {
+      font-size: 0.6rem;
+      color: var(--ivory);
+      line-height: 1.3;
+    }
+
+    .inspector-stats {
+      font-size: 0.55rem;
+      color: var(--muted);
+    }
+
+    .rezone-btns {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 2px;
+    }
+
+    .rezone-btn {
+      appearance: none;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--hairline);
+      color: var(--ivory-dim);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.53rem;
+      padding: 3px 6px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .rezone-btn:hover,
+    .rezone-btn.active {
+      border-color: var(--amber);
+      color: var(--ivory);
+      background: rgba(242, 174, 73, 0.18);
+    }
+
+    /* Optional Google Photorealistic 3D Tiles Settings Card */
+    .tiles-settings-card {
+      background: rgba(14, 20, 28, 0.95);
+      border: 1px solid var(--hairline-strong);
+      border-radius: 4px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      width: 100%;
+    }
+
+    .tiles-settings-card.collapsed {
+      display: none;
+    }
+
+    .tiles-settings-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--cyan);
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      font-size: 0.57rem;
+    }
+
+    .tiles-settings-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      width: 100%;
+    }
+
+    .tiles-settings-row .nl-input {
+      flex: 1;
+      min-width: 0;
+      border: 1px solid var(--hairline);
+      border-radius: 3px;
+      padding: 4px 6px;
+      background: rgba(8, 12, 18, 0.85);
+      color: var(--ivory);
+      font-size: 0.56rem;
+    }
+
+    .tiles-settings-status {
+      font-size: 0.52rem;
+      color: var(--muted);
+    }
+
+    /* Gemini Synthesis Output Banner */
+    .gemini-synthesis {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      line-height: 1.4;
+      color: var(--ivory-dim);
+      background: rgba(72, 236, 255, 0.06);
+      border-left: 2px solid var(--cyan);
+      padding: 5px 9px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .gemini-tag {
+      color: var(--cyan);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+
+    /* Compact Scenario Strip & Natural-Language Bar inside Drawer */
+    .scenario-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 5px;
+      flex-wrap: wrap;
+      width: 100%;
+    }
+
+    .nl-command-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      background: rgba(14, 20, 28, 0.85);
+      border: 1px solid var(--hairline);
+      border-radius: 4px;
+      padding: 4px 8px;
+    }
+
+    .nl-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+      padding: 2px 6px;
+      border: 1px solid rgba(72, 236, 255, 0.3);
+      border-radius: 2px;
+      white-space: nowrap;
+    }
+
+    .nl-input {
+      flex: 1;
+      min-width: 120px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--ivory);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.61rem;
+    }
+
+    .nl-input::placeholder {
+      color: var(--muted);
+    }
+
+    /* Subtle Hidden-Appearance Drawer Toggle Button in Header/DOM */
+    .sr-drawer-trigger {
+      background: transparent;
+      border: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      padding: 0;
+    }
+
+    /* Responsive Mobile & Fold 8 Ergonomics */
+    @media (max-width: 960px) {
+      .ui-shell {
+        padding: 10px 14px 14px;
+      }
+      .coord-cluster {
+        display: none;
+      }
+      .bottom-hud {
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .center-dock {
+        grid-column: 1 / -1;
+        order: -1;
+      }
+      .drawer-top-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .drawer-telemetry-strip {
+        grid-template-columns: 1fr;
+        gap: 3px;
+      }
+      .parcel-inspector {
+        border-left: none;
+        border-top: 1px solid var(--hairline);
+        padding-left: 0;
+        padding-top: 6px;
+      }
+      #callout-svg,
+      #callout-pins {
+        display: none;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .ui-shell {
+        padding: 8px 10px 10px;
+      }
+      .twin-subtitle,
+      .title-pipe,
+      .camera-pills .group-label,
+      .layer-pills .group-label {
+        display: none;
+      }
+      .twin-title {
+        font-size: 0.86rem;
+      }
+      .arch-pill {
+        font-size: 0.51rem;
+        padding: 3px 5px;
+      }
+      .sim-drawer {
+        padding: 7px 9px;
+        gap: 6px;
+        max-height: 44vh;
+        overflow-y: auto;
+      }
+      .sliders-column {
+        gap: 5px 8px;
+      }
+      .bottom-hud {
+        gap: 6px;
+      }
+      .telemetry-box {
+        padding: 8px 10px;
+      }
+      .telemetry-box-header {
+        font-size: 0.58rem;
+        margin-bottom: 4px;
+      }
+      .traffic-row {
+        font-size: 0.82rem;
+      }
+      .telemetry-micro-row {
+        font-size: 0.49rem;
+        letter-spacing: -0.015em;
+        gap: 4px;
+        white-space: nowrap;
+      }
+      .metric-card {
+        padding: 7px 10px;
+      }
+      .metric-label {
+        font-size: 0.58rem;
+      }
+      .metric-value {
+        font-size: 1.24rem;
+      }
+      .metric-sub,
+      .metric-delta {
+        font-size: 0.46rem;
+        letter-spacing: -0.02em;
+        white-space: nowrap;
+      }
+      .nl-badge {
+        display: none;
+      }
+      .nl-command-bar {
+        padding: 4px 6px;
+        gap: 4px;
+      }
+      .nl-input {
+        font-size: 0.53rem;
+        letter-spacing: -0.01em;
+      }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- Layer 1 & 2: PostGIS/OSM & 3D Tiles GIS + Three.js/Deck.gl 3D Spatial Viewport -->
+  <div id="canvas-container" aria-label="3D Spatial Digital Twin of Mountain View, California"></div>
+  <div class="vignette" aria-hidden="true"></div>
+
+  <!-- 3D Projected Landmark Callout Leader Lines & Pins -->
+  <svg id="callout-svg" aria-hidden="true"></svg>
+  <div id="callout-pins"></div>
+
+  <!-- Minimalist Architectural Studio UI Overlay matching Visual North Star 1:1 -->
+  <div class="ui-shell">
+    <header class="top-header">
+      <div class="top-hairline-row">
+        <div class="title-cluster" id="header-title-trigger" title="Click to toggle Simulation &amp; Gemini Studio Controls">
+          <h1 class="twin-title">DIGITAL TWIN: MOUNTAIN VIEW, CA</h1>
+          <span class="title-pipe">|</span>
+          <span class="twin-subtitle">EPSILON CITYSCOPE</span>
+        </div>
+
+        <div class="coord-cluster" id="header-coord-trigger" title="Click to reset 360° Isometric Orbital View">
+          <span id="view-mode-label">360° ISOMETRIC ORBITAL VIEW</span>
+          <span class="title-pipe">|</span>
+          <span class="coord-mono" id="cursor-coords">[LAT: 37.42N, LON: 122.08W]</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Bottom HUD: Left Traffic Telemetry | Center Expandable Sim Drawer | Right Greenspace & Population -->
+    <footer class="bottom-hud">
+      <!-- Layer 3: Live Ingestion & State (Matches North Star LIVE TRAFFIC FLOW 1:1) -->
+      <section class="telemetry-box" id="telemetry-left-card" aria-label="Live Traffic and Transit Telemetry" title="Click to open Simulation &amp; Gemini Controls">
+        <div class="telemetry-box-header">
+          <button class="sr-drawer-trigger" id="btn-drawer-toggle" type="button">LIVE TRAFFIC FLOW</button>
+          <span class="prov-badge model" id="prov-badge-traffic" title="Bureau of Public Roads Traffic Model">BPR MODEL</span>
+        </div>
+        <div class="traffic-row">
+          <span class="traffic-corridor">101:</span>
+          <span id="los-101" class="status-high">High</span>
+        </div>
+        <div class="traffic-row">
+          <span class="traffic-corridor">ECR:</span>
+          <span id="los-ecr" class="status-moderate">Moderate</span>
+        </div>
+        <div class="telemetry-provenance-footer" id="telemetry-provenance-footer">
+          <span class="prov-tag" id="prov-weather"><span class="prov-dot live">●</span> LIVE OPEN-METEO</span>
+          <span class="prov-tag" id="prov-tide"><span class="prov-dot live">●</span> NOAA 9414523</span>
+        </div>
+      </section>
+
+      <!-- Layer 4 & 5: SUMO / WebGPU Physics Simulation & Gemini 4 Argon / MCP Orchestration Drawer -->
+      <section class="center-dock" id="scenario-dock" aria-label="Simulation Scenarios and Gemini Urban Planner">
+        <div class="sim-drawer collapsed" id="sim-drawer">
+          <!-- Top Bar inside Drawer: GIS Layers & Camera Presets -->
+          <div class="drawer-nav-bar">
+            <div class="layer-pills" role="group" aria-label="3D Spatial GIS Layers">
+              <span class="group-label">GIS:</span>
+              <button class="arch-pill active" data-layer="massing" type="button">Massing &amp; Zoning</button>
+              <button class="arch-pill" data-layer="traffic" type="button">Traffic &amp; LOS</button>
+              <button class="arch-pill" data-layer="thermal" type="button">Solar &amp; Heat</button>
+              <button class="arch-pill" data-layer="flood" type="button">Bay Surge</button>
+            </div>
+
+            <div class="camera-pills" role="group" aria-label="Viewport & Camera Controls">
+              <button class="arch-pill active" data-cam="overview" type="button">City Table</button>
+              <button class="arch-pill" data-cam="bayshore" type="button">North Bayshore</button>
+              <button class="arch-pill" data-cam="castro" type="button">Castro &amp; Rail</button>
+              <button class="arch-pill" data-cam="sanantonio" type="button">San Antonio</button>
+              <button class="arch-pill" data-cam="moffett" type="button">Hangar One</button>
+              <button class="arch-pill" data-cam="southmv" type="button">South MV</button>
+              <button class="arch-pill" id="btn-tiles-toggle" type="button">3D Tiles</button>
+              <button class="arch-pill" id="btn-gemini-toggle" type="button">✦ Gemini Key</button>
+              <button class="arch-pill" id="btn-orbit-toggle" type="button">360° Orbit</button>
+              <button class="arch-pill" id="btn-pins-toggle" type="button">Pins: On</button>
+              <button class="arch-pill" id="btn-audio-toggle" type="button">♪ Audio</button>
+              <a href="./vault.html" class="arch-pill arch-link">Archive →</a>
+            </div>
+          </div>
+
+          <!-- Optional Google Photorealistic 3D Tiles Settings Drawer -->
+          <div class="tiles-settings-card collapsed" id="tiles-settings-card">
+            <div class="tiles-settings-header">
+              <span>GOOGLE 3D TILES (OPTIONAL)</span>
+              <button class="arch-pill" id="btn-close-tiles-settings" type="button">✕ Close</button>
+            </div>
+            <div class="tiles-settings-row">
+              <input type="text" id="tiles-key-input" class="nl-input" placeholder="Google Photorealistic 3D Tiles API Key (Optional — 100% functional without key)" aria-label="Google 3D Tiles Key" />
+              <button class="arch-pill active" id="btn-save-tiles-key" type="button">Save</button>
+              <button class="arch-pill" id="btn-clear-tiles-key" type="button">Clear</button>
+            </div>
+            <div class="tiles-settings-status" id="tiles-status-label">Status: Vector GIS Active (Zero keys required)</div>
+          </div>
+
+          <!-- Optional Gemini 2.5 Flash API Settings Drawer -->
+          <div class="tiles-settings-card collapsed" id="gemini-settings-card">
+            <div class="tiles-settings-header">
+              <span>GEMINI 2.5 FLASH API (OPTIONAL)</span>
+              <button class="arch-pill" id="btn-close-gemini-settings" type="button">✕ Close</button>
+            </div>
+            <div class="tiles-settings-row">
+              <input type="password" id="gemini-key-input" class="nl-input" placeholder="Gemini API Key (AIza... Optional — Local NL Compiler active by default)" aria-label="Gemini API Key" />
+              <button class="arch-pill active" id="btn-save-gemini-key" type="button">Save</button>
+              <button class="arch-pill" id="btn-clear-gemini-key" type="button">Clear</button>
+            </div>
+            <div class="tiles-settings-status" id="gemini-status-label">Status: [LOCAL NL-TO-GIS COMPILER] Active (Zero keys required)</div>
+          </div>
+
+          <!-- Preset What-If Scenario Buttons -->
+          <div class="scenario-bar" id="scenario-chips" role="group" aria-label="What-If Zoning Scenarios">
+            <button class="arch-pill active" data-scenario="baseline" type="button">2026 Baseline</button>
+            <button class="arch-pill" data-scenario="bayshore" type="button">North Bayshore (+7.2k Units)</button>
+            <button class="arch-pill" data-scenario="elcamino" type="button">El Camino &amp; Castro TOD</button>
+            <button class="arch-pill" data-scenario="eastwhisman" type="button">East Whisman TOD</button>
+            <button class="arch-pill" data-scenario="sponge" type="button">Sponge City 2040</button>
+          </div>
+
+          <div class="drawer-top-grid">
+            <div class="sliders-column">
+              <label class="slider-group">
+                <div class="slider-header">
+                  <span>Zoning FAR Cap</span>
+                  <span class="slider-val" id="val-far">2.4x</span>
+                </div>
+                <input id="slider-far" class="twin-slider" type="range" min="1.0" max="6.0" step="0.2" value="2.4" />
+              </label>
+
+              <label class="slider-group">
+                <div class="slider-header">
+                  <span>Transit &amp; Rail</span>
+                  <span class="slider-val" id="val-transit">25%</span>
+                </div>
+                <input id="slider-transit" class="twin-slider" type="range" min="10" max="85" step="1" value="25" />
+              </label>
+
+              <label class="slider-group">
+                <div class="slider-header">
+                  <span>Canopy &amp; Solar</span>
+                  <span class="slider-val" id="val-canopy">16%</span>
+                </div>
+                <input id="slider-canopy" class="twin-slider" type="range" min="10" max="55" step="1" value="16" />
+              </label>
+
+              <label class="slider-group">
+                <div class="slider-header">
+                  <span>Bay Surge (SLR)</span>
+                  <span class="slider-val" id="val-surge">0.0m</span>
+                </div>
+                <input id="slider-surge" class="twin-slider" type="range" min="0.0" max="2.0" step="0.1" value="0.0" />
+              </label>
+            </div>
+
+            <!-- Interactive 3D Parcel Inspector -->
+            <div class="parcel-inspector" id="parcel-inspector">
+              <div class="inspector-title">
+                <span id="parcel-id-label">PARCEL: MV-DT-104 (CASTRO TOD)</span>
+                <span id="parcel-zone-badge">CRA-MU</span>
+              </div>
+              <div class="inspector-meta" id="parcel-desc-label">
+                Click any 3D city block to inspect or re-zone its envelope.
+              </div>
+              <div class="inspector-stats" id="parcel-stats-label">
+                FAR 2.8 · 4 Stories · 142 Units · 310 Jobs
+              </div>
+              <div class="rezone-btns" role="group" aria-label="Rezone Selected Parcel">
+                <button class="rezone-btn" data-rezone="R1" type="button">R-1 Low</button>
+                <button class="rezone-btn" data-rezone="R3" type="button">R-3 Mid</button>
+                <button class="rezone-btn active" data-rezone="MU6" type="button">MU-6 Mixed</button>
+                <button class="rezone-btn" data-rezone="TOD10" type="button">TOD-10 High</button>
+                <button class="rezone-btn" data-rezone="PARK" type="button">Eco-Park</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gemini Natural Language Scenario Input -->
+          <form class="nl-command-bar" id="gemini-form" autocomplete="off">
+            <span class="nl-badge">✦ GEMINI PLANNER</span>
+            <input
+              id="gemini-prompt-input"
+              class="nl-input"
+              type="text"
+              placeholder="What-if: &quot;Upzone El Camino to 6 stories + BRT&quot;"
+              aria-label="Gemini What-If Urban Planning Prompt"
+            />
+            <button class="arch-pill active" id="btn-run-gemini" type="submit">Simulate</button>
+          </form>
+
+          <div class="gemini-synthesis" id="gemini-synthesis">
+            <span class="gemini-tag">GEMINI SIM //</span>
+            <span id="gemini-synthesis-text">[LOCAL NL-TO-GIS COMPILER] Baseline 2026 loaded: US-101 V/C 0.88 (High), ECR 0.64 (Moderate).</span>
+          </div>
+
+          <!-- Layer 3 Extended Telemetry Readouts -->
+          <div class="drawer-telemetry-strip">
+            <div class="telemetry-micro-row">
+              <span>CALTRAIN EMU</span>
+              <span class="telemetry-micro-val" id="metric-caltrain">12 min · 36.2k/d</span>
+            </div>
+            <div class="telemetry-micro-row">
+              <span>TRANSIT SHARE</span>
+              <span class="telemetry-micro-val" id="metric-mode-share">25.0%</span>
+            </div>
+            <div class="telemetry-micro-row">
+              <span>HEAT / SURGE</span>
+              <span class="telemetry-micro-val" id="metric-climate">0.0°C · 0.0m</span>
+            </div>
+          </div>
+
+          <div class="drawer-sub-metrics">
+            <span class="metric-delta" id="delta-greenspace">BASELINE</span>
+            <span class="metric-sub" id="metric-solar-sub">SOLAR PV: 48 MW · RUNOFF CAPTURE: 62%</span>
+            <span class="metric-delta" id="delta-population">RHNA +0</span>
+            <span class="metric-sub" id="metric-housing-sub">37,800 UNITS · JOBS/HOUSING 2.9:1</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Metric Stack matching North Star 1:1 -->
+      <section class="right-metrics-stack" id="telemetry-right-card" aria-label="City Greenspace and Population Metrics" title="Click to open Simulation &amp; Gemini Controls">
+        <div class="metric-card greenspace-card">
+          <div class="metric-label emerald-text">
+            <span>GREENSPACE %</span>
+          </div>
+          <div class="metric-value emerald-val" id="metric-greenspace">16.4</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-label">
+            <span>POPULATION</span>
+          </div>
+          <div class="metric-value" id="metric-population">81,500</div>
+        </div>
+      </section>
+    </footer>
+  </div>
+
+  <script type="module" src="./mountain-view.js?v=7"></script>
+</body>
+</html>

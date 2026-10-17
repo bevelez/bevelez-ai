@@ -49,17 +49,17 @@ const TAPES = [
   },
   {
     id: '04',
-    indexMeta: 'No. 04 — In Production',
-    title: 'Etude in Glass',
-    desc: 'Upcoming polyphonic harmonic study for bowed glass and resonant strings.',
-    unlocked: false,
-    url: null,
-    ctaLabel: 'In Production',
-    shellColor: 0x5c7a6b,
-    shellAttenuation: 0x2d4238,
-    ribColor: 0x486356,
-    hubColor: 0xf2efe9,
-    artStyle: 'etude'
+    indexMeta: 'No. 04 — Spatial GIS, Telemetry & Gemini Sim',
+    title: 'Mountain View Digital Twin',
+    desc: 'Interactive 3D city planning digital twin of Mountain View, CA. Run what-if zoning scenarios, simulate US-101 & Caltrain traffic or Bay climate impacts, and stream live telemetry.',
+    unlocked: true,
+    url: './mountain-view.html',
+    ctaLabel: 'Enter Digital Twin',
+    shellColor: 0x142624,
+    shellAttenuation: 0x071211,
+    ribColor: 0x0e1c1a,
+    hubColor: 0xefe9dc,
+    artStyle: 'mountainview'
   }
 ];
 
@@ -514,36 +514,131 @@ function drawNightDriveArtwork(ctx) {
   ctx.stroke();
 }
 
-function drawEtudeArtwork(ctx) {
-  ctx.fillStyle = '#ebe6dc';
+function drawMountainViewArtwork(ctx) {
+  // 1. Deep obsidian-slate & SF Bay emerald-teal cartographic backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#070c10');
+  bg.addColorStop(0.55, '#0b1919');
+  bg.addColorStop(1, '#102422');
+  ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 1024, 480);
 
-  ctx.strokeStyle = 'rgba(30, 42, 36, 0.35)';
-  ctx.lineWidth = 1.8;
-  for (let r = 22; r <= 88; r += 14) {
+  // Subtle GIS topographic grid & SF Bay wetland stipple on right half
+  ctx.save();
+  ctx.strokeStyle = 'rgba(72, 219, 178, 0.08)';
+  ctx.lineWidth = 1;
+  for (let gx = 480; gx < 1000; gx += 32) {
     ctx.beginPath();
-    ctx.arc(825, 140, r, 0, Math.PI * 2);
+    ctx.moveTo(gx, 28);
+    ctx.lineTo(gx, 392);
+    ctx.stroke();
+  }
+  for (let gy = 40; gy < 390; gy += 32) {
+    ctx.beginPath();
+    ctx.moveTo(480, gy);
+    ctx.lineTo(1000, gy);
     ctx.stroke();
   }
 
-  ctx.fillStyle = '#1e2a24';
-  ctx.font = '500 17px "JetBrains Mono", monospace';
-  ctx.fillText('ARCHIVAL STUDY  ·  POLYPHONIC GLASS', 56, 62);
+  // SF Bay Wetlands radial glow in upper-right
+  const bayGlow = ctx.createRadialGradient(855, 115, 10, 855, 115, 175);
+  bayGlow.addColorStop(0, 'rgba(64, 214, 172, 0.28)');
+  bayGlow.addColorStop(0.55, 'rgba(0, 210, 255, 0.10)');
+  bayGlow.addColorStop(1, 'rgba(7, 12, 16, 0)');
+  ctx.fillStyle = bayGlow;
+  ctx.fillRect(0, 0, 1024, 480);
 
-  ctx.font = 'italic 600 68px "Cormorant Garamond", "Georgia", serif';
-  ctx.fillText('Etude in Glass', 54, 132);
+  // Shoreline Amphitheatre iconic white tensile twin peaks (right stage x=845, y=135)
+  ctx.fillStyle = 'rgba(244, 241, 232, 0.92)';
+  ctx.beginPath();
+  ctx.moveTo(785, 156);
+  ctx.quadraticCurveTo(812, 138, 826, 92);
+  ctx.quadraticCurveTo(844, 132, 864, 96);
+  ctx.quadraticCurveTo(878, 138, 906, 156);
+  ctx.quadraticCurveTo(845, 168, 785, 156);
+  ctx.closePath();
+  ctx.fill();
 
+  // Google Bay View Dragon-Scale Canopy diamond lattice (x=830..955, y=185..250)
+  ctx.strokeStyle = 'rgba(238, 194, 118, 0.78)';
+  ctx.lineWidth = 1.5;
+  for (let r = 0; r < 4; r++) {
+    for (let c = 0; c < 5; c++) {
+      const dx = 838 + c * 22 + (r % 2) * 11;
+      const dy = 195 + r * 14;
+      ctx.beginPath();
+      ctx.moveTo(dx, dy - 7);
+      ctx.lineTo(dx + 10, dy);
+      ctx.lineTo(dx, dy + 7);
+      ctx.lineTo(dx - 10, dy);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+
+  // US-101 & Caltrain Cyan Telemetry Corridors + Castro St Amber Spine
+  ctx.strokeStyle = '#38e8ff';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(760, 255);
+  ctx.lineTo(975, 315);
+  ctx.moveTo(775, 282);
+  ctx.lineTo(975, 342);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#f3b659';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(815, 365);
+  ctx.lineTo(895, 245);
+  ctx.stroke();
+  ctx.restore();
+
+  // Lower Telemetry Frieze
+  ctx.fillStyle = '#05090c';
+  ctx.fillRect(16, 396, 992, 68);
+
+  ctx.strokeStyle = '#d8b474';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  // Live telemetry bar ticks along bottom frieze
+  for (let i = 0; i < 28; i++) {
+    const bx = 280 + i * 16;
+    const bh = 8 + Math.round(Math.abs(Math.sin(i * 0.65)) * 22);
+    ctx.fillStyle = i % 3 === 0 ? '#42e6b5' : (i % 2 === 0 ? '#38e8ff' : '#e0bc7c');
+    ctx.fillRect(bx, 442 - bh, 8, bh);
+  }
+
+  // Editorial Typography & GIS Metadata
+  ctx.fillStyle = '#42e6b5';
   ctx.font = '500 16px "JetBrains Mono", monospace';
-  ctx.fillText('SIDE A', 56, 245);
-  ctx.font = '400 15px "JetBrains Mono", monospace';
-  ctx.fillText('UPCOMING', 56, 270);
+  ctx.fillText('37.3861° N, 122.0839° W  ·  3D GIS + TELEMETRY + GEMINI SIM', 56, 62);
 
+  ctx.fillStyle = '#f5f2ea';
+  ctx.font = 'italic 600 64px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillText('Mountain View', 54, 130);
+
+  ctx.fillStyle = '#e0bc7c';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('DIGITAL TWIN', 56, 242);
+  ctx.fillStyle = 'rgba(245, 242, 234, 0.74)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('ZONING ENGINE', 56, 268);
+  ctx.fillText('101 / CALTRAIN', 56, 292);
+  ctx.fillText('BAY RESILIENCE', 56, 316);
+
+  ctx.fillStyle = '#e0bc7c';
+  ctx.font = '400 15px "JetBrains Mono", monospace';
   ctx.fillText('NO. 04', 56, 436);
   ctx.textAlign = 'right';
-  ctx.fillText('60 MIN', 968, 436);
+  ctx.fillText('CITYSCOPE · LIVE SIM', 968, 436);
   ctx.textAlign = 'left';
 
-  ctx.strokeStyle = 'rgba(30, 42, 36, 0.35)';
+  ctx.strokeStyle = 'rgba(216, 180, 116, 0.62)';
   ctx.lineWidth = 3;
   roundedRectPath(ctx, 26, 24, 972, 432, 20);
   ctx.stroke();
@@ -566,7 +661,7 @@ function createCassetteStickerTexture(tape) {
   } else if (tape.artStyle === 'drive') {
     drawNightDriveArtwork(ctx);
   } else {
-    drawEtudeArtwork(ctx);
+    drawMountainViewArtwork(ctx);
   }
   ctx.restore();
 
@@ -583,7 +678,7 @@ function createCassetteStickerTexture(tape) {
   ctx.restore();
 
   ctx.save();
-  ctx.strokeStyle = tape.artStyle === 'etude' ? '#1e2a24' : '#c8ad78';
+  ctx.strokeStyle = '#c8ad78';
   ctx.lineWidth = 6;
   roundedRectPath(ctx, winX, winY, winW, winH, winR);
   ctx.stroke();
@@ -970,6 +1065,7 @@ let isAutoOrbit = true;
 const tapeItems = TAPES.map((tape, idx) => {
   const cardEl = document.createElement('article');
   cardEl.className = `tape-card ${tape.unlocked ? 'unlocked' : 'locked'}`;
+  cardEl.dataset.url = tape.url || '';
   cardEl.setAttribute('role', tape.unlocked ? 'link' : 'region');
   if (tape.unlocked) {
     cardEl.tabIndex = 0;
