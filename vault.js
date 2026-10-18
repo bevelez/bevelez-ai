@@ -51,7 +51,7 @@ const TAPES = [
     id: '04',
     indexMeta: 'No. 04 — The City in 3D, Day & Night',
     title: 'Mountain View 3D',
-    desc: 'Mountain View, CA as a 3D map you can orbit, by day and by night: every street, park and creek, 8,000 buildings, trees along the blocks, Moffett Field, the Googleplex and the Shoreline tent, with the windows and street lights coming on after dark.',
+    desc: 'Mountain View, CA as a 3D map you can orbit, by day and by night: every street, park and creek, 8,000 buildings, trees along the blocks, Moffett Field, the Googleplex and the Shoreline tent, with the windows and street lights coming on after dark. Press Ride for a first-person bike commute up the Stevens Creek Trail to Gradient Canopy.',
     unlocked: true,
     url: './mountain-view.html',
     ctaLabel: 'Open the Map',

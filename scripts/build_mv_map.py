@@ -3,7 +3,8 @@
 Builds assets/mountain-view-map.json, the compact map bundle behind mountain-view.html.
 
 Sources (OpenStreetMap via Overpass, ODbL; Microsoft Global ML Building Footprints heights):
-  --gis    assets/mountain-view-gis.json   (8,010 cleaned building footprints with heights)
+  --gis    the cleaned building footprints with heights (8,010). No longer shipped; recover it with
+           `git show d78cd26:assets/mountain-view-gis.json > /tmp/mountain-view-gis.json`
   --cache  a folder holding the raw Overpass dumps streets_and_aeroway_raw.json,
            infrastructure_raw.json and boundary_and_water_raw.json (not shipped; see
            scripts/build_mv_gis.py in git history for how they were fetched).
@@ -111,7 +112,7 @@ ROAD_CLASS = {
 ICON = [
     (re.compile(r"hangar one", re.I), "hangar1"),
     (re.compile(r"hangar (2|3|two|three)", re.I), "hangar"),
-    (re.compile(r"bay view canopy", re.I), "canopy"),
+    (re.compile(r"canopy", re.I), "canopy"),
     (re.compile(r"amphitheat", re.I), "amphitheatre"),
     (re.compile(r"computer history museum", re.I), "chm"),
     (re.compile(r"^google", re.I), "google"),

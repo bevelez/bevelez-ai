@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
-  <link rel="stylesheet" href="./mountain-view.css?v=2" />
+  <link rel="stylesheet" href="./mountain-view.css?v=3" />
   <script type="importmap">
     {
       "imports": {
@@ -39,6 +39,10 @@
       <span class="moon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></span>
       <span class="knob" aria-hidden="true"></span>
     </button>
+    <button class="pill ride-btn" id="ride" type="button" aria-label="Bike to work: a first-person ride" title="Bike to work">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="17" r="3.5"/><circle cx="18.5" cy="17" r="3.5"/><path d="M5.5 17l4-8h5l4 8M9.5 9l-1-3h3M14.5 9l-2 8"/></svg>
+      <span class="t">Ride</span>
+    </button>
     <button class="pill icon" id="home" type="button" aria-label="Reset the view" title="Reset the view">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 7v10h-5v-6H9v6H4V10z"/></svg>
     </button>
@@ -52,6 +56,6 @@
 
   <div id="loading"><div><div class="ring"></div><div class="msg" id="loading-msg">Building Mountain View…</div></div></div>
 
-  <script type="module" src="./mountain-view.js?v=2"></script>
+  <script type="module" src="./mountain-view.js?v=3"></script>
 </body>
 </html>
