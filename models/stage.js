@@ -6,7 +6,7 @@ import {
   mergeStaticGroupMeshes,
   createLightPoolTexture,
   createContactShadowDecal
-} from './shared.js?v=20261018n';
+} from './shared.js?v=20261018r';
 
 // ============================================================================
 // 4. BOOMBOX SOUND-SYSTEM TRUCK LEVEL 3 (WITH EMBEDDED DJ KRONOS IN BOOTH!)
