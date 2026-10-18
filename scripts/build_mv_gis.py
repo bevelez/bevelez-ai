@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Mountain View Geospatial Data Bundle Builder & Verifier
-Unified 1:1 OpenStreetMap GIS Engine (Teams 1, 2, 3, and 4)
+Unified 1:1 OpenStreetMap + Microsoft Global ML Building Heights GIS Engine
 
 Fetches, extracts, cleans, and bundles authentic 1:1 geospatial data covering the entire
 City of Mountain View municipal boundary (37.355°N to 37.445°N, -122.120°W to -122.040°W)
@@ -9,8 +9,19 @@ into assets/mountain-view-gis.json.
 
 Data Provenance:
 - OpenStreetMap (Overpass API) under Open Database License (ODbL)
+- Microsoft Global ML Building Footprints (2026-02-03 release, Bing Quadkey 023010230, ODbL)
 - City of Mountain View Precise Plans (North Bayshore, East Whisman, El Camino Real, San Antonio, Downtown)
-- USGS 3DEP / NOAA NAVD88 Elevation Datum
+- Copernicus DEM GLO-90 / NASA SRTM 90m Elevation Datum via Open-Meteo Elevation API
+
+Regenerating Local Cache (data/osm_cache/ — gitignored, not shipped to production):
+  Run `python3 scripts/build_mv_gis.py --fetch-cache` to download and populate `data/osm_cache/`:
+  1. `infrastructure_raw.json`, `streets_and_aeroway_raw.json`, `boundary_and_water_raw.json`,
+     `buildings_tagged_raw.json`, `all_buildings_raw.json` from `https://overpass-api.de/api/interpreter`
+     over bounding box `(37.355,-122.120,37.445,-122.040)`.
+  2. `elevation_grid_srtm.json` from `https://api.open-meteo.com/v1/elevation` (20x20 grid over MV_BOUNDS).
+  3. `ms_buildings_mv_heights.json` from Microsoft Global ML Building Footprints
+     (`https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv`,
+     RegionName=UnitedStates, QuadKey=023010230, filtered to MV_BOUNDS with height > 0).
 """
 
 import sys
@@ -1368,6 +1379,50 @@ def build_gis_bundle():
     print(f"Extracted {len(final_buildings)} building footprints (core: {len(core_buildings)}, residential sampled: {len(res_sampled)})")
 
     # =========================================================================
+    # 9b. Enrich Building Heights from Microsoft Global ML Building Footprints
+    #     (2026-02-03 release, quadkey 023010230, 38,273 Mountain View buildings)
+    # =========================================================================
+    ms_heights_path = os.path.join(CACHE_DIR, "ms_buildings_mv_heights.json")
+    if os.path.exists(ms_heights_path):
+        with open(ms_heights_path, "r", encoding="utf-8") as mf:
+            ms_payload = json.load(mf)
+        ms_list = ms_payload.get("buildings", []) if isinstance(ms_payload, dict) else ms_payload
+        ms_grid = defaultdict(list)
+        ms_cell = 0.0005  # ~50m grid cells
+        for idx_m, mb in enumerate(ms_list):
+            gx = int(math.floor(mb["lon"] / ms_cell))
+            gy = int(math.floor(mb["lat"] / ms_cell))
+            ms_grid[(gx, gy)].append(mb)
+
+        ms_matched_count = 0
+        for b_item in final_buildings:
+            if b_item.get("height_source") != "district_zoning_default":
+                continue
+            blon, blat = b_item["center"]
+            gx = int(math.floor(blon / ms_cell))
+            gy = int(math.floor(blat / ms_cell))
+            best_mb = None
+            best_score = 999999.0
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    for mb in ms_grid.get((gx + dx, gy + dy), ()):
+                        # Distance in meters between OSM footprint centroid and MS footprint centroid
+                        dist_m = math.hypot((blon - mb["lon"]) * 88300.0, (blat - mb["lat"]) * 110900.0)
+                        in_aabb = (mb["min_lon"] - 0.00008 <= blon <= mb["max_lon"] + 0.00008 and
+                                   mb["min_lat"] - 0.00008 <= blat <= mb["max_lat"] + 0.00008)
+                        score = dist_m * (0.45 if in_aabb else 1.0)
+                        if (in_aabb or dist_m <= 22.0) and score < best_score:
+                            best_score = score
+                            best_mb = mb
+            if best_mb is not None and best_mb.get("height_m", 0) > 0:
+                hm = round(float(best_mb["height_m"]), 1)
+                b_item["height_m"] = hm
+                b_item["levels"] = max(1, int(round(hm / 3.5)))
+                b_item["height_source"] = "ms_global_ml"
+                ms_matched_count += 1
+        print(f"Matched {ms_matched_count:,} buildings to Microsoft Global ML Building Footprints heights")
+
+    # =========================================================================
     # 10. Assemble Complete GIS Dataset (Section 3: stripped unused keys
     #     city_boundary, exclaves, enclaves, local_streets, districts)
     # =========================================================================
@@ -1390,8 +1445,8 @@ def build_gis_bundle():
         "parks": parks,
         "elevation_grid": elevation_grid,
         "metadata": {
-            "provenance": "OpenStreetMap contributors (ODbL), City of Mountain View Precise Plans, Copernicus DEM GLO-90 / NASA SRTM 90m Elevation (Open-Meteo API)",
-            "extracted_at": "2026-10-17T18:05:00Z",
+            "provenance": "OpenStreetMap contributors (ODbL), Microsoft Global ML Building Footprints (ODbL, 2026-02-03 quadkey 023010230), City of Mountain View Precise Plans, Copernicus DEM GLO-90 / NASA SRTM 90m Elevation (Open-Meteo API)",
+            "extracted_at": "2026-10-17T22:30:00Z",
             "bounding_box": [MV_BOUNDS["minLat"], MV_BOUNDS["minLon"], MV_BOUNDS["maxLat"], MV_BOUNDS["maxLon"]],
             "building_count": len(final_buildings),
             "height_sources": height_sources,

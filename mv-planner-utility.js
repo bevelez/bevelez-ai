@@ -14,13 +14,17 @@
 
 import {
   PROVENANCE,
+  CITY_DEMOGRAPHICS_BASELINE,
   RHNA_6TH_CYCLE,
+  ITE_TRIP_RATES,
+  CAPCOA_VMT_MODEL,
+  PRO_FORMA_CONSTANTS,
   getDistrictMultiplier,
   resolveDistrictKey
 } from './sim/constants.js';
 
 // ABAG 6th Cycle RHNA Targets for City of Mountain View (2023–2031)
-// Source: https://abag.ca.gov/sites/default/files/documents/2021-12/Final_RHNA_Allocation_Plan_2023-2031.pdf
+// Source: https://abag.ca.gov/sites/default/files/documents/2021-12/Final_RHNA_Allocation_Plan_2023-2031.pdf (2021-12-16)
 export const RHNA_MANDATES = Object.freeze({
   targetTotal: RHNA_6TH_CYCLE.total,        // 11,135
   veryLow: RHNA_6TH_CYCLE.veryLow,          // 2,773 (<50% AMI)
@@ -29,14 +33,8 @@ export const RHNA_MANDATES = Object.freeze({
   aboveModerate: RHNA_6TH_CYCLE.aboveModerate // 4,880 (>120% AMI)
 });
 
-// Illustrative inclusionary affordability splits by zoning envelope (MODELED)
-const INCLUSIONARY_SPLITS = {
-  TOD10: { veryLow: 0.15, low: 0.10, moderate: 0.10, aboveModerate: 0.65 },
-  MU6:   { veryLow: 0.10, low: 0.08, moderate: 0.07, aboveModerate: 0.75 },
-  R3:    { veryLow: 0.05, low: 0.05, moderate: 0.10, aboveModerate: 0.80 },
-  R1:    { veryLow: 0.00, low: 0.10, moderate: 0.30, aboveModerate: 0.60 },
-  PARK:  { veryLow: 0.00, low: 0.00, moderate: 0.00, aboveModerate: 0.00 }
-};
+// Illustrative inclusionary affordability splits by zoning envelope (PRO_FORMA_CONSTANTS, PLACEHOLDER)
+const INCLUSIONARY_SPLITS = PRO_FORMA_CONSTANTS.inclusionarySplits;
 
 // 5 Mountain View Precise Plan District Definitions
 export const PLANNER_DISTRICT_DEFS = {
@@ -115,22 +113,11 @@ const CALTRAIN_STATIONS = {
   }
 };
 
-// Illustrative ITE Trip Generation Rates (trips per unit/job per weekday, MODELED)
-const ITE_RATES = {
-  R1:    { res: 9.44, job: 2.80 },
-  R3:    { res: 5.44, job: 2.50 },
-  MU6:   { res: 4.54, job: 2.20 },
-  TOD10: { res: 3.80, job: 1.80 },
-  PARK:  { res: 0.00, job: 0.20 }
-};
+// ITE Trip Generation Manual 11th Edition (2021-09) weekday rates from sim/constants.js
+const ITE_RATES = ITE_TRIP_RATES.rates || ITE_TRIP_RATES;
 
-const STORMWATER_RETENTION_FRACTIONS = {
-  PARK:  0.90,
-  R1:    0.55,
-  R3:    0.40,
-  MU6:   0.30,
-  TOD10: 0.25
-};
+// Unsourced illustrative stormwater retention ratios from sim/constants.js (PROVENANCE.PLACEHOLDER)
+const STORMWATER_RETENTION_FRACTIONS = PRO_FORMA_CONSTANTS.stormwaterRetentionFractions;
 
 function haversineDistanceMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -441,8 +428,8 @@ export function createPlannerUtility(twinInstance) {
       dwellingUnits = 0;
       commercialJobs = Math.max(1, Math.round(footprintSqm * 0.0001));
     } else {
-      dwellingUnits = Math.max(1, Math.round((gfaSqm * fRes) / 85.0));
-      commercialJobs = Math.max(1, Math.round((gfaSqm * (1.0 - fRes)) / 26.0));
+      dwellingUnits = Math.max(1, Math.round((gfaSqm * fRes) / PRO_FORMA_CONSTANTS.avgUnitAreaM2));
+      commercialJobs = Math.max(1, Math.round((gfaSqm * (1.0 - fRes)) / PRO_FORMA_CONSTANTS.avgJobAreaM2));
     }
 
     const distDowntownM = haversineDistanceMeters(lat, lon, CALTRAIN_STATIONS.downtown.lat, CALTRAIN_STATIONS.downtown.lon);
@@ -450,10 +437,10 @@ export function createPlannerUtility(twinInstance) {
     const transitProximityMeters = Math.min(distDowntownM, distSanAntonioM);
     const nearestStation = distDowntownM <= distSanAntonioM ? CALTRAIN_STATIONS.downtown.name : CALTRAIN_STATIONS.sanAntonio.name;
 
-    // Illustrative transit-proximity VMT attenuation curve (MODELED)
-    const vmtBaseReduction = 0.38 * Math.exp(-transitProximityMeters / 1100);
-    const todBonus = (zoneKey === 'TOD10') ? 0.04 : 0.0;
-    const clampedVmtRatio = Math.max(0.05, Math.min(0.42, vmtBaseReduction + todBonus));
+    // CAPCOA Measure T-1 / T-6 transit-proximity VMT attenuation curve (CAPCOA Dec 2021)
+    const vmtBaseReduction = CAPCOA_VMT_MODEL.maxBaseReduction * Math.exp(-transitProximityMeters / CAPCOA_VMT_MODEL.decayDistanceMeters);
+    const todBonus = (zoneKey === 'TOD10') ? CAPCOA_VMT_MODEL.todBonus : 0.0;
+    const clampedVmtRatio = Math.max(CAPCOA_VMT_MODEL.minReduction, Math.min(CAPCOA_VMT_MODEL.maxTotalReduction, vmtBaseReduction + todBonus));
     const vmtReductionPercent = +(clampedVmtRatio * 100).toFixed(1);
 
     const rates = ITE_RATES[zoneKey] || ITE_RATES.MU6;
@@ -464,13 +451,14 @@ export function createPlannerUtility(twinInstance) {
     const solarPvPotentialKw = +((footprintSqm * usableRoof * 780.0 * 0.20 * 0.86) / 1000).toFixed(1);
     const solarAnnualMwh = +((solarPvPotentialKw * 1650) / 1000).toFixed(1);
 
-    const designStormM = 0.01905; // 0.75-inch storm depth (m)
+    const designStormM = PRO_FORMA_CONSTANTS.designStormDepthM; // 0.75-inch storm depth (m, PLACEHOLDER)
     const precipVolumeM3 = footprintSqm * designStormM;
     const retainRatio = STORMWATER_RETENTION_FRACTIONS[zoneKey] || 0.30;
     const stormwaterRetentionM3 = +(precipVolumeM3 * retainRatio).toFixed(1);
 
     return {
       provenance: PROVENANCE.MODELED,
+      placeholderProvenance: PROVENANCE.PLACEHOLDER,
       isStaticOsmBuilding,
       parcelId: p.id,
       buildingName: p.name || '',

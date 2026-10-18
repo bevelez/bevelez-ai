@@ -403,6 +403,12 @@
       border: 1px solid rgba(72, 236, 255, 0.28);
     }
 
+    .prov-badge.placeholder {
+      background: rgba(242, 174, 73, 0.16);
+      color: var(--amber);
+      border: 1px solid rgba(242, 174, 73, 0.38);
+    }
+
     .telemetry-provenance-footer {
       display: flex;
       align-items: center;
@@ -845,6 +851,60 @@
       padding: 0;
     }
 
+    /* One-time 3-Step First-Run Hint Strip (No modal, no bento; dismissible + persisted in localStorage) */
+    .first-run-hint {
+      pointer-events: auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 6px;
+      padding: 5px 10px;
+      background: rgba(10, 14, 20, 0.84);
+      border: 1px solid rgba(124, 242, 214, 0.34);
+      border-radius: 4px;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      color: var(--ink);
+      letter-spacing: 0.02em;
+    }
+    .first-run-hint[hidden],
+    .first-run-hint.dismissed {
+      display: none !important;
+    }
+    .first-run-steps {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      min-width: 0;
+    }
+    .hint-step strong {
+      color: var(--emerald);
+      font-weight: 600;
+    }
+    .hint-sep {
+      color: var(--muted);
+    }
+    .hint-dismiss-btn {
+      flex-shrink: 0;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(226, 230, 236, 0.25);
+      color: var(--ink);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.52rem;
+      padding: 2px 7px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+    .hint-dismiss-btn:hover {
+      border-color: var(--emerald);
+      background: rgba(124, 242, 214, 0.12);
+    }
+
     /* Responsive Mobile & Fold 8 Ergonomics */
     @media (max-width: 960px) {
       .ui-shell {
@@ -854,8 +914,15 @@
         display: none;
       }
       .bottom-hud {
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: 8px;
+      }
+      .telemetry-box,
+      .right-metrics-stack,
+      .metric-card {
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
       }
       .center-dock {
         grid-column: 1 / -1;
@@ -898,6 +965,18 @@
         font-size: 0.51rem;
         padding: 3px 5px;
       }
+      .first-run-hint {
+        padding: 4px 7px;
+        gap: 6px;
+        font-size: 0.47rem;
+      }
+      .first-run-steps {
+        gap: 2px 6px;
+      }
+      .hint-dismiss-btn {
+        font-size: 0.46rem;
+        padding: 2px 5px;
+      }
       .sim-drawer {
         padding: 7px 9px;
         gap: 6px;
@@ -908,17 +987,29 @@
         gap: 5px 8px;
       }
       .bottom-hud {
+        grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
         gap: 6px;
       }
       .telemetry-box {
-        padding: 8px 10px;
+        padding: 6px 8px;
+        min-width: 0;
+        overflow: hidden;
       }
       .telemetry-box-header {
-        font-size: 0.58rem;
-        margin-bottom: 4px;
+        font-size: 0.48rem;
+        margin-bottom: 3px;
+        flex-wrap: wrap;
+        gap: 2px 4px;
+        white-space: normal;
       }
       .traffic-row {
-        font-size: 0.82rem;
+        font-size: 0.76rem;
+      }
+      .telemetry-provenance-footer {
+        flex-wrap: wrap;
+        gap: 2px 5px;
+        font-size: 0.43rem;
+        margin-top: 3px;
       }
       .telemetry-micro-row {
         font-size: 0.49rem;
@@ -927,13 +1018,17 @@
         white-space: nowrap;
       }
       .metric-card {
-        padding: 7px 10px;
+        padding: 6px 8px;
+        min-width: 0;
+        overflow: hidden;
       }
       .metric-label {
-        font-size: 0.58rem;
+        font-size: 0.51rem;
+        gap: 4px;
+        flex-wrap: wrap;
       }
       .metric-value {
-        font-size: 1.24rem;
+        font-size: 1.16rem;
       }
       .metric-sub,
       .metric-delta {
@@ -1612,6 +1707,26 @@
         <button class="arch-pill" data-cam="moffett" type="button">NASA Hangar One</button>
         <button class="arch-pill" data-cam="overview" type="button">Full City</button>
       </nav>
+
+      <!-- One-Time 3-Step First-Run Hint (No modal, no bento; dismissible & remembered in localStorage) -->
+      <div class="first-run-hint" id="first-run-hint" role="region" aria-label="First-Run Quick Start">
+        <div class="first-run-steps">
+          <span class="hint-step"><strong>1.</strong> Click a building</span>
+          <span class="hint-sep" aria-hidden="true">·</span>
+          <span class="hint-step"><strong>2.</strong> Drag the FAR slider</span>
+          <span class="hint-sep" aria-hidden="true">·</span>
+          <span class="hint-step"><strong>3.</strong> Open Decision Support</span>
+        </div>
+        <button class="hint-dismiss-btn" id="btn-dismiss-first-run-hint" type="button" aria-label="Dismiss quick start hint">✕ Dismiss</button>
+      </div>
+      <script>
+        try {
+          if (localStorage.getItem('mv_twin_first_run_dismissed') === '1') {
+            var _frh = document.getElementById('first-run-hint');
+            if (_frh) { _frh.hidden = true; _frh.classList.add('dismissed'); }
+          }
+        } catch (_e) {}
+      </script>
     </header>
 
     <!-- Bottom HUD: Left Traffic Model | Center Expandable Sim & Planner Drawers | Right Greenspace & Population -->
@@ -1679,7 +1794,7 @@
                 <div class="rhna-bar-fill" id="rhna-bar-fill" style="width: 0%;"></div>
               </div>
               <div class="rhna-footnote">
-                <span>Modeled Inclusionary Share: <strong id="rhna-inclusionary-rate">15.0%</strong></span>
+                <span>Modeled Inclusionary Share: <strong id="rhna-inclusionary-rate">15.0%</strong> <span class="prov-badge placeholder" title="Unsourced illustrative inclusionary zoning split (PRO_FORMA_CONSTANTS)">PLACEHOLDER</span></span>
                 <span>ABAG 6th-Cycle Target: 11,135 Total Units</span>
               </div>
             </div>
@@ -1918,7 +2033,7 @@
                   <span class="pf-val" id="pf-gfa">3,500 m² (37,673 sq ft)</span>
                 </div>
                 <div class="pf-stat-item">
-                  <span class="pf-label">CAPACITY:</span>
+                  <span class="pf-label">CAPACITY <span class="prov-badge placeholder" title="Unsourced illustrative pro-forma constants: 85 m²/unit &amp; 26 m²/job (PRO_FORMA_CONSTANTS)">PLACEHOLDER</span>:</span>
                   <span class="pf-val" id="pf-yields">142 DU · 310 Jobs</span>
                 </div>
                 <div class="pf-stat-item">
@@ -1930,7 +2045,7 @@
                   <span class="pf-val" id="pf-vmt">-24.5% VMT (280m to Caltrain)</span>
                 </div>
                 <div class="pf-stat-item">
-                  <span class="pf-label">ECO-MODEL:</span>
+                  <span class="pf-label">ECO-MODEL <span class="prov-badge placeholder" title="Stormwater runoff uses unsourced illustrative 0.75-in design storm &amp; zone retention fractions (PRO_FORMA_CONSTANTS)">PLACEHOLDER</span>:</span>
                   <span class="pf-val" id="pf-eco">130 kW Solar · 45 m³ Runoff</span>
                 </div>
               </div>
@@ -1958,7 +2073,7 @@
 
           <!-- Natural Language Scenario Input -->
           <form class="nl-command-bar" id="gemini-form" autocomplete="off">
-            <span class="nl-badge">✦ NL PLANNER</span>
+            <span class="nl-badge" id="nl-engine-badge">LOCAL COMPILER</span>
             <input
               id="gemini-prompt-input"
               class="nl-input"
@@ -1970,7 +2085,7 @@
           </form>
 
           <div class="gemini-synthesis" id="gemini-synthesis">
-            <span class="gemini-tag">MODEL LOG //</span>
+            <span class="gemini-tag" id="gemini-synthesis-badge">LOCAL COMPILER</span>
             <span id="gemini-synthesis-text">Client-side deterministic models initialized: BPR traffic (US-101 V/C 0.88, ECR 0.64), Spencer solar geometry, SRTM bilinear flood grid, ABAG 6th-Cycle RHNA.</span>
           </div>
 
@@ -1998,9 +2113,9 @@
           </div>
         </div>
 
-        <!-- Visible OpenStreetMap ODbL Attribution -->
+        <!-- Visible OpenStreetMap ODbL & Microsoft Global ML Building Footprints Attribution -->
         <div class="osm-attribution-bar" id="osm-attribution-bar">
-          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL) · Elevation: Copernicus DEM / SRTM (Open-Meteo) · Telemetry: Open-Meteo &amp; NOAA CO-OPS 9414523
+          Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> &amp; Microsoft Global ML Building Footprints (ODbL) · Elevation: Copernicus DEM / SRTM (Open-Meteo) · Telemetry: Open-Meteo &amp; NOAA CO-OPS 9414523
         </div>
       </section>
 
@@ -2025,6 +2140,6 @@
     </footer>
   </div>
 
-  <script type="module" src="./mountain-view.js?v=8"></script>
+  <script type="module" src="./mountain-view.js?v=9"></script>
 </body>
 </html>

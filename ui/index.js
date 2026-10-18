@@ -1,19 +1,69 @@
 /**
- * ui/index.js — Natural Language Planning Compiler (Word-Boundary Tokenizer + Gemini JSON Tool Calls),
- * GeminiUrbanBridge Class, and Accessibility / Keyboard Navigation Controls for Mountain View Digital Twin.
+ * ui/index.js — Natural Language Planning Compiler (Word-Boundary Tokenizer + Gemini 2.5 Flash JSON Tool Schema),
+ * GeminiUrbanBridge Class, First-Run 3-Step Hint, and Accessibility / Keyboard Navigation Controls
+ * for the Mountain View Digital Twin.
  *
- * Fixes from Remediation Brief Sections 1, 2, 4, 5:
- * - Bug #7 Fixed: Replaces substring `.includes('sea')` / `.includes('tod')` matching with a strict
- *   word-boundary tokenizer and explicit action-verb + target-entity intent table.
- *   Regression verified: `"What does the research say about today?"` produces ZERO state changes.
- * - Bug #8 Fixed: Sends Gemini API key strictly in the `x-goog-api-key` HTTP header (never in URL query string),
- *   never prints key fragments in the UI, and uses structured JSON output (`responseMimeType: "application/json"`)
- *   so Gemini returns executable tool calls (`set_far`, `rezone_district`, `set_surge`, `set_transit_share`, `set_canopy`)
- *   that drive the simulation.
- * - Section 1 Fixed: Removes all fake MCP tool names and non-existent stack claims.
+ * Phase 1 & Phase 2 Implementation:
+ * - Bug #7 Fixed: Word-boundary tokenizer + explicit command-verb intent parser.
+ *   Regression verified: `"What does the research say about today?"` produces ZERO state mutations through both
+ *   the Gemini 2.5 Flash path and the Local Compiler fallback path.
+ * - Bug #8 & Phase 2 Item 2: Sends Gemini API key strictly in the `x-goog-api-key` HTTP header (never in URL,
+ *   never logged or displayed in the DOM). Sends explicit JSON `responseSchema` of tools:
+ *   `set_far_cap`, `set_transit_share`, `set_canopy`, `set_surge`, `rezone_district(district, zone)`, `reset_baseline`.
+ *   Applies returned tool calls through the same functions the sliders and district controls use.
+ *   Badges every result `"GEMINI 2.5 FLASH · n tool calls"` or `"LOCAL COMPILER"`.
+ * - Phase 2 Item 5: One-time 3-step first-run hint (`#first-run-hint`), dismissible and persisted in `localStorage`
+ *   under `'mv_twin_first_run_dismissed'`.
  */
 
 import { SCENARIO_PRESETS, resolveDistrictKey } from '../sim/constants.js';
+
+export const FIRST_RUN_STORAGE_KEY = 'mv_twin_first_run_dismissed';
+
+export const GEMINI_TOOL_SCHEMA = Object.freeze({
+  type: 'OBJECT',
+  properties: {
+    tool_calls: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          tool: {
+            type: 'STRING',
+            enum: [
+              'set_far_cap',
+              'set_transit_share',
+              'set_canopy',
+              'set_surge',
+              'rezone_district',
+              'reset_baseline'
+            ]
+          },
+          args: {
+            type: 'OBJECT',
+            properties: {
+              far: { type: 'NUMBER' },
+              transitSharePct: { type: 'NUMBER' },
+              canopyPct: { type: 'NUMBER' },
+              surgeMeters: { type: 'NUMBER' },
+              district: {
+                type: 'STRING',
+                enum: ['NB_PP', 'DT_CRA', 'ECR_MU', 'EW_TOD', 'SA_PP', 'RES_SF']
+              },
+              zone: {
+                type: 'STRING',
+                enum: ['TOD10', 'MU6', 'R3', 'R1', 'PARK']
+              }
+            }
+          }
+        },
+        required: ['tool']
+      }
+    },
+    summary: { type: 'STRING' }
+  },
+  required: ['tool_calls', 'summary']
+});
 
 /**
  * Tokenize natural language input into lowercase whole words using word boundaries (\b).
@@ -25,11 +75,32 @@ export function tokenizePromptWords(promptText) {
 }
 
 /**
- * Deterministic Word-Boundary Natural Language Intent Parser (Bug #7 Fixed).
- * Returns `{ mutated: boolean, toolCalls: Array<{tool: string, args: object}>, explanation: string }`.
- *
- * Requires explicit planning command tokens (verbs or explicit numeric parameter assignments)
- * so conversational questions like "What does the research say about today?" produce 0 toolCalls and mutated=false.
+ * Returns true when a prompt is a conversational / informational question with no planning command verbs.
+ * Used by both the Local Compiler and the Gemini 2.5 Flash path to guarantee zero state mutations
+ * on conversational queries like "What does the research say about today?".
+ */
+export function isConversationalQuestionOnly(promptText) {
+  const raw = String(promptText || '').trim();
+  const tokens = tokenizePromptWords(raw);
+  if (tokens.length === 0) return true;
+  const questionStarters = new Set([
+    'what', 'why', 'how', 'when', 'where', 'who', 'which',
+    'does', 'do', 'is', 'are', 'can', 'could', 'would', 'should'
+  ]);
+  const commandVerbs = new Set([
+    'set', 'rezone', 'upzone', 'downzone', 'apply', 'simulate',
+    'increase', 'decrease', 'raise', 'lower', 'boost', 'reduce',
+    'reset', 'restore', 'change', 'make', 'convert'
+  ]);
+  const hasCommandVerb = tokens.some((t) => commandVerbs.has(t));
+  const isQuestion = raw.endsWith('?') || questionStarters.has(tokens[0]);
+  return Boolean(isQuestion && !hasCommandVerb);
+}
+
+/**
+ * Deterministic Word-Boundary Natural Language Intent Parser (No-Key Fallback).
+ * Emits canonical Phase 2 tool calls:
+ * `set_far_cap`, `set_transit_share`, `set_canopy`, `set_surge`, `rezone_district`, `reset_baseline`.
  */
 export function compileNaturalLanguageIntent(promptText) {
   const raw = String(promptText || '').trim();
@@ -39,35 +110,38 @@ export function compileNaturalLanguageIntent(promptText) {
   if (tokens.length === 0) {
     return {
       mutated: false,
+      badge: 'LOCAL COMPILER',
       toolCalls: [],
-      explanation: '[LOCAL NL COMPILER] No command entered. Try: "Set FAR to 3.2 in North Bayshore", "Rezone Downtown Castro to TOD10", or "Set storm surge to 1.2m".'
+      explanation: '[LOCAL COMPILER] No command entered. Try: "Set FAR to 3.2 in North Bayshore", "Rezone Downtown Castro to TOD10", or "Set storm surge to 1.2m".'
     };
   }
 
-  const questionStarters = new Set(['what', 'why', 'how', 'when', 'where', 'who', 'which', 'does', 'do', 'is', 'are', 'can', 'could', 'would', 'should']);
-  const commandVerbs = new Set(['set', 'rezone', 'upzone', 'downzone', 'apply', 'simulate', 'increase', 'decrease', 'raise', 'lower', 'boost', 'reduce', 'reset', 'restore', 'change', 'make', 'convert']);
-
-  const firstWord = tokens[0];
+  const commandVerbs = new Set([
+    'set', 'rezone', 'upzone', 'downzone', 'apply', 'simulate',
+    'increase', 'decrease', 'raise', 'lower', 'boost', 'reduce',
+    'reset', 'restore', 'change', 'make', 'convert'
+  ]);
   const hasCommandVerb = tokens.some((t) => commandVerbs.has(t));
-  const isQuestion = raw.endsWith('?') || questionStarters.has(firstWord);
 
-  if (isQuestion && !hasCommandVerb) {
+  if (isConversationalQuestionOnly(raw)) {
     return {
       mutated: false,
+      badge: 'LOCAL COMPILER',
       toolCalls: [],
-      explanation: '[LOCAL NL COMPILER] Informational query recognized — 0 simulation parameters modified. Use explicit planning commands (e.g., "Rezone North Bayshore to TOD10", "Set FAR to 3.5", "Set surge to 1.2m", or "Set transit share to 48%") to modify the scenario.'
+      explanation: '[LOCAL COMPILER] Informational query recognized — 0 simulation parameters modified. Use explicit planning commands (e.g., "Rezone North Bayshore to TOD10", "Set FAR to 3.5", "Set surge to 1.2m", or "Set transit share to 48%") to modify the scenario.'
     };
   }
 
   const toolCalls = [];
 
-  // 1. Check for Reset / Baseline intent
+  // 1. Check for Reset / Baseline intent -> reset_baseline
   if (wordSet.has('reset') || (wordSet.has('restore') && wordSet.has('baseline')) || (wordSet.has('2026') && wordSet.has('baseline'))) {
-    toolCalls.push({ tool: 'apply_scenario', args: { scenario: 'baseline' } });
+    toolCalls.push({ tool: 'reset_baseline', args: {} });
     return {
       mutated: true,
+      badge: 'LOCAL COMPILER',
       toolCalls,
-      explanation: '[LOCAL NL COMPILER] Executed apply_scenario(baseline): Reset all parameters and district multipliers to 2026 Baseline.'
+      explanation: '[LOCAL COMPILER] Executed reset_baseline(): Reset all parameters and district multipliers to 2026 Baseline.'
     };
   }
 
@@ -82,7 +156,7 @@ export function compileNaturalLanguageIntent(promptText) {
     return null;
   }
 
-  // 2. Check for explicit District Rezoning intent (whole words only)
+  // 2. Check for explicit District Rezoning intent -> rezone_district(district, zone)
   const districtMentions = [];
   if (wordSet.has('bayshore') || wordSet.has('google') || wordSet.has('shoreline') || wordSet.has('nb_pp') || wordSet.has('nb-p')) districtMentions.push('NB_PP');
   if (wordSet.has('castro') || wordSet.has('downtown') || wordSet.has('dt_cra') || wordSet.has('dt-p')) districtMentions.push('DT_CRA');
@@ -123,23 +197,23 @@ export function compileNaturalLanguageIntent(promptText) {
     });
   }
 
-  // 3. Check for explicit FAR Cap or Story count adjustment (whole words only)
+  // 3. Check for explicit FAR Cap or Story count adjustment -> set_far_cap
   const storyMatch = raw.match(/\b(\d+)\s*(?:stories|story|floors)\b/i);
-  const farMatch = raw.match(/\bfar\s*(?:of|to|cap|=|:)?\s*(\d+(?:\.\d+)?)\b/i);
+  const farMatch = raw.match(/\bfar(?:\s*cap)?\s*(?:of|to|cap|=|:)?\s*(\d+(?:\.\d+)?)\b/i);
   if (farMatch) {
     const val = Math.max(1.0, Math.min(6.0, parseFloat(farMatch[1])));
-    toolCalls.push({ tool: 'set_far', args: { far: val } });
+    toolCalls.push({ tool: 'set_far_cap', args: { far: val } });
   } else if (storyMatch) {
     const stories = parseInt(storyMatch[1], 10);
     const val = Math.max(1.0, Math.min(6.0, +(stories * 0.65).toFixed(1)));
-    toolCalls.push({ tool: 'set_far', args: { far: val } });
+    toolCalls.push({ tool: 'set_far_cap', args: { far: val } });
   } else if (isDownzone) {
-    toolCalls.push({ tool: 'set_far', args: { far: 1.4 } });
+    toolCalls.push({ tool: 'set_far_cap', args: { far: 1.4 } });
   } else if (wordSet.has('upzone') || (wordSet.has('high') && wordSet.has('density')) || (districtMentions.length > 0 && hasCommandVerb)) {
-    toolCalls.push({ tool: 'set_far', args: { far: 4.4 } });
+    toolCalls.push({ tool: 'set_far_cap', args: { far: 4.4 } });
   }
 
-  // 4. Check for explicit Transit Mode Share intent (whole words only: "transit", "caltrain", "brt", "rail")
+  // 4. Check for explicit Transit Mode Share intent -> set_transit_share
   if (wordSet.has('transit') || wordSet.has('caltrain') || wordSet.has('brt') || wordSet.has('rail') || (wordSet.has('mode') && wordSet.has('share'))) {
     const transitPctMatch =
       raw.match(/\b(\d+)\s*%\s*(?:transit|rail|mode|brt|shuttle|caltrain)\b/i) ||
@@ -152,7 +226,7 @@ export function compileNaturalLanguageIntent(promptText) {
     }
   }
 
-  // 5. Check for explicit Urban Tree Canopy / Solar / Greenspace intent (whole words only)
+  // 5. Check for explicit Urban Tree Canopy / Solar / Greenspace intent -> set_canopy
   if (wordSet.has('canopy') || wordSet.has('tree') || wordSet.has('trees') || wordSet.has('greenspace') || wordSet.has('solar') || wordSet.has('sponge')) {
     const greenPctMatch =
       raw.match(/\+?(\d+)\s*%\s*(?:solar|canopy|green|greenspace|tree|trees|permeable)\b/i) ||
@@ -165,7 +239,7 @@ export function compileNaturalLanguageIntent(promptText) {
     }
   }
 
-  // 6. Check for explicit Storm Surge / Flood intent (whole words only: "flood", "surge", "tide", or "sea" + "level"/"rise")
+  // 6. Check for explicit Storm Surge / Flood intent -> set_surge
   const hasDryPhrase = (wordSet.has('no') && (wordSet.has('flood') || wordSet.has('surge'))) || wordSet.has('dry') || /\b0(?:\.0)?\s*m\s*surge\b/i.test(raw);
   const hasSurgeWord = wordSet.has('flood') || wordSet.has('surge') || wordSet.has('tide') || wordSet.has('inundation') || (wordSet.has('sea') && (wordSet.has('level') || wordSet.has('rise')));
   if (hasDryPhrase) {
@@ -182,47 +256,51 @@ export function compileNaturalLanguageIntent(promptText) {
   if (toolCalls.length === 0) {
     return {
       mutated: false,
+      badge: 'LOCAL COMPILER',
       toolCalls: [],
-      explanation: '[LOCAL NL COMPILER] No explicit parameter changes matched in prompt — simulation state unchanged. Try: "Upzone El Camino Real to 6 stories with BRT and 30% solar canopy" or "Set surge to 1.2m".'
+      explanation: '[LOCAL COMPILER] No explicit parameter changes matched in prompt — simulation state unchanged. Try: "Upzone El Camino Real to 6 stories with BRT and 30% solar canopy" or "Set surge to 1.2m".'
     };
   }
 
   const summaryLabels = toolCalls.map((tc) => `${tc.tool}(${JSON.stringify(tc.args)})`).join(', ');
   return {
     mutated: true,
+    badge: 'LOCAL COMPILER',
     toolCalls,
-    explanation: `[LOCAL NL COMPILER] Executed ${summaryLabels}.`
+    explanation: `[LOCAL COMPILER] Executed ${summaryLabels}.`
   };
 }
 
 /**
- * Calls Gemini 2.5 Flash via the `x-goog-api-key` HTTP header (never in the URL query string!)
- * to translate a natural-language planning request into structured JSON tool calls.
+ * Calls Gemini 2.5 Flash via the `x-goog-api-key` HTTP header (never in URL query string, never logged)
+ * with an explicit `responseSchema` of tools:
+ * `set_far_cap`, `set_transit_share`, `set_canopy`, `set_surge`, `rezone_district`, `reset_baseline`.
  */
-export async function invokeGeminiStructuredPlanner(promptText, apiKey, currentTelemetrySnapshot) {
+export async function invokeGeminiStructuredPlanner(promptText, apiKey, currentTelemetrySnapshot, fetchImpl = null) {
   if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
     return null;
   }
 
   const endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
   const systemInstruction = `You are the urban planning compiler for the City of Mountain View 3D Digital Twin.
-Given the user's prompt, decide whether they are asking an informational question (return an empty tool_calls array []) OR requesting changes to the simulation.
-Available tools:
-1. {"tool": "set_far", "args": {"far": number (1.0 to 6.0)}}
-2. {"tool": "rezone_district", "args": {"district": "NB_PP"|"DT_CRA"|"ECR_MU"|"EW_TOD"|"SA_PP", "zone": "TOD10"|"MU6"|"R3"|"R1"|"PARK"}}
-3. {"tool": "set_surge", "args": {"surgeMeters": number (0.0 to 2.0)}}
-4. {"tool": "set_transit_share", "args": {"transitSharePct": number (10 to 85)}}
-5. {"tool": "set_canopy", "args": {"canopyPct": number (10 to 55)}}
-6. {"tool": "apply_scenario", "args": {"scenario": "baseline"|"bayshore"|"elcamino"|"eastwhisman"|"sponge"}}
+Given the user's sentence, decide whether they are asking an informational question (return an empty tool_calls array []) OR requesting changes to the simulation.
+If the sentence is a question without an explicit command to change zoning or parameters (for example, "What does the research say about today?"), you MUST return "tool_calls": [].
+Available tools in the JSON schema:
+1. {"tool": "set_far_cap", "args": {"far": number (1.0 to 6.0)}}
+2. {"tool": "set_transit_share", "args": {"transitSharePct": number (10 to 85)}}
+3. {"tool": "set_canopy", "args": {"canopyPct": number (10 to 55)}}
+4. {"tool": "set_surge", "args": {"surgeMeters": number (0.0 to 2.0)}}
+5. {"tool": "rezone_district", "args": {"district": "NB_PP"|"DT_CRA"|"ECR_MU"|"EW_TOD"|"SA_PP", "zone": "TOD10"|"MU6"|"R3"|"R1"|"PARK"}}
+6. {"tool": "reset_baseline", "args": {}}`;
 
-Return strictly valid JSON with schema:
-{"tool_calls": [...], "summary": "Concise 1-2 sentence explanation of what was changed or answered."}`;
+  const doFetch = fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  if (!doFetch) return null;
 
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6500);
 
-    const res = await fetch(endpoint, {
+    const res = await doFetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -235,15 +313,16 @@ Return strictly valid JSON with schema:
             role: 'user',
             parts: [
               {
-                text: `User prompt: ${promptText}\nCurrent state: ${JSON.stringify(currentTelemetrySnapshot || {})}`
+                text: `User sentence: ${promptText}\nCurrent simulation state: ${JSON.stringify(currentTelemetrySnapshot || {})}`
               }
             ]
           }
         ],
         generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 280,
-          responseMimeType: 'application/json'
+          temperature: 0.0,
+          maxOutputTokens: 320,
+          responseMimeType: 'application/json',
+          responseSchema: GEMINI_TOOL_SCHEMA
         }
       }),
       signal: controller.signal
@@ -256,8 +335,12 @@ Return strictly valid JSON with schema:
     if (!text) return null;
     const parsed = JSON.parse(text);
     if (!parsed || !Array.isArray(parsed.tool_calls)) return null;
+
+    // Guarantee conversational questions like "What does the research say about today?" produce 0 mutations
+    const safeToolCalls = isConversationalQuestionOnly(promptText) ? [] : parsed.tool_calls;
+
     return {
-      toolCalls: parsed.tool_calls,
+      toolCalls: safeToolCalls,
       summary: String(parsed.summary || '').trim()
     };
   } catch (_err) {
@@ -266,15 +349,32 @@ Return strictly valid JSON with schema:
 }
 
 /**
+ * Updates the visible NL badge elements (`#gemini-synthesis-badge` and `#nl-engine-badge`) in the DOM.
+ */
+export function updateNlBadgeDOM(badgeText) {
+  if (typeof document === 'undefined') return;
+  const synthBadge = document.getElementById('gemini-synthesis-badge');
+  if (synthBadge) synthBadge.textContent = badgeText;
+  const nlBadge = document.getElementById('nl-engine-badge');
+  if (nlBadge) nlBadge.textContent = badgeText;
+}
+
+/**
  * GeminiUrbanBridge — Executes structured tool calls from either Gemini 2.5 Flash (via x-goog-api-key header)
- * or the local deterministic word-boundary NL compiler.
+ * or the local deterministic word-boundary NL compiler, applying them through the same functions the sliders use.
  */
 export class GeminiUrbanBridge {
-  constructor(simEngines, onStateMutated, getParcels = () => []) {
+  constructor(simEngines, onStateMutated, getParcels = () => [], toolHandlers = null) {
     this.simEngines = simEngines;
     this.onStateMutated = onStateMutated;
     this.getParcels = getParcels;
+    this.toolHandlers = toolHandlers;
+    this.fetchImpl = null;
     this.lastDispatch = null;
+  }
+
+  setToolHandlers(handlers) {
+    this.toolHandlers = handlers;
   }
 
   getApiKey() {
@@ -308,9 +408,13 @@ export class GeminiUrbanBridge {
 
   compileNaturalLanguageToActions(rawPrompt) {
     const parsed = compileNaturalLanguageIntent(rawPrompt);
+    const badge = 'LOCAL COMPILER';
+    updateNlBadgeDOM(badge);
+
     if (!parsed || !parsed.mutated || !parsed.toolCalls || parsed.toolCalls.length === 0) {
       this.lastDispatch = {
-        engine: 'LOCAL NL COMPILER',
+        engine: badge,
+        badge,
         prompt: rawPrompt,
         mutated: false,
         mutatedKeys: [],
@@ -320,10 +424,11 @@ export class GeminiUrbanBridge {
       return {
         matched: false,
         mutated: false,
+        badge,
         mutatedKeys: [],
         toolCalls: [],
         matchedDistricts: [],
-        summary: parsed ? parsed.explanation : '[LOCAL NL COMPILER] No state changes.'
+        summary: parsed ? parsed.explanation : `[${badge}] No state changes.`
       };
     }
 
@@ -331,7 +436,8 @@ export class GeminiUrbanBridge {
     const mutatedKeys = parsed.toolCalls.map((tc) => tc.tool);
     const snap = this.onStateMutated ? this.onStateMutated('nl-prompt') : null;
     this.lastDispatch = {
-      engine: 'LOCAL NL COMPILER',
+      engine: badge,
+      badge,
       prompt: rawPrompt,
       mutated: true,
       mutatedKeys,
@@ -342,6 +448,7 @@ export class GeminiUrbanBridge {
     return {
       matched: true,
       mutated: true,
+      badge,
       mutatedKeys,
       toolCalls: parsed.toolCalls,
       matchedDistricts,
@@ -352,67 +459,98 @@ export class GeminiUrbanBridge {
 
   _applyToolCalls(toolCalls) {
     const sim = this.simEngines;
+    const handlers = this.toolHandlers;
     const matchedDistricts = [];
 
     for (const tc of toolCalls) {
       if (!tc || !tc.tool) continue;
       const args = tc.args || {};
 
-      if (tc.tool === 'apply_scenario') {
+      if (tc.tool === 'reset_baseline' || tc.tool === 'apply_scenario') {
         const key = String(args.scenario || 'baseline').toLowerCase();
-        const preset = SCENARIO_PRESETS[key] || SCENARIO_PRESETS.baseline;
-        sim.activeScenarioId = preset.id;
-        sim.params = {
-          farCap: preset.farCap,
-          transitShare: preset.transitShare,
-          canopyMandate: preset.canopyMandate,
-          baySurge: preset.baySurge
-        };
-        sim.districtMultipliers = { ...preset.districtMultipliers };
-        sim.parcelOverrides.clear();
+        if (handlers && typeof handlers.reset_baseline === 'function' && key === 'baseline') {
+          handlers.reset_baseline();
+        } else if (handlers && typeof handlers.apply_scenario === 'function') {
+          handlers.apply_scenario(key);
+        } else {
+          const preset = SCENARIO_PRESETS[key] || SCENARIO_PRESETS.baseline;
+          sim.activeScenarioId = preset.id;
+          sim.params = {
+            farCap: preset.farCap,
+            transitShare: preset.transitShare,
+            canopyMandate: preset.canopyMandate,
+            baySurge: preset.baySurge
+          };
+          sim.districtMultipliers = { ...preset.districtMultipliers };
+          sim.parcelOverrides.clear();
+        }
       } else if (tc.tool === 'rezone_district') {
-        sim.activeScenarioId = 'custom';
         const distKey = resolveDistrictKey(args.district) || 'NB_PP';
         const zone = String(args.zone || 'TOD10').toUpperCase();
         matchedDistricts.push(distKey);
-        if (zone === 'PARK') {
-          const parcels = this.getParcels();
-          const candidates = parcels.filter((p) => p.district === distKey || (distKey === 'DT_CRA' && p.district === 'NB_PP'));
-          for (let i = 0; i < Math.min(6, candidates.length); i++) {
-            sim.parcelOverrides.set(candidates[i].id, 'PARK');
-          }
+        if (handlers && typeof handlers.rezone_district === 'function') {
+          handlers.rezone_district(distKey, zone);
         } else {
-          const multMap = {
-            TOD10: distKey === 'NB_PP' ? 2.45 : (distKey === 'DT_CRA' ? 2.35 : 2.30),
-            MU6: 1.85,
-            R3: 1.35,
-            R1: 0.68
-          };
-          sim.districtMultipliers[distKey] = multMap[zone] || 2.35;
+          sim.activeScenarioId = 'custom';
+          if (zone === 'PARK') {
+            const parcels = this.getParcels();
+            const candidates = parcels.filter((p) => p.district === distKey || (distKey === 'DT_CRA' && p.district === 'NB_PP'));
+            for (let i = 0; i < Math.min(6, candidates.length); i++) {
+              sim.parcelOverrides.set(candidates[i].id, 'PARK');
+            }
+          } else {
+            const multMap = {
+              TOD10: distKey === 'NB_PP' ? 2.45 : (distKey === 'DT_CRA' ? 2.35 : 2.30),
+              MU6: 1.85,
+              R3: 1.35,
+              R1: 0.68
+            };
+            sim.districtMultipliers[distKey] = multMap[zone] || 2.35;
+          }
         }
-      } else if (tc.tool === 'set_far') {
-        sim.activeScenarioId = 'custom';
-        const farVal = Number(args.far);
+      } else if (tc.tool === 'set_far_cap' || tc.tool === 'set_far') {
+        const farVal = Number(args.far ?? args.far_cap);
         if (Number.isFinite(farVal)) {
-          sim.params.farCap = Math.max(1.0, Math.min(6.0, farVal));
+          const clamped = Math.max(1.0, Math.min(6.0, farVal));
+          if (handlers && typeof handlers.set_far_cap === 'function') {
+            handlers.set_far_cap(clamped);
+          } else {
+            sim.activeScenarioId = 'custom';
+            sim.params.farCap = clamped;
+          }
         }
       } else if (tc.tool === 'set_surge') {
-        sim.activeScenarioId = 'custom';
-        const surgeVal = Number(args.surgeMeters);
+        const surgeVal = Number(args.surgeMeters ?? args.surge);
         if (Number.isFinite(surgeVal)) {
-          sim.params.baySurge = Math.max(0.0, Math.min(2.0, surgeVal));
+          const clamped = Math.max(0.0, Math.min(2.0, surgeVal));
+          if (handlers && typeof handlers.set_surge === 'function') {
+            handlers.set_surge(clamped);
+          } else {
+            sim.activeScenarioId = 'custom';
+            sim.params.baySurge = clamped;
+          }
         }
       } else if (tc.tool === 'set_transit_share') {
-        sim.activeScenarioId = 'custom';
-        const trVal = Number(args.transitSharePct);
+        const trVal = Number(args.transitSharePct ?? args.transit_share);
         if (Number.isFinite(trVal)) {
-          sim.params.transitShare = Math.max(10, Math.min(85, trVal));
+          const clamped = Math.max(10, Math.min(85, trVal));
+          if (handlers && typeof handlers.set_transit_share === 'function') {
+            handlers.set_transit_share(clamped);
+          } else {
+            sim.activeScenarioId = 'custom';
+            sim.params.transitShare = clamped;
+          }
         }
       } else if (tc.tool === 'set_canopy') {
-        sim.activeScenarioId = 'custom';
-        const canVal = Number(args.canopyPct);
+        const canVal = Number(args.canopyPct ?? args.canopy);
         if (Number.isFinite(canVal)) {
-          sim.params.canopyMandate = Math.max(10, Math.min(55, canVal));
+          const clamped = Math.max(10, Math.min(55, canVal));
+          if (handlers && typeof handlers.set_canopy === 'function') {
+            handlers.set_canopy(clamped);
+          } else {
+            sim.activeScenarioId = 'custom';
+            sim.params.canopyMandate = clamped;
+          }
         }
       }
     }
@@ -428,61 +566,81 @@ export class GeminiUrbanBridge {
 
     let toolCalls = null;
     let aiSummary = null;
-    let engineLabel = 'LOCAL NL COMPILER';
+    let usedGemini = false;
 
-    if (savedKey && savedKey.startsWith('AIza')) {
-      const geminiResult = await invokeGeminiStructuredPlanner(prompt, savedKey, {
-        params: this.simEngines.params,
-        districtMultipliers: this.simEngines.districtMultipliers
-      });
+    if (savedKey) {
+      const geminiResult = await invokeGeminiStructuredPlanner(
+        prompt,
+        savedKey,
+        {
+          params: this.simEngines.params,
+          districtMultipliers: this.simEngines.districtMultipliers
+        },
+        this.fetchImpl
+      );
       if (geminiResult && Array.isArray(geminiResult.toolCalls)) {
         toolCalls = geminiResult.toolCalls;
         aiSummary = geminiResult.summary;
-        engineLabel = 'GEMINI 2.5 FLASH (STRUCTURED JSON TOOLS)';
+        usedGemini = true;
       }
     }
 
     let localParsed = null;
-    if (toolCalls === null) {
+    if (!usedGemini) {
       localParsed = compileNaturalLanguageIntent(prompt);
       toolCalls = localParsed.toolCalls;
     }
 
-    if (!toolCalls || toolCalls.length === 0) {
+    const safeCalls = Array.isArray(toolCalls) ? toolCalls : [];
+    const badge = usedGemini
+      ? `GEMINI 2.5 FLASH · ${safeCalls.length} tool calls`
+      : 'LOCAL COMPILER';
+    updateNlBadgeDOM(badge);
+
+    if (safeCalls.length === 0) {
       this.lastDispatch = {
-        engine: engineLabel,
+        engine: badge,
+        badge,
         prompt,
         mutated: false,
         mutatedKeys: [],
         toolCalls: [],
         timestamp: Date.now()
       };
-      return aiSummary || (localParsed ? localParsed.explanation : `[${engineLabel}] Informational query — 0 parameters changed.`);
+      if (usedGemini) {
+        return `[${badge}] ${aiSummary || 'Informational query recognized — 0 simulation parameters modified.'}`;
+      }
+      return localParsed ? localParsed.explanation : `[${badge}] Informational query — 0 parameters changed.`;
     }
 
-    const matchedDistricts = this._applyToolCalls(toolCalls);
-    const snap = this.onStateMutated('nl-prompt');
+    const matchedDistricts = this._applyToolCalls(safeCalls);
+    const snap = this.onStateMutated ? this.onStateMutated('nl-prompt') : null;
     this.lastDispatch = {
-      engine: engineLabel,
+      engine: badge,
+      badge,
       prompt,
       mutated: true,
-      mutatedKeys: toolCalls.map((t) => t.tool),
+      mutatedKeys: safeCalls.map((t) => t.tool),
       matchedDistricts,
-      toolCalls,
+      toolCalls: safeCalls,
       timestamp: Date.now()
     };
 
-    const toolList = toolCalls.map((t) => t.tool).join(', ');
-    if (aiSummary) {
-      return `[${engineLabel}: ${toolList}] ${aiSummary}`;
+    const toolList = safeCalls.map((t) => t.tool).join(', ');
+    if (usedGemini && aiSummary) {
+      return `[${badge}: ${toolList}] ${aiSummary}`;
     }
-    return `[${engineLabel}: ${toolList}] Executed "${prompt}": Modeled Population ${snap.population.toLocaleString()} (${snap.rhnaDelta >= 0 ? '+' : ''}${snap.rhnaDelta.toLocaleString()} RHNA units), Greenspace ${snap.greenspacePct.toFixed(1)}%, US-101 LOS ${snap.corridors.us101.label} (V/C ${snap.corridors.us101.vc}), UHI ${snap.uhiDelta >= 0 ? '+' : ''}${snap.uhiDelta}°C.`;
+    if (snap) {
+      return `[${badge}: ${toolList}] Executed "${prompt}": Modeled Population ${snap.population.toLocaleString()} (${snap.rhnaDelta >= 0 ? '+' : ''}${snap.rhnaDelta.toLocaleString()} RHNA units), Greenspace ${snap.greenspacePct.toFixed(1)}%, US-101 LOS ${snap.corridors.us101.label} (V/C ${snap.corridors.us101.vc}), UHI ${snap.uhiDelta >= 0 ? '+' : ''}${snap.uhiDelta}°C.`;
+    }
+    return `[${badge}: ${toolList}] Executed "${prompt}".`;
   }
 }
 
 /**
- * Wires keyboard accessibility (Escape to close dialogs, Focus Trap inside Planner Drawer,
- * ArrowLeft/ArrowRight on `.planner-tab` buttons, and synchronized `aria-expanded` attributes).
+ * Wires First-Run 3-Step Hint dismissal (remembered in localStorage) and Keyboard Accessibility
+ * (Escape to close dialogs, Focus Trap inside Planner Drawer, ArrowLeft/ArrowRight on `.planner-tab`,
+ * and Ctrl+Z / Cmd+Z for batch-rezone undo).
  */
 export function initAccessibilityControls({
   closePlannerDrawer,
@@ -492,6 +650,28 @@ export function initAccessibilityControls({
   togglePlannerDrawer
 } = {}) {
   if (typeof document === 'undefined') return;
+
+  // One-time 3-step first-run hint (remembered in localStorage, never shown again)
+  const firstRunHint = document.getElementById('first-run-hint');
+  const btnDismissHint = document.getElementById('btn-dismiss-first-run-hint');
+  if (firstRunHint) {
+    try {
+      if (localStorage.getItem(FIRST_RUN_STORAGE_KEY) === '1') {
+        firstRunHint.hidden = true;
+        firstRunHint.classList.add('dismissed');
+      }
+    } catch (_) {}
+  }
+  if (btnDismissHint && firstRunHint) {
+    btnDismissHint.addEventListener('click', (e) => {
+      e.stopPropagation();
+      try {
+        localStorage.setItem(FIRST_RUN_STORAGE_KEY, '1');
+      } catch (_) {}
+      firstRunHint.hidden = true;
+      firstRunHint.classList.add('dismissed');
+    });
+  }
 
   const btnControlsHud = document.getElementById('btn-controls-hud');
   if (btnControlsHud) {
@@ -586,4 +766,3 @@ export function initAccessibilityControls({
 }
 
 export { resolveDistrictKey };
-

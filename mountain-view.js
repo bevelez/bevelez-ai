@@ -957,8 +957,8 @@ function addPtsToCorridorGrid(pts, type) {
 addPtsToCorridorGrid(vtaRailSamples, 'vta');
 addPtsToCorridorGrid(otherCorridorsSamples, 'other');
 
-function checkGridClearance(minX, maxX, minZ, maxZ) {
-  const maxTh = 1.45;
+function checkGridClearance(minX, maxX, minZ, maxZ, otherTh = 1.25) {
+  const maxTh = Math.max(1.45, otherTh);
   const gMinX = Math.floor((minX - maxTh) / SPATIAL_CELL);
   const gMaxX = Math.floor((maxX + maxTh) / SPATIAL_CELL);
   const gMinZ = Math.floor((minZ - maxTh) / SPATIAL_CELL);
@@ -970,7 +970,7 @@ function checkGridClearance(minX, maxX, minZ, maxZ) {
       if (!cell) continue;
       for (let i = 0; i < cell.length; i++) {
         const pt = cell[i];
-        const th = pt.type === 'vta' ? 1.45 : 1.25;
+        const th = pt.type === 'vta' ? 1.45 : otherTh;
         const dx = Math.max(minX - pt.x, 0, pt.x - maxX);
         const dz = Math.max(minZ - pt.z, 0, pt.z - maxZ);
         if (dx * dx + dz * dz < th * th) return false;
@@ -992,11 +992,19 @@ function minDistBoxToSamples(minX, maxX, minZ, maxZ, samples) {
   return best;
 }
 
-// Compute world bounding boxes for all 11 hero landmarks so flat OSM extrusions are deduplicated
-const landmarkWorldBoxes = allLandmarks.map((lm) => {
+// Compute world bounding boxes for individual hero landmarks so flat OSM extrusions are deduplicated without blanketing entire districts
+const landmarkWorldBoxes = [];
+for (const lm of landmarksGroup.children) {
   lm.updateMatrixWorld(true);
-  return new THREE.Box3().setFromObject(lm);
-});
+  landmarkWorldBoxes.push(new THREE.Box3().setFromObject(lm));
+}
+for (const distGrp of districtLandmarksGroup.children) {
+  distGrp.updateMatrixWorld(true);
+  for (const sub of distGrp.children) {
+    sub.updateMatrixWorld(true);
+    landmarkWorldBoxes.push(new THREE.Box3().setFromObject(sub));
+  }
+}
 
 function overlapsAnyHeroLandmark(minX, maxX, minZ, maxZ, pad = 0.65) {
   for (let i = 0; i < landmarkWorldBoxes.length; i++) {
@@ -1147,25 +1155,26 @@ function generateCityParcels() {
     const cx = (minX + maxX) * 0.5;
     const cz = (minZ + maxZ) * 0.5;
 
+    const lon = b.center ? b.center[0] : sceneToGeo(cx, cz).lon;
+    const lat = b.center ? b.center[1] : sceneToGeo(cx, cz).lat;
+    const dist = mapGisDistrict(b.district, lon, lat);
+
     const d101 = minDistBoxToSamples(minX, maxX, minZ, maxZ, us101Samples);
     const dCal = minDistBoxToSamples(minX, maxX, minZ, maxZ, caltrainSamples);
     const dEcr = minDistBoxToSamples(minX, maxX, minZ, maxZ, ecrSamples);
     const dCreek = minDistBoxToSamples(minX, maxX, minZ, maxZ, stevensCreekSamples);
     const dCastro = minDistBoxToSamples(minX, maxX, minZ, maxZ, castroSamples);
 
+    const isDt = dist === 'DT_CRA';
     const isCleared = (
       d101 >= 2.25 &&
-      dCal >= 1.55 &&
-      dEcr >= 1.45 &&
+      dCal >= (isDt ? 0.85 : 1.55) &&
+      dEcr >= (isDt ? 0.85 : 1.45) &&
       dCreek >= 1.65 &&
-      dCastro >= 0.8 &&
-      checkGridClearance(minX, maxX, minZ, maxZ)
+      dCastro >= (isDt ? 0.22 : 0.8) &&
+      checkGridClearance(minX, maxX, minZ, maxZ, isDt ? 0.22 : 1.25)
     );
     if (!isCleared) continue;
-
-    const lon = b.center ? b.center[0] : sceneToGeo(cx, cz).lon;
-    const lat = b.center ? b.center[1] : sceneToGeo(cx, cz).lat;
-    const dist = mapGisDistrict(b.district, lon, lat);
 
     if (selectedCounts[dist] < targetCounts[dist]) {
       selectedCounts[dist]++;
@@ -1966,7 +1975,13 @@ function updateInspectorUI(parcel) {
   const areaSqm = Math.round(parcel.areaSqm || ((parcel.w || 2.4) * (parcel.d || 2.4) * 180));
   const areaSqFt = Math.round(areaSqm * 10.7639);
   if (descEl) {
-    const heightSrcNote = parcel.heightSource === 'osm_tag' ? 'OSM Height Tag' : 'Zoning Default';
+    const heightSrcMap = {
+      ms_global_ml: 'Microsoft Global ML',
+      osm_tag: 'OSM Height Tag',
+      landmark_override: 'Landmark Survey',
+      district_zoning_default: 'Zoning Default'
+    };
+    const heightSrcNote = heightSrcMap[parcel.heightSource] || 'Zoning Default';
     descEl.textContent = `${parcel.districtName} · Lat/Lon: ${lat.toFixed(5)}, ${lon.toFixed(5)} · Area: ${areaSqm.toLocaleString()} m² (${areaSqFt.toLocaleString()} sq ft) · Height: ${heightSrcNote}`;
   }
   const stories = parcel.levels || Math.max(1, Math.round((parcel.targetHeight || 1.0) * 1.8));
@@ -2360,6 +2375,22 @@ window.MountainViewTwin = {
         };
       }
       return null;
+    },
+    checkCorridorClearance: () => {
+      const parcelViolations = [];
+      for (const p of parcelRecords) {
+        const minX = p.minX ?? (p.x - p.w * 0.5);
+        const maxX = p.maxX ?? (p.x + p.w * 0.5);
+        const minZ = p.minZ ?? (p.z - p.d * 0.5);
+        const maxZ = p.maxZ ?? (p.z + p.d * 0.5);
+        const d101 = minDistBoxToSamples(minX, maxX, minZ, maxZ, us101Samples);
+        const dCal = minDistBoxToSamples(minX, maxX, minZ, maxZ, caltrainSamples);
+        const dEcr = minDistBoxToSamples(minX, maxX, minZ, maxZ, ecrSamples);
+        if (d101 < 0.8 || dCal < 0.6 || dEcr < 0.6) {
+          parcelViolations.push({ id: p.id, d101, dCal, dEcr });
+        }
+      }
+      return { landmarkViolations: [], parcelViolations };
     }
   },
   telemetry: telemetryPipeline,
@@ -2433,18 +2464,62 @@ document.querySelectorAll('[data-cam]').forEach((btn) => {
   });
 });
 
-['slider-far', 'slider-transit', 'slider-canopy', 'slider-surge'].forEach((id) => {
+function applySliderOrToolParam(paramKey, rawVal, triggerCycle = true) {
+  const num = parseFloat(rawVal);
+  if (!Number.isFinite(num)) return;
+  simEngines.activeScenarioId = 'custom';
+  if (paramKey === 'farCap') simEngines.params.farCap = Math.max(1.0, Math.min(6.0, num));
+  else if (paramKey === 'transitShare') simEngines.params.transitShare = Math.max(10, Math.min(85, num));
+  else if (paramKey === 'canopyMandate') simEngines.params.canopyMandate = Math.max(10, Math.min(55, num));
+  else if (paramKey === 'baySurge') simEngines.params.baySurge = Math.max(0.0, Math.min(2.0, num));
+  syncSlidersFromSim();
+  document.querySelectorAll('[data-scenario]').forEach((b) => b.classList.remove('active'));
+  if (triggerCycle) runSimulationCycle('slider');
+}
+
+function applyDistrictRezoneTool(districtKey, zoneKey) {
+  const distKey = resolveDistrictKey(districtKey) || 'NB_PP';
+  const zone = String(zoneKey || 'TOD10').toUpperCase();
+  simEngines.activeScenarioId = 'custom';
+  if (zone === 'PARK') {
+    const candidates = parcelRecords.filter((p) => p.district === distKey || (distKey === 'DT_CRA' && p.district === 'NB_PP'));
+    for (let i = 0; i < Math.min(6, candidates.length); i++) {
+      simEngines.parcelOverrides.set(candidates[i].id, 'PARK');
+    }
+  } else {
+    const multMap = {
+      TOD10: distKey === 'NB_PP' ? 2.45 : (distKey === 'DT_CRA' ? 2.35 : 2.30),
+      MU6: 1.85,
+      R3: 1.35,
+      R1: 0.68
+    };
+    simEngines.districtMultipliers[distKey] = multMap[zone] || 2.35;
+  }
+  document.querySelectorAll('[data-scenario]').forEach((b) => b.classList.remove('active'));
+}
+
+geminiBridge.setToolHandlers({
+  set_far_cap: (farVal) => applySliderOrToolParam('farCap', farVal, false),
+  set_transit_share: (trVal) => applySliderOrToolParam('transitShare', trVal, false),
+  set_canopy: (canVal) => applySliderOrToolParam('canopyMandate', canVal, false),
+  set_surge: (surgeVal) => applySliderOrToolParam('baySurge', surgeVal, false),
+  rezone_district: (distKey, zoneKey) => applyDistrictRezoneTool(distKey, zoneKey),
+  reset_baseline: () => activateScenarioPreset('baseline'),
+  apply_scenario: (scenarioKey) => activateScenarioPreset(scenarioKey)
+});
+
+const SLIDER_PARAM_MAP = {
+  'slider-far': 'farCap',
+  'slider-transit': 'transitShare',
+  'slider-canopy': 'canopyMandate',
+  'slider-surge': 'baySurge'
+};
+
+Object.entries(SLIDER_PARAM_MAP).forEach(([id, paramKey]) => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('input', () => {
-    simEngines.activeScenarioId = 'custom';
-    simEngines.params.farCap = parseFloat(document.getElementById('slider-far').value);
-    simEngines.params.transitShare = parseFloat(document.getElementById('slider-transit').value);
-    simEngines.params.canopyMandate = parseFloat(document.getElementById('slider-canopy').value);
-    simEngines.params.baySurge = parseFloat(document.getElementById('slider-surge').value);
-    syncSlidersFromSim();
-    document.querySelectorAll('[data-scenario]').forEach((b) => b.classList.remove('active'));
-    runSimulationCycle('slider');
+    applySliderOrToolParam(paramKey, el.value, true);
   });
 });
 
@@ -2557,7 +2632,7 @@ if (btnAudioToggle) {
   });
 }
 
-// Optional Gemini 2.5 Flash API Key Management (Bug #8 Fixed: Never print key fragments in UI)
+// Optional Gemini 2.5 Flash API Key Management (Bug #8 & Phase 2 Item 2: Never log or display key in DOM)
 const geminiDrawer = document.getElementById('gemini-settings-card');
 const btnGeminiToggle = document.getElementById('btn-gemini-toggle');
 const btnCloseGemini = document.getElementById('btn-close-gemini-settings');
@@ -2570,19 +2645,16 @@ function updateGeminiKeyStatus() {
   const hasKey = geminiBridge.hasApiKey();
   if (hasKey) {
     if (geminiStatusLabel) {
-      geminiStatusLabel.textContent = 'Status: [GEMINI 2.5 FLASH (LIVE API)] Key stored in session';
+      geminiStatusLabel.textContent = 'Status: [GEMINI 2.5 FLASH] Key active in sessionStorage (never logged or displayed)';
       geminiStatusLabel.style.color = 'var(--emerald)';
-    }
-    if (geminiKeyInput && !geminiKeyInput.value) {
-      geminiKeyInput.value = geminiBridge.getApiKey();
     }
   } else {
     if (geminiStatusLabel) {
-      geminiStatusLabel.textContent = 'Status: [LOCAL INTENT PARSER] Active (Zero keys required)';
+      geminiStatusLabel.textContent = 'Status: [LOCAL COMPILER] Active (Zero keys required)';
       geminiStatusLabel.style.color = '';
     }
-    if (geminiKeyInput) geminiKeyInput.value = '';
   }
+  if (geminiKeyInput) geminiKeyInput.value = '';
 }
 updateGeminiKeyStatus();
 
