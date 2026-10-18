@@ -52,10 +52,53 @@ export function attachKronosDebugHarness(ctx) {
 
   let jointSamplingActive = false;
   const sampledJointFrames = [];
+  const jointLimitViolations = [];
+
+  function checkRigJointLimits(rig, rigName, facingSign, frameIdx) {
+    if (!rig) return;
+    const eps = 1e-4;
+    const elbowNodeNames = ['leftElbow', 'rightElbow'];
+    for (const jn of elbowNodeNames) {
+      const node = rig[jn];
+      if (!node || !node.rotation) continue;
+      const rx = node.rotation.x;
+      const minX = facingSign < 0 ? (0.0 - eps) : (-1.65 - eps);
+      const maxX = facingSign < 0 ? (1.65 + eps) : (0.0 + eps);
+      if (rx < minX || rx > maxX) {
+        jointLimitViolations.push({ frame: frameIdx, rig: rigName, joint: `${jn}.x`, val: Number(rx.toFixed(4)), range: [minX, maxX] });
+      }
+    }
+    const kneeNodeNames = ['leftKnee', 'rightKnee'];
+    for (const jn of kneeNodeNames) {
+      const node = rig[jn];
+      if (!node || !node.rotation) continue;
+      const rx = node.rotation.x;
+      const minX = facingSign < 0 ? (-1.65 - eps) : (0.0 - eps);
+      const maxX = facingSign < 0 ? (0.0 + eps) : (1.65 + eps);
+      if (rx < minX || rx > maxX) {
+        jointLimitViolations.push({ frame: frameIdx, rig: rigName, joint: `${jn}.x`, val: Number(rx.toFixed(4)), range: [minX, maxX] });
+      }
+    }
+    if (rig.torso && rig.torso.rotation) {
+      const tx = rig.torso.rotation.x;
+      const ty = rig.torso.rotation.y;
+      const tz = rig.torso.rotation.z;
+      if (tx < -0.55 - eps || tx > 0.55 + eps) {
+        jointLimitViolations.push({ frame: frameIdx, rig: rigName, joint: 'torso.x', val: Number(tx.toFixed(4)), range: [-0.55, 0.55] });
+      }
+      if (ty < -0.85 - eps || ty > 0.85 + eps) {
+        jointLimitViolations.push({ frame: frameIdx, rig: rigName, joint: 'torso.y', val: Number(ty.toFixed(4)), range: [-0.85, 0.85] });
+      }
+      if (tz < -0.45 - eps || tz > 0.45 + eps) {
+        jointLimitViolations.push({ frame: frameIdx, rig: rigName, joint: 'torso.z', val: Number(tz.toFixed(4)), range: [-0.45, 0.45] });
+      }
+    }
+  }
 
   function recordJointSampleFrame() {
     if (!jointSamplingActive) return;
     const t = performance.now();
+    const frameIdx = sampledJointFrames.length;
     const joints = {};
     const jl = [
       'leftArm', 'leftElbow', 'rightArm', 'rightElbow',
@@ -70,8 +113,17 @@ export function attachKronosDebugHarness(ctx) {
         joints[k] = [0, 0, 0];
       }
     });
+    checkRigJointLimits(challengerRig, 'challenger', -1, frameIdx);
+    bruisers.forEach((b, idx) => {
+      if (b.active && b.rig) {
+        checkRigJointLimits(b.rig, `bruiser_${idx}`, 1, frameIdx);
+      }
+    });
+    if (kronosRig) {
+      checkRigJointLimits(kronosRig, 'kronos', 1, frameIdx);
+    }
     sampledJointFrames.push({
-      frame: sampledJointFrames.length,
+      frame: frameIdx,
       time: t,
       pose: gameState.pose,
       joints
@@ -112,6 +164,7 @@ export function attachKronosDebugHarness(ctx) {
     startJointSampling: () => {
       jointSamplingActive = true;
       sampledJointFrames.length = 0;
+      jointLimitViolations.length = 0;
       return true;
     },
     stopJointSampling: () => {
@@ -119,6 +172,7 @@ export function attachKronosDebugHarness(ctx) {
       return true;
     },
     getSampledJointFrames: () => sampledJointFrames,
+    getJointLimitViolations: () => jointLimitViolations,
 
     getCombatFootworkTelemetry: () => {
       const b0 = bruisers[0];
@@ -167,8 +221,10 @@ export function attachKronosDebugHarness(ctx) {
         combo: gameState.combo,
         confirmedHits: gameState.confirmedHits,
         perfectHits: gameState.perfectHits,
+        missedPresses: gameState.missedPresses,
         rank: gameState.rank,
         pose: gameState.pose,
+        playerHitStunTimer: Number((gameState.playerHitStunTimer || 0).toFixed(3)),
         cameraMode: cameraState.mode,
         kronosInRing: gameState.kronosInRing,
         kronosRingState: gameState.kronosRingState,
@@ -186,6 +242,9 @@ export function attachKronosDebugHarness(ctx) {
         cameraTrauma: Number(cameraJuice.trauma.toFixed(3)),
         hitStopActive: gameState.hitStopTimer > 0,
         hitStopTimer: Number(gameState.hitStopTimer.toFixed(3)),
+        impactBeatOffsetsMs: gameState.impactBeatOffsetsMs || [],
+        enemyStrikeEvents: gameState.enemyStrikeEvents || [],
+        jointLimitViolationCount: jointLimitViolations.length,
         renderInfo: {
           calls: renderer.info.render.calls,
           triangles: renderer.info.render.triangles

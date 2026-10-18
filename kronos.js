@@ -185,6 +185,19 @@ class KronosAudioEngine {
     this.sfxCarveFilter = null;
     this.sfxLimiter = null;
     this.masterLimiter = null;
+
+    let savedCalib = 0;
+    try {
+      const raw = typeof window !== 'undefined' && window.localStorage
+        ? window.localStorage.getItem('kronos_audio_calibration_sec')
+        : null;
+      if (raw !== null) {
+        const parsed = parseFloat(raw);
+        if (Number.isFinite(parsed)) savedCalib = Math.max(-0.25, Math.min(0.25, parsed));
+      }
+    } catch (e) {}
+    this.calibrationOffsetSec = savedCalib;
+    this._tapCalibSamples = [];
   }
 
   getActiveChart() {
@@ -715,8 +728,37 @@ class KronosAudioEngine {
   }
 
   getOutputLatencySec() {
-    if (!this.ctx) return 0;
-    return this.ctx.outputLatency || this.ctx.baseLatency || 0;
+    const ctxLat = this.ctx ? ((this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0)) : 0;
+    return ctxLat + (this.calibrationOffsetSec || 0);
+  }
+
+  setCalibrationOffsetSec(offsetSec) {
+    const clamped = Math.max(-0.25, Math.min(0.25, Number(offsetSec) || 0));
+    this.calibrationOffsetSec = clamped;
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem('kronos_audio_calibration_sec', String(clamped));
+      }
+    } catch (e) {}
+    return this.calibrationOffsetSec;
+  }
+
+  tapCalibrate() {
+    const activeMediaKey = this.activeTrackKey === 'custom' ? 'flow' : this.activeTrackKey;
+    const activeEl = this.tracks[activeMediaKey];
+    if (!this.isPlaying || !activeEl || activeEl.paused) return this.calibrationOffsetSec;
+    const chart = this.getActiveChart();
+    const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
+    const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+    const ctxLat = this.ctx ? ((this.ctx.baseLatency || 0) + (this.ctx.outputLatency || 0)) : 0;
+    const uncalibratedSongTime = Math.max(0, activeEl.currentTime - ctxLat);
+    const beatFloat = (uncalibratedSongTime - firstOffset) / beatSec;
+    const nearestBeat = Math.round(beatFloat);
+    const residualSec = (beatFloat - nearestBeat) * beatSec;
+    this._tapCalibSamples.push(residualSec);
+    if (this._tapCalibSamples.length > 8) this._tapCalibSamples.shift();
+    const avgOffset = this._tapCalibSamples.reduce((a, b) => a + b, 0) / this._tapCalibSamples.length;
+    return this.setCalibrationOffsetSec(avgOffset);
   }
 
   getSongTime() {
@@ -1403,6 +1445,10 @@ const gameState = {
 
   lastHit: null,
   hitHistory: [],
+  impactBeatOffsetsMs: [],
+  enemyStrikeEvents: [],
+  playerHitStunTimer: 0,
+  attackStartPose: null,
   activeImpactVFX: [],
   lastContactPoint: null,
   priorityTargetCache: null
@@ -1477,10 +1523,51 @@ function updateStyleRankAndHype(dt = 0) {
   }
 }
 
+function findNearestChartBeat(songTime, chart) {
+  const activeChart = chart || audioEngine.getActiveChart();
+  const beatSec = (activeChart && activeChart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (activeChart && activeChart.firstBeatOffset !== undefined) ? activeChart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+
+  const beatFloat = (songTime - firstOffset) / beatSec;
+  const gridBeatIdx = Math.round(beatFloat);
+  let nearestBeatTime = firstOffset + gridBeatIdx * beatSec;
+  let minAbsDelta = Math.abs(songTime - nearestBeatTime);
+  let nextBeatTime = firstOffset + Math.ceil(beatFloat) * beatSec;
+  if (nextBeatTime <= songTime + 1e-4) {
+    nextBeatTime += beatSec;
+  }
+
+  if (activeChart && !activeChart.moduloOnly && Array.isArray(activeChart.beatTimes) && activeChart.beatTimes.length > 0) {
+    let bestFuture = Infinity;
+    for (let i = 0; i < activeChart.beatTimes.length; i++) {
+      const bt = activeChart.beatTimes[i];
+      const d = Math.abs(songTime - bt);
+      if (d < minAbsDelta) {
+        minAbsDelta = d;
+        nearestBeatTime = bt;
+      }
+      if (bt > songTime + 1e-4 && bt < bestFuture) {
+        bestFuture = bt;
+      }
+    }
+    if (bestFuture < Infinity) {
+      nextBeatTime = bestFuture;
+    }
+  }
+
+  const signedDelta = songTime - nearestBeatTime;
+  const timeUntilBeat = signedDelta < -1e-4 ? -signedDelta : Math.max(0.012, nextBeatTime - songTime);
+  return {
+    nearestBeatTime,
+    nextBeatTime,
+    signedDelta,
+    absDelta: minAbsDelta,
+    timeUntilBeat
+  };
+}
+
 function evaluateBeatWindow(songTime) {
   const chart = audioEngine.getActiveChart();
-  const beatSec = chart.beatSec || KRONOS_BEAT_SEC;
-  const firstOffset = chart.firstBeatOffset !== undefined ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
 
   // No grading in silence unless explicitly forced by debug test harness
   if (songTime === null || songTime === undefined) {
@@ -1494,35 +1581,59 @@ function evaluateBeatWindow(songTime) {
       mult: 1.0,
       onBeat: false,
       delta: Infinity,
-      timeUntilBeat: 0.075
+      signedDelta: 0,
+      timeUntilBeat: 0.065,
+      nearestBeatTime: null,
+      targetBeatTime: null
     };
   }
 
-  let minDelta = Infinity;
-  let nearestFutureDelta = Infinity;
-  if (!chart.moduloOnly && Array.isArray(chart.beatTimes) && chart.beatTimes.length > 0) {
-    for (let i = 0; i < chart.beatTimes.length; i++) {
-      const bt = chart.beatTimes[i];
-      const d = Math.abs(songTime - bt);
-      if (d < minDelta) minDelta = d;
-      if (bt >= songTime && (bt - songTime) < nearestFutureDelta) {
-        nearestFutureDelta = bt - songTime;
-      }
-    }
-  }
-
-  const modPhase = (((songTime - firstOffset) % beatSec) + beatSec) % beatSec;
-  const modDelta = Math.min(modPhase, beatSec - modPhase);
-  const delta = chart.moduloOnly ? modDelta : Math.min(minDelta, modDelta);
-  const timeUntilBeat = Math.min(nearestFutureDelta, beatSec - modPhase);
+  const info = findNearestChartBeat(songTime, chart);
+  const delta = info.absDelta;
+  const signedDelta = info.signedDelta;
+  const timeUntilBeat = info.timeUntilBeat;
+  const nearestBeatTime = info.nearestBeatTime;
 
   if (delta <= TUNING.PERFECT_WINDOW_SEC) {
-    return { grade: 'PERFECT', label: 'PERFECT!', color: '#ffe042', mult: 1.5, onBeat: true, delta, timeUntilBeat };
+    return {
+      grade: 'PERFECT',
+      label: 'PERFECT!',
+      color: '#ffe042',
+      mult: 1.5,
+      onBeat: true,
+      delta,
+      signedDelta,
+      timeUntilBeat,
+      nearestBeatTime,
+      targetBeatTime: nearestBeatTime
+    };
   }
   if (delta <= TUNING.ON_BEAT_WINDOW_SEC) {
-    return { grade: 'GOOD', label: 'ON BEAT!', color: '#42f56c', mult: 1.15, onBeat: true, delta, timeUntilBeat };
+    return {
+      grade: 'GOOD',
+      label: 'ON BEAT!',
+      color: '#42f56c',
+      mult: 1.15,
+      onBeat: true,
+      delta,
+      signedDelta,
+      timeUntilBeat,
+      nearestBeatTime,
+      targetBeatTime: nearestBeatTime
+    };
   }
-  return { grade: 'MISS', label: 'MISS!', color: '#ff385c', mult: 0.0, onBeat: false, delta, timeUntilBeat };
+  return {
+    grade: 'MISS',
+    label: 'OFF-BEAT',
+    color: '#ff385c',
+    mult: 1.0,
+    onBeat: false,
+    delta,
+    signedDelta,
+    timeUntilBeat,
+    nearestBeatTime,
+    targetBeatTime: info.nextBeatTime
+  };
 }
 
 let starburstTimer = null;
@@ -1723,6 +1834,11 @@ function spawnWave(waveNum) {
     gameState.bossAttackPattern = 'idle';
     gameState.bossComboStep = 0;
     gameState.bossCounterStunActive = false;
+    const curSongTime = audioEngine.getSongTime();
+    const activeChart = audioEngine.getActiveChart();
+    const bSec = (activeChart && activeChart.beatSec) || KRONOS_BEAT_SEC;
+    const fOff = (activeChart && activeChart.firstBeatOffset !== undefined) ? activeChart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+    gameState.wave3StartBeatFloat = curSongTime !== null ? Math.max(0, (curSongTime - fOff) / bSec) : undefined;
     gameState.wave3BeatFloat = 0;
     gameState.wave3LastBassDropBar = -1;
     gameState.wave3LastScratchBar = -1;
@@ -1789,12 +1905,12 @@ function launchBruiserIntoStage(b) {
       headGroup: [-0.2, 0, 0],
       leftArm: [-1.2, 0, -0.5],
       rightArm: [-1.2, 0, 0.5],
-      leftElbow: [0.4, 0, 0],
-      rightElbow: [0.4, 0, 0],
+      leftElbow: [-0.4, 0, 0],
+      rightElbow: [-0.4, 0, 0],
       leftLeg: [0.3, 0, -0.15],
       rightLeg: [0.3, 0, 0.15],
-      leftKnee: [-0.1, 0, 0],
-      rightKnee: [-0.1, 0, 0]
+      leftKnee: [0.1, 0, 0],
+      rightKnee: [0.1, 0, 0]
     });
   }
   const startPos = b.rig.root.position.clone();
@@ -2050,6 +2166,10 @@ function restartGame(options = {}) {
   gameState.onBeatHits = 0;
   gameState.missedPresses = 0;
   gameState.hitHistory = [];
+  gameState.impactBeatOffsetsMs = [];
+  gameState.enemyStrikeEvents = [];
+  gameState.playerHitStunTimer = 0;
+  gameState.attackStartPose = null;
   gameState.styleRank = '—';
   gameState.hype = 0.0;
   gameState.kronosRingState = 'idle';
@@ -2057,6 +2177,7 @@ function restartGame(options = {}) {
   gameState.bossComboStep = 0;
   gameState.lastProcessedBeatIdx = -1;
   gameState.wave3StartBeatIdx = undefined;
+  gameState.wave3StartBeatFloat = undefined;
   gameState.wave3BeatFloat = 0;
   gameState.wave3BarIdx = 0;
   gameState.wave3BeatInBar = 0;
@@ -2281,8 +2402,23 @@ function resolveActivePhaseAttack(hitCtx) {
   hitCtx.resolved = true;
 
   const { action, punchStep, timing, moveKey } = hitCtx;
-  if (hitCtx.isMiss || timing.grade === 'MISS') {
-    return;
+
+  const frameSongTime = audioEngine.getSongTime();
+  const impactSongTime = (hitCtx.targetImpactSongTime !== undefined && hitCtx.targetImpactSongTime !== null)
+    ? hitCtx.targetImpactSongTime
+    : frameSongTime;
+  const stepSongTime = (
+    hitCtx.pressSongTime !== undefined &&
+    hitCtx.pressSongTime !== null &&
+    impactSongTime !== null &&
+    hitCtx.pressSongTime >= impactSongTime
+  ) ? hitCtx.pressSongTime : frameSongTime;
+  let impactBeatOffsetMs = 0;
+  if (stepSongTime !== null && stepSongTime !== undefined) {
+    const chart = audioEngine.getActiveChart();
+    const beatInfo = findNearestChartBeat(stepSongTime, chart);
+    impactBeatOffsetMs = Number((beatInfo.absDelta * 1000).toFixed(2));
+    gameState.impactBeatOffsetsMs.push(impactBeatOffsetMs);
   }
 
   // Live Distance + Facing check AT THE ACTIVE PHASE MOMENT!
@@ -2314,7 +2450,7 @@ function resolveActivePhaseAttack(hitCtx) {
 
   const limbPos = getAttackingLimbWorldPos(action, punchStep);
 
-  // Air Whiff if no enemy passes live distance + facing check inside ACTIVE window
+  // Air Whiff ONLY if no enemy passes live distance + facing check inside ACTIVE window
   if (!validTarget) {
     const contactPoint = limbPos.clone().add(new THREE.Vector3(0, 0, -0.55));
     contactPoint.y = THREE.MathUtils.clamp(contactPoint.y, 0.9, 1.6);
@@ -2328,20 +2464,23 @@ function resolveActivePhaseAttack(hitCtx) {
   // CONFIRMED HIT ON ENEMY IN ACTIVE PHASE!
   const { type, obj } = validTarget;
   const isPerfect = timing.grade === 'PERFECT';
+  const isOffBeat = timing.grade === 'MISS';
   const counterMult = (gameState.kronosRingState === 'counter_stun' || gameState.counterBonusTimer > 0) ? 2.0 : 1.0;
   if (counterMult > 1.0 && gameState.kronosRingState !== 'counter_stun') {
     gameState.counterBonusTimer = 0;
   }
 
-  gameState.combo += 1;
-  gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
-  gameState.comboDecayTimer = TUNING.COMBO_DECAY_SEC;
-  gameState.confirmedHits += 1;
-  if (isPerfect) {
-    gameState.perfectHits += 1;
-  } else {
-    gameState.onBeatHits += 1;
+  if (!isOffBeat) {
+    gameState.combo += 1;
+    gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
+    gameState.comboDecayTimer = TUNING.COMBO_DECAY_SEC;
+    if (isPerfect) {
+      gameState.perfectHits += 1;
+    } else {
+      gameState.onBeatHits += 1;
+    }
   }
+  gameState.confirmedHits += 1;
   gameState.combatIdleTimer = 0;
 
   const baseHitDmg = TUNING.MOVES[moveKey] ? TUNING.MOVES[moveKey].baseDmg : (action === 'kick' ? 48 : 32);
@@ -2360,7 +2499,8 @@ function resolveActivePhaseAttack(hitCtx) {
     grade: timing.grade,
     confirmed: true,
     timestamp: performance.now(),
-    songTime: audioEngine.getSongTime(),
+    songTime: impactSongTime,
+    impactBeatOffsetMs,
     enemyIdx: validTarget.obj && validTarget.obj.idx !== undefined ? validTarget.obj.idx : 0,
     hitReactState: recoilType,
     recoilVector: recoilVector.clone(),
@@ -2382,13 +2522,15 @@ function resolveActivePhaseAttack(hitCtx) {
 
   updateStyleRankAndHype(0);
 
-  if (gameState.combo === 4 || gameState.combo === 8 || gameState.combo === 12) {
+  if (!isOffBeat && (gameState.combo === 4 || gameState.combo === 8 || gameState.combo === 12)) {
     audioEngine.triggerCrowdHype(`combo-${gameState.combo}`, { combo: gameState.combo });
   }
 
   audioEngine.playCombatSfx(moveKey, timing.grade, validTarget.pos);
 
-  if (isPerfect) {
+  if (isOffBeat) {
+    gameState.hitStopTimer = 0.024;
+  } else if (isPerfect) {
     gameState.hitStopTimer = action === 'kick' ? 0.100 :
       (action === 'punch' && punchStep === 0) ? 0.048 :
       (action === 'punch' && punchStep === 1) ? 0.070 :
@@ -2400,19 +2542,24 @@ function resolveActivePhaseAttack(hitCtx) {
       (action === 'punch' && punchStep === 2) ? 0.065 : 0.032;
   }
 
-  const styleMult = gameState.styleDamageMultiplier || 1.0;
-  let totalHitDmg = Math.round(baseHitDmg * (timing.mult || 1.0) * counterMult * styleMult);
+  const styleMult = isOffBeat ? 1.0 : (gameState.styleDamageMultiplier || 1.0);
+  const timingMult = isOffBeat ? 1.0 : (timing.mult || 1.0);
+  let totalHitDmg = Math.round(baseHitDmg * timingMult * counterMult * styleMult);
   hitEntry.damage = totalHitDmg;
 
-  gameState.hype = Math.min(100.0, (gameState.hype || 0) + (isPerfect ? 8.0 : 4.0) * styleMult);
+  if (!isOffBeat) {
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + (isPerfect ? 8.0 : 4.0) * styleMult);
+    floorDial.updateBadge(timing.label || 'ON BEAT!', timing.color || '#42f56c');
+    const burstWords = action === 'kick'
+      ? ['BEAT KICK!', 'HEAVY KICK!', 'KRA-KOOM!', 'BA-DOOM!']
+      : ['POW-SNAP!', 'KRA-KOOM!', 'ON-BEAT HIT!'];
+    setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
+  } else {
+    floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
+    setStarburstText('HIT ×1.0', 1.04);
+  }
 
-  floorDial.updateBadge(timing.label || 'ON BEAT!', timing.color || '#42f56c');
-  const burstWords = action === 'kick'
-    ? ['BEAT KICK!', 'HEAVY KICK!', 'KRA-KOOM!', 'BA-DOOM!']
-    : ['POW-SNAP!', 'KRA-KOOM!', 'ON-BEAT HIT!'];
-  setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
-
-  const isSrank = gameState.styleRank === 'S-RANK' || gameState.combo >= 10;
+  const isSrank = !isOffBeat && (gameState.styleRank === 'S-RANK' || gameState.combo >= 10);
   const isFinisherMove = action === 'kick' || (action === 'punch' && punchStep === 2);
   const isBeatDropFinisher = isSrank && isFinisherMove;
 
@@ -2434,8 +2581,8 @@ function resolveActivePhaseAttack(hitCtx) {
     }
   }
 
-  gameState.cameraKick = action === 'kick' ? 0.35 : 0.22;
-  gameState.cameraDutch = (action === 'kick' ? 1 : -1) * 0.035;
+  gameState.cameraKick = isOffBeat ? 0.14 : (action === 'kick' ? 0.35 : 0.22);
+  gameState.cameraDutch = (action === 'kick' ? 1 : -1) * (isOffBeat ? 0.020 : 0.035);
   triggerCameraJuice(action, isPerfect, punchStep);
   if (isPerfect && postProcessing && postProcessing.triggerImpact) {
     postProcessing.triggerImpact('PERFECT', contactPoint);
@@ -2623,39 +2770,21 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     }
   }
 
-  // 3. OFF-BEAT MISS CHECK (Section 2.2: require ON-BEAT ±165ms or better when music is playing)
+  // 3. OFF-BEAT MISS CHECK (Phase 3 Dead as Disco: off-beat resets combo & increments missedPresses, but executes normal ×1.0 attack!)
   if (timing.grade === 'MISS') {
     gameState.missedPresses += 1;
     gameState.combo = 0;
     gameState.comboDecayTimer = 0;
     updateStyleRankAndHype(0);
-    gameState.isAttacking = true;
-    gameState.attackType = action === 'kick' ? 'kick' : 'punch-jab';
-    gameState.pose = gameState.attackType;
-    const missCfg = TUNING.MOVES.miss;
-    const totalMiss = missCfg.startup + missCfg.active + missCfg.recovery;
-    gameState.attackPhase = 'startup';
-    gameState.attackTimer = 0;
-    gameState.recoveryTimer = missCfg.recovery;
-    gameState.poseTimer = totalMiss;
-    gameState.canCancel = false;
-    gameState.phaseDurations = {
-      startup: missCfg.startup,
-      active: missCfg.active,
-      recovery: missCfg.recovery,
-      total: totalMiss
-    };
-    gameState.pendingHit = { isMiss: true, resolved: true, action, timing };
-    floorDial.updateBadge('MISS!', '#ff385c');
-    setStarburstText('OFF-BEAT MISS!', 1.04);
-    audioEngine.playCombatSfx('miss-whiff', 'MISS', gameState.playerPos);
+    floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
+    setStarburstText('OFF-BEAT ×1.0', 1.04);
     updateHudNumbers();
-    return;
   }
 
   // 4. START REAL BEAT-WARPED ATTACK LIFECYCLE (Section 2.1 & 2.3)
   gameState.isAttacking = true;
   gameState.combatEngagementTimer = 0.85;
+  gameState.attackStartPose = challengerBlender ? challengerBlender.getCurrentPoseDict() : null;
 
   let currentPunchStep = 0;
   let moveKey = 'kick';
@@ -2675,14 +2804,28 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     gameState.attackType = 'kick';
   }
 
-  // Real Beat-Warping: wind-up starts on input (attackTimer = 0) and warps startupDur so impact lands on the target beat
+  // Real Beat-Warping: wind-up starts on input (attackTimer = 0) and warps startupDur so impact (at startupEnd) lands on the target beat;
+  // recoveryDur is quantized to the half-beat (beatSec * 0.5).
+  const chart = audioEngine.getActiveChart();
+  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
   const moveCfg = TUNING.MOVES[moveKey] || TUNING.MOVES['punch-jab'];
   let startupDur = moveCfg.startup;
-  if (songTime !== null && timing.timeUntilBeat !== undefined && timing.timeUntilBeat >= 0.025 && timing.timeUntilBeat <= TUNING.ON_BEAT_WINDOW_SEC) {
-    startupDur = THREE.MathUtils.clamp(timing.timeUntilBeat, 0.030, 0.165);
+  let targetImpactSongTime = null;
+  if (songTime !== null) {
+    if (timing.onBeat && timing.targetBeatTime !== undefined && timing.targetBeatTime !== null) {
+      targetImpactSongTime = timing.targetBeatTime;
+      const timeToTarget = targetImpactSongTime - songTime;
+      startupDur = Math.max(0.008, Math.min(TUNING.ON_BEAT_WINDOW_SEC, timeToTarget));
+    } else if (timing.timeUntilBeat !== undefined) {
+      startupDur = THREE.MathUtils.clamp(timing.timeUntilBeat, 0.030, 0.165);
+      targetImpactSongTime = songTime + startupDur;
+    }
   }
   const activeDur = moveCfg.active;
-  const recoveryDur = moveCfg.recovery;
+  const halfBeatSec = beatSec * 0.5;
+  const recoveryDur = songTime !== null
+    ? Math.max(0.120, halfBeatSec * 0.5)
+    : moveCfg.recovery;
   const totalDur = startupDur + activeDur + recoveryDur;
 
   gameState.attackPhase = 'startup';
@@ -2721,7 +2864,9 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     action,
     punchStep: currentPunchStep,
     moveKey,
-    timing
+    timing,
+    pressSongTime: songTime,
+    targetImpactSongTime
   };
 
   gameState.activeSmears.push(smearArcPool.acquire(challengerRig.root.position, action === 'kick'));
@@ -2733,11 +2878,13 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
 class ContinuousPoseBlender {
   constructor(rig, options = {}) {
     this.rig = rig;
-    this.lambda = options.lambda !== undefined ? options.lambda : 22.0;
+    this.lambda = options.lambda !== undefined ? options.lambda : 26.0;
     this.omegaMax = options.omegaMax !== undefined ? options.omegaMax : 16.0;
     this.maxStepFloor = options.maxStepFloor !== undefined ? options.maxStepFloor : 0.25;
     this.controlRootYaw = options.controlRootYaw !== undefined ? options.controlRootYaw : true;
     this.controlHipsPos = options.controlHipsPos !== undefined ? options.controlHipsPos : true;
+    // facingSign: -1 for Challenger (-Z rig), +1 for Bruisers and Kronos (+Z rigs)
+    this.facingSign = options.facingSign !== undefined ? options.facingSign : -1;
 
     this.jointNames = [
       'leftArm', 'leftElbow', 'rightArm', 'rightElbow',
@@ -2768,6 +2915,8 @@ class ContinuousPoseBlender {
       }
       this.target[j] = { ...this.current[j] };
     }
+    this.enforceJointLimits(this.current);
+    this.enforceJointLimits(this.target);
     if (this.rig.hips && this.rig.hips.position) {
       this.currentHipsPos.copy(this.rig.hips.position);
       this.targetHipsPos.copy(this.rig.hips.position);
@@ -2776,6 +2925,33 @@ class ContinuousPoseBlender {
       this.currentRootYaw = this.rig.root.rotation.y;
       this.targetRootYaw = this.rig.root.rotation.y;
     }
+  }
+
+  enforceJointLimits(stateMap) {
+    if (!stateMap) return;
+    if (this.facingSign < 0) {
+      // -Z rig (Challenger): forward elbow flexion in [0, 1.65], backward knee flexion in [-1.65, 0]
+      if (stateMap.leftElbow) stateMap.leftElbow.x = THREE.MathUtils.clamp(stateMap.leftElbow.x, 0.0, 1.65);
+      if (stateMap.rightElbow) stateMap.rightElbow.x = THREE.MathUtils.clamp(stateMap.rightElbow.x, 0.0, 1.65);
+      if (stateMap.leftKnee) stateMap.leftKnee.x = THREE.MathUtils.clamp(stateMap.leftKnee.x, -1.65, 0.0);
+      if (stateMap.rightKnee) stateMap.rightKnee.x = THREE.MathUtils.clamp(stateMap.rightKnee.x, -1.65, 0.0);
+    } else {
+      // +Z rig (Bruisers, DJ Kronos): forward elbow flexion in [-1.65, 0], backward knee flexion in [0, 1.65]
+      if (stateMap.leftElbow) stateMap.leftElbow.x = THREE.MathUtils.clamp(stateMap.leftElbow.x, -1.65, 0.0);
+      if (stateMap.rightElbow) stateMap.rightElbow.x = THREE.MathUtils.clamp(stateMap.rightElbow.x, -1.65, 0.0);
+      if (stateMap.leftKnee) stateMap.leftKnee.x = THREE.MathUtils.clamp(stateMap.leftKnee.x, 0.0, 1.65);
+      if (stateMap.rightKnee) stateMap.rightKnee.x = THREE.MathUtils.clamp(stateMap.rightKnee.x, 0.0, 1.65);
+    }
+  }
+
+  getCurrentPoseDict() {
+    const out = {};
+    for (let i = 0; i < this.allJoints.length; i++) {
+      const j = this.allJoints[i];
+      const cur = this.current[j];
+      out[j] = cur ? [cur.x, cur.y, cur.z] : [0, 0, 0];
+    }
+    return out;
   }
 
   static wrapAngle(diff) {
@@ -2799,6 +2975,7 @@ class ContinuousPoseBlender {
         }
       }
     }
+    this.enforceJointLimits(this.target);
   }
 
   setTarget(poseDict) {
@@ -2827,6 +3004,7 @@ class ContinuousPoseBlender {
         this.current[j].z = this.target[j].z;
       }
     }
+    this.enforceJointLimits(this.current);
     this.applyToRig();
   }
 
@@ -2877,9 +3055,7 @@ class ContinuousPoseBlender {
     if (Math.abs(yawStep) > Math.abs(yawDiff)) yawStep = yawDiff;
     this.currentRootYaw += yawStep;
 
-    if (this.current.leftKnee && this.current.leftKnee.x > 0.0) this.current.leftKnee.x = 0.0;
-    if (this.current.rightKnee && this.current.rightKnee.x > 0.0) this.current.rightKnee.x = 0.0;
-
+    this.enforceJointLimits(this.current);
     this.applyToRig();
   }
 
@@ -2902,11 +3078,12 @@ class ContinuousPoseBlender {
 }
 
 const challengerBlender = new ContinuousPoseBlender(challengerRig, {
-  lambda: 22.0,
+  lambda: 26.0,
   omegaMax: 16.0,
   maxStepFloor: 0.25,
   controlRootYaw: true,
-  controlHipsPos: true
+  controlHipsPos: true,
+  facingSign: -1
 });
 
 bruisers.forEach((b) => {
@@ -2915,7 +3092,8 @@ bruisers.forEach((b) => {
     omegaMax: 16.0,
     maxStepFloor: 0.25,
     controlRootYaw: false,
-    controlHipsPos: false
+    controlHipsPos: false,
+    facingSign: 1
   });
 });
 
@@ -2924,7 +3102,8 @@ const kronosBlender = new ContinuousPoseBlender(kronosRig, {
   omegaMax: 16.0,
   maxStepFloor: 0.25,
   controlRootYaw: false,
-  controlHipsPos: false
+  controlHipsPos: false,
+  facingSign: 1
 });
 kronosRig.blender = kronosBlender;
 
@@ -3006,6 +3185,13 @@ const CHALLENGER_POSES = {
     rightArm: [0.90, -0.25, 0.35], rightElbow: [1.30, 0, 0],
     leftLeg: [0.32, 0, -0.22], leftKnee: [-0.40, 0, 0], leftAnkle: [0, 0, 0],
     rightLeg: [-0.24, 0, 0.28], rightKnee: [-0.24, 0, 0], rightAnkle: [0, 0, 0]
+  },
+  hurt: {
+    hips: [-0.14, 0.16, -0.08], torso: [-0.28, 0.22, -0.10], headGroup: [-0.22, -0.18, 0.08],
+    leftArm: [0.42, 0.25, -0.52], leftElbow: [1.45, 0, 0],
+    rightArm: [0.48, -0.25, 0.52], rightElbow: [1.42, 0, 0],
+    leftLeg: [0.28, 0.10, -0.20], leftKnee: [-0.48, 0, 0], leftAnkle: [0.20, 0, 0.14],
+    rightLeg: [-0.22, -0.10, 0.20], rightKnee: [-0.36, 0, 0], rightAnkle: [0.32, 0, -0.14]
   }
 };
 
@@ -3030,7 +3216,7 @@ function lerpPoseDict(pA, pB, t) {
   return result;
 }
 
-function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
+function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016, rawDt = dt) {
   const kneeBounce = beatPulse * 0.045;
   const breath = Math.sin(elapsed * 2.8) * 0.03;
 
@@ -3062,25 +3248,33 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
     if (actKey && CHALLENGER_POSES[actKey]) {
       const config = CHALLENGER_POSES[actKey];
       const idleConfig = CHALLENGER_POSES.idle;
+      const startPose = gameState.attackStartPose || idleConfig;
 
       if (t < startupEnd) {
         const tau = Math.min(1.0, Math.max(0.0, t / Math.max(0.001, startupEnd)));
-        const ease = tau * tau * (3.0 - 2.0 * tau);
-        targetJoints = lerpPoseDict(idleConfig, config.chamber, ease);
-        targetHipsY = 1.00 - ease * (actKey === 'punch-uppercut' ? 0.07 : 0.03);
-        if (actKey === 'kick' && tau > 0.55 && kickSmear.updateSweep) {
-          kickSmear.updateSweep((tau - 0.55) / 0.45 * 0.35, false, beatPulse);
+        if (tau < 0.40) {
+          const u = tau / 0.40;
+          const ease = u * u * (3.0 - 2.0 * u);
+          targetJoints = lerpPoseDict(startPose, config.chamber, ease);
+          targetHipsY = 1.00 - ease * (actKey === 'punch-uppercut' ? 0.07 : 0.03);
+        } else {
+          const u = (tau - 0.40) / 0.60;
+          const ease = Math.sin(u * Math.PI * 0.5);
+          targetJoints = lerpPoseDict(config.chamber, config.apex, ease);
+          targetHipsY = 1.00 + (actKey === 'kick' ? 0.03 : (actKey === 'punch-uppercut' ? 0.06 : 0.01)) * ease;
+        }
+        if (actKey === 'kick' && tau > 0.40 && kickSmear.updateSweep) {
+          kickSmear.updateSweep((tau - 0.40) / 0.60 * 0.85, false, beatPulse);
         } else {
           kickSmear.smearGroup.visible = false;
         }
       } else if (t < activeEnd) {
-        const tau = Math.min(1.0, Math.max(0.0, (t - startupEnd) / Math.max(0.001, p.active || 0.060)));
-        const ease = Math.sin(tau * Math.PI * 0.5);
-        targetJoints = lerpPoseDict(config.chamber, config.apex, ease);
-        targetHipsY = 1.00 + (actKey === 'kick' ? 0.03 : (actKey === 'punch-uppercut' ? 0.06 : 0.01)) * ease;
+        // Hold full 100% apex extension on the beat & throughout active phase / hit-stop
+        targetJoints = config.apex;
+        targetHipsY = 1.00 + (actKey === 'kick' ? 0.03 : (actKey === 'punch-uppercut' ? 0.06 : 0.01));
         if (actKey === 'kick') {
           if (kickSmear.updateSweep) {
-            kickSmear.updateSweep(0.35 + 0.65 * ease, false, beatPulse);
+            kickSmear.updateSweep(1.0, false, beatPulse);
           } else {
             kickSmear.smearGroup.visible = true;
             kickSmear.arcMat.opacity = 0.92 + beatPulse * 0.08;
@@ -3108,7 +3302,11 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
   }
 
   if (!targetJoints) {
-    if (pose === 'dodge') {
+    if (pose === 'hurt' || gameState.playerHitStunTimer > 0) {
+      targetJoints = CHALLENGER_POSES.hurt;
+      targetHipsY = 0.93;
+      kickSmear.smearGroup.visible = false;
+    } else if (pose === 'dodge') {
       targetJoints = CHALLENGER_POSES.dodge;
       targetHipsY = 0.88;
       kickSmear.smearGroup.visible = false;
@@ -3135,7 +3333,10 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
 
   challengerBlender.setTargetPose(targetJoints);
   challengerBlender.setTargetHipsPosition(0, targetHipsY, 0);
-  challengerBlender.update(dt);
+  const blenderDt = (gameState.isAttacking && gameState.attackPhase === 'active' && gameState.hitStopTimer > 0)
+    ? rawDt
+    : dt;
+  challengerBlender.update(blenderDt);
 }
 
 // ============================================================================
@@ -3502,24 +3703,34 @@ const RADIAL_SLOTS = [
 function updatePlayer(dt, rawDt, elapsed, beatPulse) {
   if (gameState.dodgeInvulnTimer > 0) gameState.dodgeInvulnTimer = Math.max(0, gameState.dodgeInvulnTimer - dt);
   if (gameState.counterBonusTimer > 0) gameState.counterBonusTimer = Math.max(0, gameState.counterBonusTimer - dt);
+  if (gameState.playerHitStunTimer > 0) gameState.playerHitStunTimer = Math.max(0, gameState.playerHitStunTimer - dt);
 
-  // Per-move startupDur / activeDur / recoveryDur lifecycle + Active-Phase Hit Resolution
+  // Per-move startupDur / activeDur / recoveryDur lifecycle + Active-Phase Hit Resolution on the beat (startupEnd)
   if (gameState.isAttacking) {
     gameState.attackTimer += dt;
     const p = gameState.phaseDurations;
     const startupEnd = p.startup || 0.065;
     const activeDur = p.active || 0.060;
     const activeEnd = startupEnd + activeDur;
-    const impactApexTime = startupEnd + activeDur * 0.45;
+    const impactApexTime = startupEnd;
     const total = p.total || (activeEnd + (p.recovery || 0.160));
+    const curSongTime = audioEngine.getSongTime();
+    const reachedTargetBeat = (
+      curSongTime !== null &&
+      gameState.pendingHit &&
+      !gameState.pendingHit.resolved &&
+      gameState.pendingHit.targetImpactSongTime !== null &&
+      gameState.pendingHit.targetImpactSongTime !== undefined &&
+      curSongTime >= gameState.pendingHit.targetImpactSongTime - 1e-6
+    );
 
-    if (gameState.attackTimer < startupEnd) {
+    if (gameState.attackTimer < startupEnd && !reachedTargetBeat) {
       gameState.attackPhase = 'startup';
       gameState.canCancel = false;
     } else if (gameState.attackTimer < activeEnd) {
       gameState.attackPhase = 'active';
       gameState.canCancel = false;
-      if (gameState.pendingHit && !gameState.pendingHit.resolved && gameState.attackTimer >= impactApexTime) {
+      if (gameState.pendingHit && !gameState.pendingHit.resolved && (gameState.attackTimer >= impactApexTime || reachedTargetBeat)) {
         resolveActivePhaseAttack(gameState.pendingHit);
       }
     } else if (gameState.attackTimer < total) {
@@ -3596,32 +3807,54 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
     floorDial.dialGroup.position.y = 0.025;
   }
 
-  poseChallenger(challengerRig, gameState.pose, elapsed, beatPulse, dt);
+  poseChallenger(challengerRig, gameState.pose, elapsed, beatPulse, dt, rawDt);
 }
 
-function quantizeWindupToBeat(songTime, chart, beatsAhead = 1.0) {
+function quantizeWindupToBeat(songTime, chart, beatsAhead = 1.0, strikeDur = 0.0) {
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
   const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
   if (songTime === null || songTime === undefined) {
-    return { canStart: true, windupDur: beatSec * beatsAhead };
+    return { canStart: true, windupDur: Math.max(0.20, beatSec * beatsAhead - strikeDur), targetImpactSongTime: null };
   }
   const beatFloat = (songTime - firstOffset) / beatSec;
   const nextIntBeat = Math.ceil(beatFloat);
   const timeToNextBeat = (nextIntBeat - beatFloat) * beatSec;
-  // Start telegraph on the beat boundary (or within 75ms of a beat boundary) so impact lands strictly on target downbeat
-  if (timeToNextBeat <= 0.075 || (beatSec - timeToNextBeat) <= 0.075) {
-    const startBeat = timeToNextBeat <= 0.075 ? nextIntBeat : (nextIntBeat - 1);
-    const targetDownbeat = startBeat + Math.max(1, Math.round(beatsAhead));
-    const exactDur = Math.max(beatSec * 0.75, (targetDownbeat - beatFloat) * beatSec);
-    return { canStart: true, windupDur: exactDur };
-  }
-  return { canStart: false, windupDur: beatSec * beatsAhead };
+  const nearBeat = timeToNextBeat <= 0.075 || (beatSec - timeToNextBeat) <= 0.075;
+  const startBeat = nearBeat
+    ? (timeToNextBeat <= 0.075 ? nextIntBeat : (nextIntBeat - 1))
+    : Math.round(beatFloat);
+  const targetDownbeat = Math.max(nextIntBeat, startBeat + Math.max(1, Math.round(beatsAhead)));
+  const targetImpactSongTime = firstOffset + targetDownbeat * beatSec;
+  const totalTelegraphDur = Math.max(beatSec * 0.65, targetImpactSongTime - songTime);
+  const exactWindupDur = Math.max(0.16, totalTelegraphDur - strikeDur);
+  return { canStart: nearBeat, windupDur: exactWindupDur, targetImpactSongTime };
+}
+
+function recordEnemyStrikeEvent(type, songTime, chart) {
+  if (songTime === null || songTime === undefined) return;
+  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const beatFloat = (songTime - firstOffset) / beatSec;
+  const nearestBeatIdx = Math.round(beatFloat);
+  const deltaMs = Number((Math.abs(beatFloat - nearestBeatIdx) * beatSec * 1000).toFixed(2));
+  gameState.enemyStrikeEvents.push({
+    type,
+    songTime: Number(songTime.toFixed(4)),
+    nearestBeatDeltaMs: deltaMs,
+    onBeatMarker: deltaMs <= 25.0
+  });
 }
 
 function applyPlayerDamage(dmg, hitWord, kickAmt = 0.28, dutchAmt = 0.04) {
   gameState.playerHp = Math.max(0, gameState.playerHp - dmg);
   gameState.combo = 0;
   gameState.comboDecayTimer = 0;
+  gameState.playerHitStunTimer = 0.150;
+  gameState.isAttacking = false;
+  gameState.attackPhase = 'idle';
+  gameState.pendingHit = null;
+  gameState.pose = 'hurt';
+  gameState.poseTimer = 0.150;
   if (!reducedMotionEnabled) {
     gameState.cameraKick = kickAmt;
     gameState.cameraDutch = dutchAmt;
@@ -3740,9 +3973,9 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
       b.blender.setTarget({
         torso: torsoTgt, headGroup: headTgt,
         leftArm: [-0.4 * ease, 0, -0.5 * ease], rightArm: [-0.4 * ease, 0, 0.5 * ease],
-        leftElbow: [0.6 * ease, 0, 0], rightElbow: [0.6 * ease, 0, 0],
+        leftElbow: [-0.6 * ease, 0, 0], rightElbow: [-0.6 * ease, 0, 0],
         leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
-        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+        leftKnee: [0.08, 0, 0], rightKnee: [0.08, 0, 0]
       });
     }
     if (b.verticalVelocity) {
@@ -3773,9 +4006,9 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
         torso: [0.22, Math.sin(elapsed * 10) * 0.25, 0],
         headGroup: [0.10, Math.sin(elapsed * 8) * 0.15, 0],
         leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
-        leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
+        leftElbow: [-0.35, 0, 0], rightElbow: [-0.35, 0, 0],
         leftLeg: [-0.10, 0, 0], rightLeg: [-0.10, 0, 0],
-        leftKnee: [-0.12, 0, 0], rightKnee: [-0.12, 0, 0]
+        leftKnee: [0.12, 0, 0], rightKnee: [0.12, 0, 0]
       });
     }
     if (b.stateTimer <= 0) {
@@ -3790,10 +4023,10 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
     if (b.blender) {
       b.blender.setTarget({
         torso: [-0.25, Math.sin(elapsed * 8.0) * 0.15, 0], headGroup: [-0.20, 0, 0],
-        leftArm: [0.35, 0, -0.45], leftElbow: [0.20, 0, 0],
-        rightArm: [0.35, 0, 0.45], rightElbow: [0.20, 0, 0],
+        leftArm: [0.35, 0, -0.45], leftElbow: [-0.20, 0, 0],
+        rightArm: [0.35, 0, 0.45], rightElbow: [-0.20, 0, 0],
         leftLeg: [-0.15, 0, 0], rightLeg: [-0.15, 0, 0],
-        leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
+        leftKnee: [0.14, 0, 0], rightKnee: [0.14, 0, 0]
       });
     }
     if (b.stateTimer <= 0) {
@@ -3805,8 +4038,13 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
   }
 }
 
-function updateBruiserWindupState(b, dt, elapsed) {
-  b.stateTimer -= dt;
+function updateBruiserWindupState(b, dt, elapsed, songTime) {
+  const strikeDur = b.attackType === 'quick_hook' ? 0.18 : 0.22;
+  if (songTime !== null && songTime !== undefined && b.targetImpactSongTime) {
+    b.stateTimer = (b.targetImpactSongTime - strikeDur) - songTime;
+  } else {
+    b.stateTimer -= dt;
+  }
   b.isGuarding = false;
   const toPlayer = new THREE.Vector3().subVectors(gameState.playerPos, b.rig.root.position);
   toPlayer.y = 0;
@@ -3821,10 +4059,10 @@ function updateBruiserWindupState(b, dt, elapsed) {
     if (b.blender) {
       b.blender.setTarget({
         torso: [0.12, 0.45, 0],
-        leftArm: [-1.45, 0.40, -0.30], leftElbow: [1.25, 0, 0],
-        rightArm: [-0.85, -0.20, 0.20], rightElbow: [1.30, 0, 0],
+        leftArm: [-1.45, 0.40, -0.30], leftElbow: [-1.25, 0, 0],
+        rightArm: [-0.85, -0.20, 0.20], rightElbow: [-1.30, 0, 0],
         leftLeg: [-0.15, 0, 0], rightLeg: [0.15, 0, 0],
-        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+        leftKnee: [0.10, 0, 0], rightKnee: [0.10, 0, 0], headGroup: [0, 0, 0]
       });
     }
     const flashColor = (!reducedMotionEnabled && Math.sin(elapsed * 16) > 0) ? 0x00e5ff : 0xffe042;
@@ -3835,10 +4073,10 @@ function updateBruiserWindupState(b, dt, elapsed) {
     if (b.blender) {
       b.blender.setTarget({
         torso: [-0.18, -0.55, 0],
-        rightArm: [-2.15, 0, 0.45], rightElbow: [1.1, 0, 0],
-        leftArm: [-0.85, 0, -0.25], leftElbow: [1.15, 0, 0],
+        rightArm: [-2.15, 0, 0.45], rightElbow: [-1.10, 0, 0],
+        leftArm: [-0.85, 0, -0.25], leftElbow: [-1.15, 0, 0],
         leftLeg: [0.15, 0, 0], rightLeg: [-0.15, 0, 0],
-        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+        leftKnee: [0.10, 0, 0], rightKnee: [0.10, 0, 0], headGroup: [0, 0, 0]
       });
     }
     b.teleMat.color.setHex(0xff1e38);
@@ -3848,32 +4086,38 @@ function updateBruiserWindupState(b, dt, elapsed) {
 
   if (b.stateTimer <= 0) {
     b.state = 'striking';
-    b.stateTimer = b.attackType === 'quick_hook' ? 0.18 : 0.22;
+    b.stateTimer = (songTime !== null && songTime !== undefined && b.targetImpactSongTime)
+      ? Math.max(0.016, b.targetImpactSongTime - songTime)
+      : strikeDur;
     b.badge.update(b.hp, b.maxHp, 'striking', null, b.attackType);
   }
 }
 
-function updateBruiserStrikingState(b, dt, contextState) {
+function updateBruiserStrikingState(b, dt, contextState, songTime, chart) {
   const idx = b.idx;
-  b.stateTimer -= dt;
+  if (songTime !== null && songTime !== undefined && b.targetImpactSongTime) {
+    b.stateTimer = b.targetImpactSongTime - songTime;
+  } else {
+    b.stateTimer -= dt;
+  }
   b.isGuarding = false;
   b.rig.hips.position.y = 1.02;
   if (b.blender) {
     if (b.attackType === 'quick_hook') {
       b.blender.setTarget({
         torso: [0.22, -0.55, 0],
-        leftArm: [-1.25, 0.45, 0.35], leftElbow: [0.35, 0, 0],
-        rightArm: [-0.60, -0.25, 0.30], rightElbow: [1.20, 0, 0],
+        leftArm: [-1.25, 0.45, 0.35], leftElbow: [-0.35, 0, 0],
+        rightArm: [-0.60, -0.25, 0.30], rightElbow: [-1.20, 0, 0],
         leftLeg: [0.18, 0, 0], rightLeg: [-0.18, 0, 0],
-        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+        leftKnee: [0.10, 0, 0], rightKnee: [0.10, 0, 0], headGroup: [0, 0, 0]
       });
     } else {
       b.blender.setTarget({
         torso: [0.28, 0.65, 0],
-        rightArm: [-1.35, -0.25, -0.15], rightElbow: [0.15, 0, 0],
-        leftArm: [-0.5, 0, -0.3], leftElbow: [0.8, 0, 0],
+        rightArm: [-1.35, -0.25, -0.15], rightElbow: [-0.15, 0, 0],
+        leftArm: [-0.5, 0, -0.3], leftElbow: [-0.80, 0, 0],
         leftLeg: [-0.20, 0, 0], rightLeg: [0.20, 0, 0],
-        leftKnee: [-0.08, 0, 0], rightKnee: [-0.12, 0, 0], headGroup: [0, 0, 0]
+        leftKnee: [0.08, 0, 0], rightKnee: [0.12, 0, 0], headGroup: [0, 0, 0]
       });
     }
   }
@@ -3881,6 +4125,8 @@ function updateBruiserStrikingState(b, dt, contextState) {
 
   if (b.stateTimer <= 0) {
     b.teleMat.opacity = 0;
+    recordEnemyStrikeEvent(`bruiser_${b.attackType}`, songTime, chart);
+    b.targetImpactSongTime = null;
     const hitDist = b.rig.root.position.distanceTo(gameState.playerPos);
     const waveCfg = (contextState && contextState.waveCfg) || TUNING.WAVES[gameState.wave] || TUNING.WAVES[1];
     const isDodging = gameState.dodgeInvulnTimer > 0 || (gameState.wave === 3 && (gameState.wave3BeatWeaveTimer || 0) > 0);
@@ -3918,10 +4164,10 @@ function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime,
     if (b.blender) {
       b.blender.setTarget({
         torso: [0.08, 0, 0], headGroup: [0.12, 0, 0],
-        leftArm: [-1.15, 0.35, -0.22], leftElbow: [1.60, 0, 0],
-        rightArm: [-1.15, -0.35, 0.22], rightElbow: [1.60, 0, 0],
+        leftArm: [-1.15, 0.35, -0.22], leftElbow: [-1.60, 0, 0],
+        rightArm: [-1.15, -0.35, 0.22], rightElbow: [-1.60, 0, 0],
         leftLeg: [0.10, 0, 0], rightLeg: [-0.10, 0, 0],
-        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+        leftKnee: [0.08, 0, 0], rightKnee: [0.08, 0, 0]
       });
     }
     b.teleMat.opacity = 0;
@@ -3961,8 +4207,8 @@ function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime,
   if (b.blender) {
     b.blender.setTarget({
       torso: [0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0],
-      leftArm: [-0.95 + beatPulse * 0.15, 0.25, -0.22], leftElbow: [1.15, 0, 0],
-      rightArm: [-0.95 - beatPulse * 0.15, -0.25, 0.22], rightElbow: [1.15, 0, 0],
+      leftArm: [-0.95 + beatPulse * 0.15, 0.25, -0.22], leftElbow: [-1.15, 0, 0],
+      rightArm: [-0.95 - beatPulse * 0.15, -0.25, 0.22], rightElbow: [-1.15, 0, 0],
       leftLeg: [stride, 0, 0], rightLeg: [-stride, 0, 0],
       leftKnee: [0, 0, 0], rightKnee: [0, 0, 0], headGroup: [0, 0, 0]
     });
@@ -3987,14 +4233,16 @@ function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime,
   b.attackCooldown -= dt;
   if (b.attackCooldown <= 0 && canAddAttacker) {
     const nextType = (b.attackType === 'quick_hook') ? 'heavy_haymaker' : 'quick_hook';
+    const strikeDur = nextType === 'quick_hook' ? 0.18 : 0.22;
     const beatsAhead = nextType === 'heavy_haymaker' ? 2.0 : 1.0;
-    const q = quantizeWindupToBeat(songTime, chart, beatsAhead);
-    if (q.canStart || b.attackCooldown < -beatSec) {
+    const q = quantizeWindupToBeat(songTime, chart, beatsAhead, strikeDur);
+    if (q.canStart || (songTime === null && b.attackCooldown < -beatSec)) {
       b.state = 'windup';
       b.attackType = nextType;
-      const scaledWindup = waveCfg.windupSec || q.windupDur;
+      const scaledWindup = songTime !== null ? q.windupDur : (waveCfg.windupSec || q.windupDur);
       b.stateTimer = scaledWindup;
       b.windupTotalDur = scaledWindup;
+      b.targetImpactSongTime = q.targetImpactSongTime;
       if (b.attackType === 'heavy_haymaker') {
         b.teleMat.color.setHex(0xff1e38);
         b.badge.update(b.hp, b.maxHp, 'windup', '! DODGE [A] / COUNTER !', 'heavy_haymaker');
@@ -4033,9 +4281,9 @@ function updateKronosHitAndStunState(dt, elapsed, beatSec) {
       kronosBlender.setTarget({
         torso: torsoTgt, headGroup: headTgt,
         leftArm: [-0.5 * ease, 0, -0.4 * ease], rightArm: [-0.5 * ease, 0, 0.4 * ease],
-        leftElbow: [0.7 * ease, 0, 0], rightElbow: [0.7 * ease, 0, 0],
+        leftElbow: [-0.7 * ease, 0, 0], rightElbow: [-0.7 * ease, 0, 0],
         leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
-        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+        leftKnee: [0.08, 0, 0], rightKnee: [0.08, 0, 0]
       });
     }
     if (gameState.kronosStateTimer <= 0) {
@@ -4064,9 +4312,9 @@ function updateKronosHitAndStunState(dt, elapsed, beatSec) {
         torso: [0.28, Math.sin(elapsed * 10.0) * 0.22, 0],
         headGroup: [0.18, Math.sin(elapsed * 8.0) * 0.16, 0],
         leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
-        leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
+        leftElbow: [-0.35, 0, 0], rightElbow: [-0.35, 0, 0],
         leftLeg: [-0.12, 0, 0], rightLeg: [-0.12, 0, 0],
-        leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
+        leftKnee: [0.14, 0, 0], rightKnee: [0.14, 0, 0]
       });
     }
     if (gameState.kronosStateTimer <= 0) {
@@ -4079,7 +4327,7 @@ function updateKronosHitAndStunState(dt, elapsed, beatSec) {
   }
 }
 
-function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
+function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg, songTime, chart) {
   if (gameState.kronosRingState === 'windup_combo') {
     gameState.kronosStateTimer -= dt;
     const step = gameState.bossComboStep || 0;
@@ -4095,17 +4343,22 @@ function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
 
     if (kronosBlender) {
       if (step === 0) {
-        kronosBlender.setTarget({ torso: [-0.15, 0.35, 0], leftArm: [-1.45, 0.25, -0.2], leftElbow: [1.2, 0, 0], rightArm: [-0.65, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
+        kronosBlender.setTarget({ torso: [-0.15, 0.35, 0], leftArm: [-1.45, 0.25, -0.2], leftElbow: [-1.2, 0, 0], rightArm: [-0.65, -0.2, 0.2], rightElbow: [-0.8, 0, 0] });
       } else if (step === 1) {
-        kronosBlender.setTarget({ torso: [-0.18, -0.45, 0], rightArm: [-1.85, -0.3, 0.3], rightElbow: [1.3, 0, 0], leftArm: [-0.75, 0.2, -0.2], leftElbow: [0.9, 0, 0] });
+        kronosBlender.setTarget({ torso: [-0.18, -0.45, 0], rightArm: [-1.85, -0.3, 0.3], rightElbow: [-1.3, 0, 0], leftArm: [-0.75, 0.2, -0.2], leftElbow: [-0.9, 0, 0] });
       } else {
         kronosRig.hips.position.y = 1.08 + Math.sin(elapsed * 14.0) * 0.08;
-        kronosBlender.setTarget({ torso: [-0.35, 0, 0], leftArm: [-2.4, 0, -0.35], leftElbow: [0.4, 0, 0], rightArm: [-2.4, 0, 0.35], rightElbow: [0.4, 0, 0], headGroup: [-0.15, 0, 0] });
+        kronosBlender.setTarget({ torso: [-0.35, 0, 0], leftArm: [-2.4, 0, -0.35], leftElbow: [-0.4, 0, 0], rightArm: [-2.4, 0, 0.35], rightElbow: [-0.4, 0, 0], headGroup: [-0.15, 0, 0] });
       }
     }
-    if (gameState.kronosStateTimer <= 0) {
+    const windupDone = (songTime !== null && gameState.kronosTargetWindupEndSongTime !== undefined && gameState.kronosTargetWindupEndSongTime !== null)
+      ? (songTime >= gameState.kronosTargetWindupEndSongTime)
+      : (gameState.kronosStateTimer <= 0);
+    if (windupDone) {
       gameState.kronosRingState = 'striking_combo';
-      gameState.kronosStateTimer = beatSec * 0.28;
+      gameState.kronosStateTimer = (songTime !== null && gameState.kronosTargetImpactSongTime !== undefined && gameState.kronosTargetImpactSongTime !== null)
+        ? Math.max(0.02, gameState.kronosTargetImpactSongTime - songTime)
+        : (beatSec * 0.28);
       const label = step === 2 ? '! SCRATCH COUNTER [3/3 · A] !' : (step === 1 ? '! SCRATCH CUT [2/3] !' : '! SCRATCH SLASH [1/3] !');
       kronosRingBadge.update(gameState.bossHp, 100, 'striking', label, 'scratch_combo');
     }
@@ -4119,15 +4372,19 @@ function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
 
   if (kronosBlender) {
     if (step === 0) {
-      kronosBlender.setTarget({ torso: [0.22, 0.45, 0], leftArm: [-1.65, 0, -0.1], leftElbow: [0.15, 0, 0], rightArm: [-0.5, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
+      kronosBlender.setTarget({ torso: [0.22, 0.45, 0], leftArm: [-1.65, 0, -0.1], leftElbow: [-0.15, 0, 0], rightArm: [-0.5, -0.2, 0.2], rightElbow: [-0.8, 0, 0] });
     } else if (step === 1) {
-      kronosBlender.setTarget({ torso: [0.25, -0.55, 0], rightArm: [-1.55, 0, 0.15], rightElbow: [0.2, 0, 0], leftArm: [-0.6, 0.2, -0.2], leftElbow: [0.7, 0, 0] });
+      kronosBlender.setTarget({ torso: [0.25, -0.55, 0], rightArm: [-1.55, 0, 0.15], rightElbow: [-0.2, 0, 0], leftArm: [-0.6, 0.2, -0.2], leftElbow: [-0.7, 0, 0] });
     } else {
       kronosRig.hips.position.y = 0.94;
-      kronosBlender.setTarget({ torso: [0.45, 0, 0], leftArm: [-1.2, 0, -0.25], leftElbow: [0.8, 0, 0], rightArm: [-1.2, 0, 0.25], rightElbow: [0.8, 0, 0], headGroup: [0.2, 0, 0] });
+      kronosBlender.setTarget({ torso: [0.45, 0, 0], leftArm: [-1.2, 0, -0.25], leftElbow: [-0.8, 0, 0], rightArm: [-1.2, 0, 0.25], rightElbow: [-0.8, 0, 0], headGroup: [0.2, 0, 0] });
     }
   }
-  if (gameState.kronosStateTimer <= 0) {
+  const strikeDone = (songTime !== null && gameState.kronosTargetImpactSongTime !== undefined && gameState.kronosTargetImpactSongTime !== null)
+    ? (songTime >= gameState.kronosTargetImpactSongTime)
+    : (gameState.kronosStateTimer <= 0);
+  if (strikeDone) {
+    recordEnemyStrikeEvent('kronos', songTime, chart);
     const isDodging = gameState.dodgeInvulnTimer > 0 || (gameState.wave3BeatWeaveTimer || 0) > 0 || gameState.bossStepWeaved;
     const hitDist = kronosRig.root.position.distanceTo(gameState.playerPos);
     const scratchDmgs = (w3Cfg && w3Cfg.bossScratchHitDmg) || [10, 12, 18];
@@ -4135,6 +4392,8 @@ function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
     if (step === 2) {
       kronosTeleMat.opacity = 0;
       gameState.bossStepWeaved = false;
+      gameState.kronosTargetWindupEndSongTime = null;
+      gameState.kronosTargetImpactSongTime = null;
       if (isDodging) {
         const riposteDmg = w3Cfg ? w3Cfg.bossCounterRiposteDmg : 26;
         gameState.bossHp = Math.max(0, gameState.bossHp - riposteDmg);
@@ -4171,7 +4430,18 @@ function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
       gameState.bossComboStep = step + 1;
       gameState.bossStepWeaved = false;
       gameState.kronosRingState = 'windup_combo';
-      gameState.kronosStateTimer = beatSec * 0.72;
+      const strikeDur = beatSec * 0.28;
+      if (songTime !== null) {
+        const q = quantizeWindupToBeat(songTime, chart, 1.0, strikeDur);
+        const windupDur = q.windupDur;
+        gameState.kronosStateTimer = windupDur;
+        gameState.kronosTargetWindupEndSongTime = q.targetImpactSongTime !== null ? (q.targetImpactSongTime - strikeDur) : (songTime + windupDur);
+        gameState.kronosTargetImpactSongTime = q.targetImpactSongTime !== null ? q.targetImpactSongTime : (songTime + windupDur + strikeDur);
+      } else {
+        gameState.kronosStateTimer = beatSec * 0.72;
+        gameState.kronosTargetWindupEndSongTime = null;
+        gameState.kronosTargetImpactSongTime = null;
+      }
       const nextLabel = (step === 0) ? '! SCRATCH CUT [2/3] !' : '! SCRATCH COUNTER [3/3 · A] !';
       kronosTeleMat.color.setHex(step === 0 ? 0x00e5ff : 0xffe042);
       kronosRingBadge.update(gameState.bossHp, 100, 'windup', nextLabel, 'scratch_combo');
@@ -4194,10 +4464,10 @@ function updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg) {
     if (kronosBlender) {
       kronosBlender.setTarget({
         torso: [-0.35, 0, 0],
-        leftArm: [-2.2, 0.3, -0.4], leftElbow: [0.6, 0, 0],
-        rightArm: [-2.2, -0.3, 0.4], rightElbow: [0.6, 0, 0],
+        leftArm: [-2.2, 0.3, -0.4], leftElbow: [-0.6, 0, 0],
+        rightArm: [-2.2, -0.3, 0.4], rightElbow: [-0.6, 0, 0],
         leftLeg: [0.35, 0, 0], rightLeg: [-0.25, 0, 0],
-        leftKnee: [-0.4, 0, 0], rightKnee: [-0.3, 0, 0]
+        leftKnee: [0.4, 0, 0], rightKnee: [0.3, 0, 0]
       });
     }
     if (gameState.kronosStateTimer <= 0) {
@@ -4235,8 +4505,8 @@ function updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg) {
     if (kronosBlender) {
       kronosBlender.setTarget({
         torso: [0.38, 0, 0],
-        leftArm: [-1.2, 0, -0.3], leftElbow: [0.9, 0, 0],
-        rightArm: [-1.2, 0, 0.3], rightElbow: [0.9, 0, 0]
+        leftArm: [-1.2, 0, -0.3], leftElbow: [-0.9, 0, 0],
+        rightArm: [-1.2, 0, 0.3], rightElbow: [-0.9, 0, 0]
       });
     }
     if (gameState.kronosStateTimer <= 0) {
@@ -4319,7 +4589,7 @@ function updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg) {
   return false;
 }
 
-function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState) {
+function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, songTime, chart, contextState) {
   kronosTeleMat.opacity = 0;
   const kAngle = elapsed * 0.55;
   const targetKx = gameState.playerPos.x + Math.sin(kAngle) * 1.48;
@@ -4332,10 +4602,10 @@ function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState
   if (kronosBlender) {
     kronosBlender.setTarget({
       torso: [0.06, Math.sin(elapsed * 2.8) * 0.15, 0],
-      leftArm: [-0.85 + beatPulse * 0.18, 0.2, -0.2], leftElbow: [1.10, 0, 0],
-      rightArm: [-0.90 - beatPulse * 0.18, -0.2, 0.2], rightElbow: [1.10, 0, 0],
+      leftArm: [-0.85 + beatPulse * 0.18, 0.2, -0.2], leftElbow: [-1.10, 0, 0],
+      rightArm: [-0.90 - beatPulse * 0.18, -0.2, 0.2], rightElbow: [-1.10, 0, 0],
       leftLeg: [kStride, 0, 0], rightLeg: [-kStride, 0, 0],
-      leftKnee: [-0.05, 0, 0], rightKnee: [-0.05, 0, 0], headGroup: [0, 0, 0]
+      leftKnee: [0.05, 0, 0], rightKnee: [0.05, 0, 0], headGroup: [0, 0, 0]
     });
   }
 
@@ -4344,7 +4614,17 @@ function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState
     : true;
   gameState.kronosAttackCooldown -= dt;
   if (gameState.kronosAttackCooldown <= 0 && canBossAttack) {
-    const windupDur = beatSec * 0.72;
+    const strikeDur = beatSec * 0.28;
+    let windupDur = beatSec * 0.72;
+    if (songTime !== null) {
+      const q = quantizeWindupToBeat(songTime, chart, 1.0, strikeDur);
+      windupDur = q.windupDur;
+      gameState.kronosTargetWindupEndSongTime = q.targetImpactSongTime !== null ? (q.targetImpactSongTime - strikeDur) : (songTime + windupDur);
+      gameState.kronosTargetImpactSongTime = q.targetImpactSongTime !== null ? q.targetImpactSongTime : (songTime + windupDur + strikeDur);
+    } else {
+      gameState.kronosTargetWindupEndSongTime = null;
+      gameState.kronosTargetImpactSongTime = null;
+    }
     gameState.bossAttackPattern = 'scratch_combo';
     gameState.bossComboStep = 0;
     gameState.bossStepWeaved = false;
@@ -4381,9 +4661,9 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
     if (b.state === 'hit' || b.state === 'stunned' || b.state === 'guard_break') {
       updateBruiserHitStunGuardBreakState(b, dt, elapsed);
     } else if (b.state === 'windup') {
-      updateBruiserWindupState(b, dt, elapsed);
+      updateBruiserWindupState(b, dt, elapsed, songTime);
     } else if (b.state === 'striking') {
-      updateBruiserStrikingState(b, dt, contextState);
+      updateBruiserStrikingState(b, dt, contextState, songTime, chart);
     } else {
       updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime, chart, beatSec, contextState);
     }
@@ -4408,7 +4688,7 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
         torso: [0, Math.sin(elapsed * 2.4) * 0.18, 0],
         leftArm: [-0.65 + Math.sin(elapsed * 5) * 0.20, 0, -0.15],
         rightArm: [-0.70 - Math.sin(elapsed * 5) * 0.20, 0, 0.15],
-        leftElbow: [0.8, 0, 0], rightElbow: [0.8, 0, 0],
+        leftElbow: [-0.8, 0, 0], rightElbow: [-0.8, 0, 0],
         leftLeg: [0, 0, 0], rightLeg: [0, 0, 0],
         leftKnee: [0, 0, 0], rightKnee: [0, 0, 0],
         headGroup: [0, Math.sin(elapsed * 2.4) * 0.10, 0]
@@ -4449,10 +4729,25 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
   }
 
   const w3Cfg = TUNING.WAVES[3];
-  gameState.wave3BeatFloat = (gameState.wave3BeatFloat || 0) + dt / beatSec;
+  if (songTime !== null) {
+    const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+    const curBeatFloat = Math.max(0, (songTime - firstOffset) / beatSec);
+    if (
+      gameState.wave3StartBeatFloat === undefined ||
+      gameState.wave3StartBeatFloat === null ||
+      curBeatFloat < gameState.wave3StartBeatFloat
+    ) {
+      gameState.wave3StartBeatFloat = curBeatFloat;
+    }
+    gameState.wave3BeatFloat = Math.max(0, curBeatFloat - gameState.wave3StartBeatFloat);
+  } else {
+    gameState.wave3BeatFloat = (gameState.wave3BeatFloat || 0) + dt / beatSec;
+  }
   const totalBeats = gameState.wave3BeatFloat;
   const barIndex = Math.floor(totalBeats / 4);
   const beatInBar = totalBeats - barIndex * 4;
+  gameState.wave3BarIdx = barIndex;
+  gameState.wave3BeatInBar = beatInBar;
 
   // Every 4th bar (barIndex % 4 === 3, starting on Beat 3 -> 4th-bar downbeat): trigger BASS DROP ring shockwave
   if (
@@ -4479,11 +4774,11 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
   if (gameState.kronosRingState === 'hit' || gameState.kronosRingState === 'counter_stun' || gameState.kronosRingState === 'stunned') {
     updateKronosHitAndStunState(dt, elapsed, beatSec);
   } else if (gameState.kronosRingState === 'windup_combo' || gameState.kronosRingState === 'striking_combo') {
-    if (updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg)) return;
+    if (updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg, songTime, chart)) return;
   } else if (gameState.kronosRingState === 'windup_shockwave' || gameState.kronosRingState === 'shockwave_active') {
     if (updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg)) return;
   } else {
-    updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState);
+    updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, songTime, chart, contextState);
   }
 
   if (gameState.kronosRingState !== 'windup_shockwave' && gameState.kronosRingState !== 'shockwave_active' && gameState.bossShockwave && gameState.bossShockwave.active) {
@@ -4587,7 +4882,8 @@ function updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart) {
     if (!isPhoneViewport && instancedCrowdHandle.update) {
       const hypeRatio = Math.max(0, Math.min(1.0, (gameState.hype || 0) / 100));
       const jumpAmp = reducedMotionEnabled ? 0.04 : (0.14 + 0.14 * hypeRatio);
-      instancedCrowdHandle.update(elapsed, bpm, jumpAmp);
+      const crowdTime = songTime !== null ? songTime : elapsed;
+      instancedCrowdHandle.update(crowdTime, bpm, jumpAmp);
     }
   }
 

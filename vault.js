@@ -49,12 +49,12 @@ const TAPES = [
   },
   {
     id: '04',
-    indexMeta: 'No. 04 — Spatial GIS, Telemetry & Gemini Sim',
-    title: 'Mountain View Digital Twin',
-    desc: 'Interactive 3D city planning digital twin of Mountain View, CA. Run what-if zoning scenarios, simulate US-101 & Caltrain traffic or Bay climate impacts, and stream live telemetry.',
+    indexMeta: 'No. 04 — Live City View, Cesium & Open Data',
+    title: 'Mountain View Live',
+    desc: 'A live, dark 3D view of Mountain View, CA: weather and air, traffic cameras, flights over Moffett, alerts, earthquakes and the scanner, with a chill radio on the side.',
     unlocked: true,
     url: './mountain-view.html',
-    ctaLabel: 'Enter Digital Twin',
+    ctaLabel: 'Enter Live View',
     shellColor: 0x142624,
     shellAttenuation: 0x071211,
     ribColor: 0x0e1c1a,
@@ -630,7 +630,7 @@ function drawMountainViewArtwork(ctx) {
   // Editorial Typography & GIS Metadata
   ctx.fillStyle = '#42e6b5';
   ctx.font = '500 16px "JetBrains Mono", monospace';
-  ctx.fillText('37.3861° N, 122.0839° W  ·  3D GIS + TELEMETRY + GEMINI SIM', 56, 62);
+  ctx.fillText('37.3861° N, 122.0839° W  ·  LIVE CITY VIEW', 56, 62);
 
   ctx.fillStyle = '#f5f2ea';
   ctx.font = 'italic 600 64px "Cormorant Garamond", "Georgia", serif';
@@ -638,18 +638,18 @@ function drawMountainViewArtwork(ctx) {
 
   ctx.fillStyle = '#e0bc7c';
   ctx.font = '500 15px "JetBrains Mono", monospace';
-  ctx.fillText('DIGITAL TWIN', 56, 242);
+  ctx.fillText('LIVE', 56, 242);
   ctx.fillStyle = 'rgba(245, 242, 234, 0.74)';
   ctx.font = '400 14px "JetBrains Mono", monospace';
-  ctx.fillText('ZONING ENGINE', 56, 268);
-  ctx.fillText('101 / CALTRAIN', 56, 292);
-  ctx.fillText('BAY RESILIENCE', 56, 316);
+  ctx.fillText('WEATHER · AIR', 56, 268);
+  ctx.fillText('CAMERAS · FLIGHTS', 56, 292);
+  ctx.fillText('ALERTS · SCANNER', 56, 316);
 
   ctx.fillStyle = '#e0bc7c';
   ctx.font = '400 15px "JetBrains Mono", monospace';
   ctx.fillText('NO. 04', 56, 436);
   ctx.textAlign = 'right';
-  ctx.fillText('CITYSCOPE · LIVE SIM', 968, 436);
+  ctx.fillText('CESIUM · OPEN DATA', 968, 436);
   ctx.textAlign = 'left';
 
   ctx.strokeStyle = 'rgba(216, 180, 116, 0.62)';
