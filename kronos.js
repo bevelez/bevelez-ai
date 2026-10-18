@@ -9,28 +9,41 @@ import {
   KRONOS_TRACK_CHARTS,
   estimateBpmFromAudioBuffer,
   buildCustomTrackChart
-} from './kronos-tracks.js?v=20261017b';
+} from './kronos-tracks.js?v=20261017c';
+import { createContactShadowDecal } from './models/shared.js?v=20261017c';
 import {
   buildChallengerModel,
-  buildPersistentKickSmearRig,
-  buildKronosBossModel,
-  buildBruiserModel,
+  buildPersistentKickSmearRig
+} from './models/challenger.js?v=20261017c';
+import { buildKronosBossModel } from './models/kronos.js?v=20261017c';
+import { buildBruiserModel } from './models/bruiser.js?v=20261017c';
+import {
   buildSpectatorModel,
-  buildInstancedArenaCrowd,
+  buildInstancedArenaCrowd
+} from './models/crowd.js?v=20261017c';
+import {
   buildBoomboxStage,
+  createBakedArenaAOMapTexture,
+  createBakedArenaLightMapTexture
+} from './models/stage.js?v=20261017c';
+import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
   buildSubwooferShockwaveRing,
   spawnStrikeSmearArc,
   spawn3DImpactBurst,
-  createContactShadowDecal,
-  createBakedArenaAOMapTexture,
-  createBakedArenaLightMapTexture,
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './kronos-models.js?v=20261017b';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261017b';
+} from './models/arena.js?v=20261017c';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261017c';
+import {
+  SFX_SYNTH_TABLE,
+  MAX_CATEGORY_VOICES,
+  synthesizeCombatSfxVoice,
+  synthesizeCrowdHypeSwell,
+  scheduleBossTelegraphSfx
+} from './kronos-sfx.js?v=20261017c';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -77,6 +90,42 @@ export const TUNING = {
     'punch-uppercut': { startup: 0.085, active: 0.070, recovery: 0.190, baseDmg: 42 },
     'kick':           { startup: 0.095, active: 0.075, recovery: 0.210, baseDmg: 48 },
     'miss':           { startup: 0.040, active: 0.020, recovery: 0.220, baseDmg: 0 }
+  },
+  WAVES: {
+    1: {
+      name: 'Cypher Vanguard',
+      maxSimultaneousAttackers: 1,
+      windupSec: 0.75,
+      quickHookDmg: 10,
+      haymakerDmg: 16,
+      bruiserHp: 130,
+      bruiserCount: 2,
+      bossActive: false
+    },
+    2: {
+      name: 'Heavy Hype-Crew',
+      maxSimultaneousAttackers: 2,
+      windupSec: 0.65,
+      quickHookDmg: 14,
+      haymakerDmg: 22,
+      bruiserHp: 150,
+      bruiserCount: 3,
+      bossActive: false
+    },
+    3: {
+      name: 'Boss Showdown (DJ Kronos + Royal Guard)',
+      maxSimultaneousAttackers: 2,
+      windupSec: 0.60,
+      quickHookDmg: 16,
+      haymakerDmg: 24,
+      bruiserHp: 160,
+      bruiserCount: 1,
+      bossActive: true,
+      bossScratchHitDmg: [10, 12, 18],
+      bossBassDropDmg: 26,
+      bossCounterRiposteDmg: 26,
+      bossBassDropReboundDmg: 28
+    }
   }
 };
 
@@ -86,111 +135,6 @@ window.__kronosReducedMotion = reducedMotionEnabled;
 // ============================================================================
 // 1. TABLE-DRIVEN FIGHTING FOLEY SYNTH + LYRIA 3.5 AUDIO ENGINE
 // ============================================================================
-const SFX_SYNTH_TABLE = {
-  'punch-jab': {
-    priority: 1, dur: 0.125, duck: null,
-    thud: { gain: 0.42, dur: 0.120 },
-    subDrop: { f0: 115, f1: 44, dur: 0.075, gain: 0.38, earlyGain: 0.22 },
-    snap: { cf: 1600, maxCf: 2200, q: 1.8, gain: 0.44, dur: 0.050 },
-    whoosh: { f0: 550, f1: 1750, q: 1.6, gain: 0.22, dur: 0.060 },
-    air: { perfectGain: 0.16, goodGain: 0.08, dur: 0.035 },
-    chord: { notes: [196.00, 146.83], lp: 650, maxLp: 800, q: 0.707, perfectGain: 0.12, goodGain: 0.06, dur: 0.110 }
-  },
-  'punch-cross': {
-    priority: 2, dur: 0.165, duck: null,
-    thud: { gain: 0.48, dur: 0.150 },
-    subPunch: { gain: 0.40, earlyGain: 0.20, dur: 0.140 },
-    subDrop: { f0: 135, f1: 38, dur: 0.105, gain: 0.45, earlyGain: 0.25 },
-    snap: { cf: 1250, maxCf: 1800, q: 1.8, gain: 0.50, dur: 0.070 },
-    whoosh: { f0: 480, f1: 1600, q: 1.6, gain: 0.26, dur: 0.090 },
-    air: { perfectGain: 0.18, goodGain: 0.08, dur: 0.038 },
-    chord: { notes: [116.54, 146.83, 174.61], lp: 850, maxLp: 1000, q: 0.8, perfectGain: 0.14, goodGain: 0.07, dur: 0.150 }
-  },
-  'punch-uppercut': {
-    priority: 5, dur: 0.245, duck: { perfect: -3.5, good: -2.0, early: -0.8, dur: 0.18 },
-    subPunch: { gain: 0.65, earlyGain: 0.35, dur: 0.210 },
-    thud: { gain: 0.58, dur: 0.160 },
-    subDrop: { f0: 160, f1: 32, dur: 0.170, gain: 0.58, earlyGain: 0.45 },
-    dualSnap: { cfs: [850, 1900], gain: 0.55, dur: 0.100 },
-    whoosh: { f0: 380, f1: 2100, q: 1.8, gain: 0.32, dur: 0.135 },
-    air: { perfectGain: 0.22, goodGain: 0.10, dur: 0.040 },
-    stinger: { notes: [{ f: 98.00, dt: 0 }, { f: 146.83, dt: 0.02 }, { f: 196.00, dt: 0.04 }, { f: 233.08, dt: 0.06 }], lp: 1100, maxLp: 1200, q: 0.9, perfectGain: 0.16, goodGain: 0.08, dur: 0.220 }
-  },
-  'kick': {
-    priority: 4, dur: 0.270, duck: { perfect: -4.5, good: -2.5, early: -1.0, dur: 0.22 },
-    subPunch: { gain: 0.70, earlyGain: 0.40, dur: 0.220 },
-    thud: { gain: 0.65, dur: 0.160 },
-    subDrop: { f0: 140, f1: 32.7, dur: 0.200, gain: 0.68, earlyGain: 0.50, saturated: true },
-    snap: { cf: 950, maxCf: 1400, q: 1.4, gain: 0.55, dur: 0.065 },
-    whoosh: { f0: 320, f1: 1500, q: 1.7, gain: 0.36, dur: 0.160 },
-    air: { perfectGain: 0.20, goodGain: 0.09, dur: 0.038 },
-    chord: { notes: [98.00, 146.83, 196.00, 293.66], lp: 950, maxLp: 1100, q: 1.0, perfectGain: 0.18, goodGain: 0.09, dur: 0.250 }
-  },
-  'dodge': {
-    priority: 3, dur: 0.155, duck: null,
-    whoosh: { f0: 450, f1: 1550, q: 1.8, gain: 0.38, dur: 0.145 },
-    air: { perfectGain: 0.12, goodGain: 0.12, dur: 0.038, always: true },
-    resTone: { f: 196.00, q: 3.0, gain: 0.035, dur: 0.120 }
-  },
-  'miss-whiff': {
-    priority: 1, dur: 0.110, duck: null,
-    whoosh: { f0: 340, f1: 820, q: 2.0, gain: 0.20, dur: 0.095 },
-    subDrop: { f0: 95, f1: 62, dur: 0.070, gain: 0.14, earlyGain: 0.14 }
-  },
-  'counter-weave': {
-    priority: 8, dur: 0.390, duck: { perfect: -5.0, good: -5.0, early: -5.0, dur: 0.25 },
-    whoosh: { f0: 300, f1: 2600, q: 2.2, gain: 0.36, dur: 0.080 },
-    subPunch: { gain: 0.45, earlyGain: 0.45, dur: 0.180 },
-    thud: { gain: 0.55, dur: 0.140 },
-    air: { perfectGain: 0.22, goodGain: 0.22, dur: 0.040, always: true },
-    chord: { notes: [196.00, 233.08, 293.66, 349.23], lp: 1100, maxLp: 1200, q: 1.1, perfectGain: 0.18, goodGain: 0.18, dur: 0.220, always: true },
-    chime: { notes: [293.66, 392.00], lp: 600, maxLp: 750, q: 1.2, gain: 0.10, dur: 0.350 }
-  },
-  'enemy-telegraph': {
-    priority: 6, dur: 0.225, duck: null,
-    tensionDrone: { f0A: 146.83, f1A: 155.56, f0B: 98.00, f1B: 116.54, lp: 480, maxLp: 600, q: 1.4, gain: 0.24, dur: 0.210 },
-    whoosh: { f0: 280, f1: 750, q: 1.8, gain: 0.26, dur: 0.200 },
-    thud: { gain: 0.20, dur: 0.100 }
-  },
-  'player-damaged': {
-    priority: 7, dur: 0.220, duck: { perfect: -6.0, good: -6.0, early: -6.0, dur: 0.30 }, concussion: { cutoff: 450, dur: 0.40 },
-    thud: { gain: 0.68, dur: 0.170 },
-    subPunch: { gain: 0.60, earlyGain: 0.60, dur: 0.180 },
-    subDrop: { f0: 92, f1: 26, dur: 0.140, gain: 0.62, earlyGain: 0.62 },
-    snap: { cf: 520, maxCf: 800, q: 1.8, gain: 0.52, dur: 0.080, saturated: true }
-  },
-  'guard-deflect': {
-    priority: 4, dur: 0.140, duck: null,
-    thud: { gain: 0.35, dur: 0.095 },
-    snap: { cf: 1400, maxCf: 1850, q: 2.4, gain: 0.36, dur: 0.055 },
-    chime: { notes: [392.00, 587.33], lp: 950, maxLp: 1100, q: 1.4, gain: 0.08, dur: 0.120 }
-  },
-  'guard-break': {
-    priority: 8, dur: 0.280, duck: { perfect: -6.0, good: -6.0, early: -6.0, dur: 0.25 }, concussion: { cutoff: 600, dur: 0.35 },
-    subDrop: { f0: 160, f1: 40, dur: 0.190, gain: 0.60, earlyGain: 0.60 },
-    thud: { gain: 0.58, dur: 0.150 },
-    snap: { cf: 1450, maxCf: 1900, q: 3.0, gain: 0.52, dur: 0.120, saturated: true },
-    chime: { notes: [659.25, 987.77], lp: 1200, maxLp: 1400, q: 1.2, gain: 0.14, dur: 0.260 }
-  },
-  'subwoofer-bass-drop': {
-    priority: 8, dur: 0.480, duck: { perfect: -5.5, good: -5.5, early: -5.5, dur: 0.32 },
-    subPunch: { gain: 0.72, earlyGain: 0.72, dur: 0.220 },
-    thud: { gain: 0.64, dur: 0.160 },
-    subDrop: { f0: 110, f1: 28, dur: 0.420, gain: 0.75, earlyGain: 0.75, saturated: true },
-    whoosh: { f0: 240, f1: 1200, q: 1.6, gain: 0.32, dur: 0.220 }
-  },
-  'stage-ko': {
-    priority: 9, dur: 1.150, duck: { perfect: -8.0, good: -8.0, early: -8.0, dur: 0.55 }, concussion: { cutoff: 450, dur: 0.45 },
-    subPunch: { gain: 0.75, earlyGain: 0.75, dur: 0.220 },
-    thud: { gain: 0.70, dur: 0.160 },
-    subDrop: { f0: 80, f1: 22, dur: 0.450, gain: 0.85, earlyGain: 0.85, saturated: true },
-    vinylScratch: { f0: 1400, f1: 90, modF: 85, modG0: 450, modG1: 40, lp: 1600, gain: 0.38, dur: 0.180 },
-    crowdCheer: { formants: [{ f: 450, q: 3.5 }, { f: 1150, q: 4.0 }, { f: 2400, q: 3.0 }], gain: 0.45, dur: 1.080 },
-    chord: { notes: [196.00, 233.08, 293.66, 349.23], lp: 1100, maxLp: 1200, q: 1.1, perfectGain: 0.32, goodGain: 0.32, dur: 0.320, always: true }
-  }
-};
-SFX_SYNTH_TABLE.punch = SFX_SYNTH_TABLE['punch-uppercut'];
-
 class KronosAudioEngine {
   constructor() {
     this.ctx = null;
@@ -232,13 +176,7 @@ class KronosAudioEngine {
     this.activeSourceCount = 0;
     this.activeVoices = [];
     this.MAX_POLYPHONY = 24;
-    this.MAX_CATEGORY_VOICES = {
-      'stage-ko': 2,
-      'kick': 4,
-      'counter-weave': 3,
-      'enemy-telegraph': 3,
-      'crowd-swell': 2
-    };
+    this.MAX_CATEGORY_VOICES = { ...MAX_CATEGORY_VOICES };
     this.lastDuck = null;
     this._activeDuckTargetGain = 1.0;
     this._activeDuckEndTime = 0;
@@ -761,14 +699,18 @@ class KronosAudioEngine {
   }
 
   getSongTime() {
-    if (IS_DEBUG_MODE && typeof gameState !== 'undefined' && gameState._debugMusicPlaying) {
-      return Number(gameState._debugSongTime) || 0;
+    if (IS_DEBUG_MODE && typeof gameState !== 'undefined') {
+      if (gameState._debugMusicPlaying) {
+        return Number(gameState._debugSongTime) || 0;
+      }
+      if (typeof gameState.songTime === 'number') {
+        return gameState.songTime;
+      }
     }
     const activeMediaKey = this.activeTrackKey === 'custom' ? 'flow' : this.activeTrackKey;
     const activeEl = this.tracks[activeMediaKey];
     if (this.isPlaying && activeEl && !activeEl.paused) {
-      const outLatency = (this.ctx && this.ctx.outputLatency) ? this.ctx.outputLatency : 0.015;
-      return Math.max(0, activeEl.currentTime - outLatency);
+      return Math.max(0, activeEl.currentTime);
     }
     return null;
   }
@@ -848,90 +790,7 @@ class KronosAudioEngine {
     this._lastCrowdTime = now;
 
     this._enforcePolyphony('crowd-swell', this.MAX_CATEGORY_VOICES['crowd-swell'] || 2);
-
-    const comboNum = options.combo || (type === 'combo-4' ? 4 : (type === 'combo-8' ? 8 : (type === 'combo-12' ? 12 : 0)));
-    let dur = 0.65, peakGain = 0.22, duckAmount = -1.8;
-    let formants = [{ f: 380, q: 4.0 }, { f: 620, q: 4.5 }, { f: 1050, q: 5.0 }];
-
-    if (type === 'counter-weave') {
-      dur = 0.55; peakGain = 0.34; duckAmount = -3.5;
-      formants = [{ f: 580, q: 3.5 }, { f: 1350, q: 4.0 }, { f: 2200, q: 2.8 }];
-    } else if (type === 'wave-clear') {
-      dur = 1.95; peakGain = 0.42; duckAmount = -4.5;
-      formants = [{ f: 420, q: 3.0 }, { f: 1050, q: 3.5 }, { f: 2300, q: 2.5 }];
-    } else if (type === 'combo-12' || comboNum >= 12) {
-      dur = 1.30; peakGain = 0.38; duckAmount = -3.5;
-      formants = [{ f: 450, q: 3.2 }, { f: 1100, q: 3.8 }, { f: 2400, q: 3.0 }];
-    } else if (type === 'combo-8' || comboNum >= 8) {
-      dur = 0.98; peakGain = 0.30; duckAmount = -2.5;
-      formants = [{ f: 500, q: 3.0 }, { f: 950, q: 3.2 }, { f: 1350, q: 3.5 }];
-    }
-
-    const voiceNodes = [];
-    const cheerGain = this.ctx.createGain();
-    cheerGain.gain.setValueAtTime(0.0001, now);
-    cheerGain.gain.linearRampToValueAtTime(peakGain, now + dur * 0.12);
-    cheerGain.gain.setValueAtTime(peakGain, now + dur * 0.38);
-    cheerGain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    cheerGain.connect(this.sfxBus);
-    voiceNodes.push(cheerGain);
-
-    const crowdBuf = (this.noiseBuffers && this.noiseBuffers.crowd) || (this.foleyBuffers && this.foleyBuffers.clothWhoosh);
-    if (crowdBuf) {
-      formants.forEach((fmt) => {
-        const src = this.ctx.createBufferSource();
-        src.buffer = crowdBuf;
-        src.loop = true;
-        const bp = this.ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.setValueAtTime(fmt.f, now);
-        bp.frequency.linearRampToValueAtTime(fmt.f * 1.08, now + dur * 0.45);
-        bp.Q.value = fmt.q;
-        src.connect(bp);
-        bp.connect(cheerGain);
-        src.start(now);
-        src.stop(now + dur + 0.02);
-        voiceNodes.push(src, bp);
-      });
-    }
-
-    const chordGain = this.ctx.createGain();
-    const chordPeak = type === 'wave-clear' ? 0.09 : (comboNum >= 8 || type === 'counter-weave' ? 0.06 : 0.035);
-    chordGain.gain.setValueAtTime(0.0001, now);
-    chordGain.gain.linearRampToValueAtTime(chordPeak, now + 0.04);
-    chordGain.gain.exponentialRampToValueAtTime(0.0001, now + dur * 0.72);
-
-    const chordFilter = this.ctx.createBiquadFilter();
-    chordFilter.type = 'lowpass';
-    chordFilter.frequency.setValueAtTime(850, now);
-    chordFilter.Q.value = 1.8;
-    chordGain.connect(chordFilter);
-    chordFilter.connect(this.sfxBus);
-    voiceNodes.push(chordGain, chordFilter);
-
-    const gmChord = [196.00, 233.08, 293.66, 392.00];
-    gmChord.forEach((freq) => {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(freq, now);
-      osc.connect(chordGain);
-      osc.start(now);
-      osc.stop(now + dur * 0.72);
-      voiceNodes.push(osc);
-    });
-
-    this.duckMusic(duckAmount, Math.min(0.45, dur * 0.4));
-    const voiceMeta = {
-      action: 'crowd-swell',
-      startTime: now,
-      priority: 6,
-      nodes: voiceNodes,
-      chordFilter,
-      chordGain,
-      gmChord
-    };
-    this.lastCrowdHype = voiceMeta;
-    this.registerVoiceCleanup(voiceNodes, dur + 0.05, voiceMeta);
+    const { dur } = synthesizeCrowdHypeSwell(this, type, options, now);
 
     if (typeof gameState !== 'undefined' && gameState) {
       gameState.crowdHypeTimer = Math.max(gameState.crowdHypeTimer || 0, dur);
@@ -939,7 +798,7 @@ class KronosAudioEngine {
     return true;
   }
 
-  playCombatSfx(action, grade = 'PERFECT', spatialSource = null) {
+  playCombatSfx(action, grade = 'PERFECT', spatialSource = null, scheduledStartTime = null) {
     if (!this.ctx && !this.userGestureUnlocked) return;
     this.initContext();
     if (!this.ctx) return;
@@ -947,320 +806,15 @@ class KronosAudioEngine {
       this.ctx.resume().catch(() => {});
     }
 
-    const recipe = SFX_SYNTH_TABLE[action] || SFX_SYNTH_TABLE['punch-jab'];
-    const now = this.ctx.currentTime;
-    const isPerfect = grade === 'PERFECT';
-    const isGood = grade === 'GOOD';
-    const isEarly = !isPerfect && !isGood;
-    const gradeMult = isPerfect ? 1.0 : (isGood ? 0.82 : 0.60);
-    const detuneMult = Math.pow(2, ((Math.random() * 2 - 1) * 12) / 1200);
-    const filterJitter = 1.0 + (Math.random() * 2 - 1) * 0.06;
-
+    const now = scheduledStartTime !== null && scheduledStartTime !== undefined
+      ? Math.max(this.ctx.currentTime, scheduledStartTime)
+      : this.ctx.currentTime;
     this._enforcePolyphony(action, this.MAX_CATEGORY_VOICES ? this.MAX_CATEGORY_VOICES[action] : null);
+    synthesizeCombatSfxVoice(this, action, grade, spatialSource, now);
+  }
 
-    const voiceNodes = [];
-    let voiceBus = this.sfxBus;
-    let voicePanner = null;
-    if (spatialSource !== null && spatialSource !== undefined && this.ctx.createStereoPanner) {
-      const panVal = typeof spatialSource === 'number'
-        ? Math.max(-0.92, Math.min(0.92, spatialSource))
-        : this.calculateSpatialPan(spatialSource);
-      const panner = this.ctx.createStereoPanner();
-      panner.pan.value = panVal;
-      panner.pan.setValueAtTime(panVal, now);
-      panner.connect(this.sfxBus);
-      voiceNodes.push(panner);
-      voiceBus = panner;
-      voicePanner = panner;
-      this.lastPan = panVal;
-      this.lastPanner = panner;
-    }
-
-    const voiceMeta = {
-      action, grade, gradeMult, isPerfect, isGood, isEarly,
-      startTime: now, priority: recipe.priority || 1,
-      nodes: voiceNodes, panner: voicePanner
-    };
-    this.lastVoice = voiceMeta;
-
-    if (recipe.thud && this.foleyBuffers.bodyThud) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.foleyBuffers.bodyThud;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.thud.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.thud.dur);
-      src.connect(g); g.connect(voiceBus);
-      src.start(now); src.stop(now + recipe.thud.dur + 0.005);
-      voiceNodes.push(src, g);
-    }
-
-    if (recipe.subPunch && this.foleyBuffers.subPunch) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.foleyBuffers.subPunch;
-      const g = this.ctx.createGain();
-      const baseG = isEarly ? (recipe.subPunch.earlyGain || recipe.subPunch.gain) : recipe.subPunch.gain;
-      g.gain.setValueAtTime(baseG * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.subPunch.dur);
-      src.connect(g); g.connect(voiceBus);
-      src.start(now); src.stop(now + recipe.subPunch.dur + 0.005);
-      voiceNodes.push(src, g);
-    }
-
-    if (recipe.subDrop) {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(recipe.subDrop.f0 * detuneMult, now);
-      osc.frequency.exponentialRampToValueAtTime(recipe.subDrop.f1 * detuneMult, now + recipe.subDrop.dur * 0.92);
-      const g = this.ctx.createGain();
-      const baseG = isEarly ? (recipe.subDrop.earlyGain || recipe.subDrop.gain) : recipe.subDrop.gain;
-      g.gain.setValueAtTime(baseG * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.subDrop.dur);
-      if (recipe.subDrop.saturated) {
-        const shaper = this.ctx.createWaveShaper();
-        shaper.curve = this.shaperCurves.softClip;
-        shaper.oversample = '2x';
-        osc.connect(shaper); shaper.connect(g);
-        voiceNodes.push(shaper);
-      } else {
-        osc.connect(g);
-      }
-      g.connect(voiceBus);
-      osc.start(now); osc.stop(now + recipe.subDrop.dur + 0.005);
-      voiceNodes.push(osc, g);
-    }
-
-    if (recipe.snap && this.foleyBuffers.gloveSnap) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.foleyBuffers.gloveSnap;
-      const bp = this.ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.setValueAtTime(Math.min(recipe.snap.maxCf, recipe.snap.cf * filterJitter), now);
-      bp.Q.value = recipe.snap.q;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.snap.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.snap.dur);
-      if (recipe.snap.saturated) {
-        const shaper = this.ctx.createWaveShaper();
-        shaper.curve = this.shaperCurves.softClip;
-        src.connect(shaper); shaper.connect(bp);
-        voiceNodes.push(shaper);
-      } else {
-        src.connect(bp);
-      }
-      bp.connect(g); g.connect(voiceBus);
-      src.start(now); src.stop(now + recipe.snap.dur + 0.005);
-      voiceNodes.push(src, bp, g);
-    }
-
-    if (recipe.dualSnap && this.foleyBuffers.gloveSnap) {
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.dualSnap.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.dualSnap.dur);
-      g.connect(voiceBus);
-      voiceNodes.push(g);
-      recipe.dualSnap.cfs.forEach((cf) => {
-        const src = this.ctx.createBufferSource();
-        src.buffer = this.foleyBuffers.gloveSnap;
-        const bp = this.ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.value = Math.min(2200, cf * filterJitter);
-        bp.Q.value = cf === 850 ? 2.0 : 1.8;
-        src.connect(bp); bp.connect(g);
-        src.start(now); src.stop(now + recipe.dualSnap.dur + 0.005);
-        voiceNodes.push(src, bp);
-      });
-    }
-
-    if (recipe.whoosh && this.foleyBuffers.clothWhoosh) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.foleyBuffers.clothWhoosh;
-      const bp = this.ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.setValueAtTime(recipe.whoosh.f0 * filterJitter, now);
-      bp.frequency.exponentialRampToValueAtTime(recipe.whoosh.f1 * filterJitter, now + recipe.whoosh.dur);
-      bp.Q.value = recipe.whoosh.q;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.whoosh.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.whoosh.dur);
-      src.connect(bp); bp.connect(g); g.connect(voiceBus);
-      src.start(now); src.stop(now + recipe.whoosh.dur + 0.005);
-      voiceNodes.push(src, bp, g);
-    }
-
-    if (recipe.air && this.foleyBuffers.transientAir && (isPerfect || isGood || recipe.air.always)) {
-      const src = this.ctx.createBufferSource();
-      src.buffer = this.foleyBuffers.transientAir;
-      const g = this.ctx.createGain();
-      const baseG = isPerfect ? recipe.air.perfectGain : recipe.air.goodGain;
-      g.gain.setValueAtTime(baseG * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.air.dur);
-      src.connect(g); g.connect(voiceBus);
-      src.start(now); src.stop(now + recipe.air.dur + 0.004);
-      voiceNodes.push(src, g);
-    }
-
-    if (recipe.chord && (isPerfect || isGood || recipe.chord.always)) {
-      const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime(Math.min(recipe.chord.maxLp, recipe.chord.lp * filterJitter), now);
-      lp.Q.value = recipe.chord.q;
-      const g = this.ctx.createGain();
-      const baseG = isPerfect ? recipe.chord.perfectGain : recipe.chord.goodGain;
-      g.gain.setValueAtTime(baseG * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.chord.dur);
-      lp.connect(g); g.connect(voiceBus);
-      voiceNodes.push(lp, g);
-      recipe.chord.notes.forEach((f) => {
-        const osc = this.ctx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(f * detuneMult, now);
-        osc.connect(lp);
-        osc.start(now); osc.stop(now + recipe.chord.dur + 0.005);
-        voiceNodes.push(osc);
-      });
-    }
-
-    if (recipe.stinger && (isPerfect || isGood)) {
-      const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime(Math.min(recipe.stinger.maxLp, recipe.stinger.lp * filterJitter), now);
-      lp.Q.value = recipe.stinger.q;
-      const g = this.ctx.createGain();
-      const baseG = isPerfect ? recipe.stinger.perfectGain : recipe.stinger.goodGain;
-      g.gain.setValueAtTime(baseG * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.stinger.dur);
-      lp.connect(g); g.connect(voiceBus);
-      voiceNodes.push(lp, g);
-      recipe.stinger.notes.forEach((note) => {
-        const osc = this.ctx.createOscillator();
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(note.f * detuneMult, now + note.dt);
-        osc.connect(lp);
-        osc.start(now + note.dt); osc.stop(now + note.dt + 0.160);
-        voiceNodes.push(osc);
-      });
-    }
-
-    if (recipe.chime) {
-      const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.setValueAtTime(Math.min(recipe.chime.maxLp, recipe.chime.lp * filterJitter), now);
-      lp.Q.value = recipe.chime.q;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.chime.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.chime.dur);
-      lp.connect(g); g.connect(voiceBus);
-      voiceNodes.push(lp, g);
-      recipe.chime.notes.forEach((f) => {
-        const osc = this.ctx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(f * detuneMult, now);
-        osc.connect(lp);
-        osc.start(now); osc.stop(now + recipe.chime.dur + 0.005);
-        voiceNodes.push(osc);
-      });
-    }
-
-    if (recipe.resTone) {
-      const osc = this.ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(recipe.resTone.f * detuneMult, now);
-      const bp = this.ctx.createBiquadFilter();
-      bp.type = 'bandpass';
-      bp.frequency.value = recipe.resTone.f * detuneMult;
-      bp.Q.value = recipe.resTone.q;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(recipe.resTone.gain * gradeMult, now);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + recipe.resTone.dur);
-      osc.connect(bp); bp.connect(g); g.connect(voiceBus);
-      osc.start(now); osc.stop(now + recipe.resTone.dur + 0.005);
-      voiceNodes.push(osc, bp, g);
-    }
-
-    if (recipe.tensionDrone) {
-      const td = recipe.tensionDrone;
-      const lp = this.ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = Math.min(td.maxLp, td.lp * filterJitter);
-      lp.Q.value = td.q;
-      const g = this.ctx.createGain();
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.linearRampToValueAtTime(td.gain, now + 0.010);
-      g.gain.exponentialRampToValueAtTime(0.0001, now + td.dur);
-      lp.connect(g); g.connect(voiceBus);
-      voiceNodes.push(lp, g);
-
-      const osc1 = this.ctx.createOscillator();
-      osc1.type = 'triangle';
-      osc1.frequency.setValueAtTime(td.f0A * detuneMult, now);
-      osc1.frequency.exponentialRampToValueAtTime(td.f1A * detuneMult, now + 0.180);
-      osc1.connect(lp); osc1.start(now); osc1.stop(now + td.dur + 0.005);
-
-      const osc2 = this.ctx.createOscillator();
-      osc2.type = 'sine';
-      osc2.frequency.setValueAtTime(td.f0B * detuneMult, now);
-      osc2.frequency.exponentialRampToValueAtTime(td.f1B * detuneMult, now + 0.180);
-      osc2.connect(lp); osc2.start(now); osc2.stop(now + td.dur + 0.005);
-      voiceNodes.push(osc1, osc2);
-    }
-
-    if (recipe.vinylScratch) {
-      const vs = recipe.vinylScratch;
-      const carrier = this.ctx.createOscillator();
-      const modulator = this.ctx.createOscillator();
-      const modGain = this.ctx.createGain();
-      const fmLp = this.ctx.createBiquadFilter();
-      fmLp.type = 'lowpass';
-      fmLp.frequency.value = Math.min(1800, vs.lp * filterJitter);
-      const fmGain = this.ctx.createGain();
-      carrier.type = 'sine';
-      carrier.frequency.setValueAtTime(vs.f0 * detuneMult, now);
-      carrier.frequency.exponentialRampToValueAtTime(vs.f1 * detuneMult, now + 0.140);
-      modulator.type = 'sine';
-      modulator.frequency.setValueAtTime(vs.modF, now);
-      modGain.gain.setValueAtTime(vs.modG0, now);
-      modGain.gain.exponentialRampToValueAtTime(vs.modG1, now + 0.140);
-      modulator.connect(modGain); modGain.connect(carrier.frequency);
-      carrier.connect(fmLp); fmLp.connect(fmGain);
-      fmGain.gain.setValueAtTime(vs.gain, now);
-      fmGain.gain.exponentialRampToValueAtTime(0.0001, now + vs.dur);
-      fmGain.connect(voiceBus);
-      carrier.start(now); modulator.start(now);
-      carrier.stop(now + vs.dur + 0.005); modulator.stop(now + vs.dur + 0.005);
-      voiceNodes.push(carrier, modulator, modGain, fmLp, fmGain);
-    }
-
-    if (recipe.crowdCheer && this.noiseBuffers.crowd) {
-      const cc = recipe.crowdCheer;
-      const cheerGain = this.ctx.createGain();
-      cheerGain.gain.setValueAtTime(0.0001, now);
-      cheerGain.gain.linearRampToValueAtTime(cc.gain, now + 0.080);
-      cheerGain.gain.setValueAtTime(cc.gain, now + 0.330);
-      cheerGain.gain.exponentialRampToValueAtTime(0.0001, now + cc.dur);
-      cheerGain.connect(voiceBus);
-      voiceNodes.push(cheerGain);
-      cc.formants.forEach((fmt) => {
-        const src = this.ctx.createBufferSource();
-        src.buffer = this.noiseBuffers.crowd;
-        const bp = this.ctx.createBiquadFilter();
-        bp.type = 'bandpass';
-        bp.frequency.value = fmt.f;
-        bp.Q.value = fmt.q;
-        src.connect(bp); bp.connect(cheerGain);
-        src.start(now); src.stop(now + cc.dur + 0.02);
-        voiceNodes.push(src, bp);
-      });
-    }
-
-    if (recipe.concussion) {
-      this.triggerConcussion(recipe.concussion.cutoff, recipe.concussion.dur);
-    }
-    if (recipe.duck) {
-      const db = isPerfect ? recipe.duck.perfect : (isGood ? recipe.duck.good : recipe.duck.early);
-      this.duckMusic(db, recipe.duck.dur);
-    }
-
-    this.registerVoiceCleanup(voiceNodes, recipe.dur, voiceMeta);
+  scheduleBossTelegraphCue(pattern = 'bass_drop', beatSec = KRONOS_BEAT_SEC, windupDur = KRONOS_BEAT_SEC, spatialSource = null) {
+    return scheduleBossTelegraphSfx(this, pattern, beatSec, windupDur, spatialSource);
   }
 }
 
@@ -1581,16 +1135,16 @@ function createEnemyOverheadBadge(title = 'BRUISER #1') {
         bannerFill = 'rgba(255, 170, 24, 0.96)';
         strokeColor = '#00e5ff';
         headerTxt = labelOverride || '! QUICK HOOK [A] !';
-      } else if (attackType === 'bass_shockwave' || (labelOverride && labelOverride.includes('BASS DROP'))) {
+      } else if (attackType === 'bass_drop' || attackType === 'bass_shockwave' || (labelOverride && labelOverride.includes('BASS DROP'))) {
         bannerFill = 'rgba(255, 30, 56, 0.98)';
         strokeColor = '#ffe042';
         textColor = '#ffffff';
-        headerTxt = labelOverride || '! SUBWOOFER BASS DROP !';
-      } else if (attackType === 'mic_drop_combo' || (labelOverride && labelOverride.includes('MIC DROP'))) {
-        bannerFill = 'rgba(255, 170, 24, 0.98)';
+        headerTxt = labelOverride || '! BASS DROP [WEAVE BEAT 3] !';
+      } else if (attackType === 'scratch_combo' || attackType === 'mic_drop_combo' || (labelOverride && labelOverride.includes('SCRATCH'))) {
+        bannerFill = 'rgba(0, 212, 245, 0.98)';
         strokeColor = '#ffe042';
-        textColor = '#101018';
-        headerTxt = labelOverride || '! MIC DROP SLAM [A] !';
+        textColor = '#0a0c14';
+        headerTxt = labelOverride || '! SCRATCH COMBO [WEAVE 3RD] !';
       } else {
         bannerFill = 'rgba(225, 24, 48, 0.96)';
         strokeColor = '#ffe042';
@@ -1682,6 +1236,21 @@ const kronosRingBadge = createEnemyOverheadBadge('★ BOSS DJ KRONOS ★');
 kronosRingBadge.mesh.position.set(0, 2.15, 0);
 kronosRingBadge.mesh.visible = false;
 kronosRig.root.add(kronosRingBadge.mesh);
+
+const kronosTeleGeo = new THREE.RingGeometry(0.55, 0.72, 32);
+kronosTeleGeo.rotateX(-Math.PI / 2);
+const kronosTeleMat = new THREE.MeshBasicMaterial({
+  color: 0xff1e38,
+  side: THREE.DoubleSide,
+  transparent: true,
+  opacity: 0.0,
+  depthWrite: false
+});
+const kronosTeleRing = new THREE.Mesh(kronosTeleGeo, kronosTeleMat);
+kronosTeleRing.position.y = 0.032;
+kronosRig.root.add(kronosTeleRing);
+kronosRig.teleRing = kronosTeleRing;
+kronosRig.teleMat = kronosTeleMat;
 
 // Deferred Instanced Crowd Spectators (built after first paint so boot is fast and draw calls stay minimal)
 const crowdSpectators = [];
@@ -1839,23 +1408,31 @@ const btnS = document.getElementById('btn-s');
 const btnD = document.getElementById('btn-d');
 
 function computeAccuracyRank() {
-  if (gameState.confirmedHits <= 0) {
-    return { rank: '—', shortRank: '—', mult: 1.0, perfectPct: 0 };
+  const hasHistory = Array.isArray(gameState.hitHistory) && gameState.hitHistory.length > 0;
+  const confirmedCount = hasHistory
+    ? gameState.hitHistory.filter((h) => h && h.confirmed !== false).length
+    : gameState.confirmedHits;
+  const perfectCount = hasHistory
+    ? gameState.hitHistory.filter((h) => h && h.confirmed !== false && h.grade === 'PERFECT').length
+    : gameState.perfectHits;
+
+  if (confirmedCount <= 0) {
+    return { rank: '—', shortRank: '—', mult: 1.0, perfectPct: 0, confirmedCount: 0, perfectCount: 0 };
   }
-  const perfectPct = (gameState.perfectHits / Math.max(1, gameState.confirmedHits)) * 100;
-  if (perfectPct >= 75 && gameState.confirmedHits >= 5) {
-    return { rank: 'S-RANK', shortRank: 'S', mult: 1.8, perfectPct };
+  const perfectPct = (perfectCount / Math.max(1, confirmedCount)) * 100;
+  if (perfectPct >= 75 && confirmedCount >= 5) {
+    return { rank: 'S-RANK', shortRank: 'S', mult: 1.8, perfectPct, confirmedCount, perfectCount };
   }
-  if (perfectPct >= 55 && gameState.confirmedHits >= 3) {
-    return { rank: 'A-RANK', shortRank: 'A', mult: 1.5, perfectPct };
+  if (perfectPct >= 55 && confirmedCount >= 3) {
+    return { rank: 'A-RANK', shortRank: 'A', mult: 1.5, perfectPct, confirmedCount, perfectCount };
   }
-  if (perfectPct >= 35 && gameState.confirmedHits >= 2) {
-    return { rank: 'B-RANK', shortRank: 'B', mult: 1.25, perfectPct };
+  if (perfectPct >= 35 && confirmedCount >= 2) {
+    return { rank: 'B-RANK', shortRank: 'B', mult: 1.25, perfectPct, confirmedCount, perfectCount };
   }
-  if (perfectPct >= 15 || gameState.confirmedHits >= 1) {
-    return { rank: 'C-RANK', shortRank: 'C', mult: 1.1, perfectPct };
+  if (perfectPct >= 15 || confirmedCount >= 1) {
+    return { rank: 'C-RANK', shortRank: 'C', mult: 1.1, perfectPct, confirmedCount, perfectCount };
   }
-  return { rank: 'D-RANK', shortRank: 'D', mult: 1.0, perfectPct };
+  return { rank: 'D-RANK', shortRank: 'D', mult: 1.0, perfectPct, confirmedCount, perfectCount };
 }
 
 function updateStyleRankAndHype(dt = 0) {
@@ -2029,10 +1606,12 @@ function updateHudNumbers() {
 
 function spawnWave(waveNum) {
   gameState.wave = waveNum;
+  const waveCfg = TUNING.WAVES[waveNum] || TUNING.WAVES[1];
   if (waveNum === 1) {
     gameState.kronosRingState = 'idle';
     gameState.crewHp = 100;
     gameState.bossHp = 100;
+    kronosTeleMat.opacity = 0;
     if (gameState.kronosInRing) {
       gameState.kronosInRing = false;
       boomboxStage.soundRigGroup.add(kronosRig.root);
@@ -2042,9 +1621,9 @@ function spawnWave(waveNum) {
       kronosRingBadge.mesh.visible = false;
     }
     const wave1Configs = [
-      { active: true, angle: -0.52, radius: 1.75, hp: 140, cd: 1.4 },
-      { active: true, angle: 0.62,  radius: 1.95, hp: 140, cd: 2.6 },
-      { active: false, angle: 0.0,  radius: 3.50, hp: 0,   cd: 99 }
+      { active: true, angle: -0.52, radius: 1.75, hp: waveCfg.bruiserHp, cd: 1.4 },
+      { active: true, angle: 0.62,  radius: 1.95, hp: waveCfg.bruiserHp, cd: 2.6 },
+      { active: false, angle: 0.0,  radius: 3.50, hp: 0,                 cd: 99 }
     ];
     bruisers.forEach((b, idx) => {
       const cfg = wave1Configs[idx];
@@ -2079,10 +1658,11 @@ function spawnWave(waveNum) {
     setStarburstText('WAVE 2 // HEAVY CREW!', 1.18);
     floorDial.updateBadge('WAVE 2!', '#ffe042');
     gameState.crewHp = 100;
+    kronosTeleMat.opacity = 0;
     const wave2Configs = [
-      { active: true, angle: -0.78, radius: 1.85, hp: 120, cd: 1.2 },
-      { active: true, angle: 0.04,  radius: 1.78, hp: 120, cd: 2.2 },
-      { active: true, angle: 0.82,  radius: 2.00, hp: 120, cd: 3.1 }
+      { active: true, angle: -0.78, radius: 1.85, hp: waveCfg.bruiserHp, cd: 1.1 },
+      { active: true, angle: 0.04,  radius: 1.78, hp: waveCfg.bruiserHp, cd: 1.8 },
+      { active: true, angle: 0.82,  radius: 2.00, hp: waveCfg.bruiserHp, cd: 2.7 }
     ];
     bruisers.forEach((b, idx) => {
       const cfg = wave2Configs[idx];
@@ -2117,11 +1697,18 @@ function spawnWave(waveNum) {
     gameState.kronosInRing = true;
     gameState.kronosRingState = 'stalking';
     gameState.kronosStateTimer = 0;
-    gameState.kronosAttackCooldown = 1.45;
+    gameState.kronosAttackCooldown = 0.25;
     gameState.kronosRingPos.set(0.32, 0, 0.05);
     gameState.bossAttackPattern = 'idle';
     gameState.bossComboStep = 0;
     gameState.bossCounterStunActive = false;
+    gameState.wave3BeatFloat = 0;
+    gameState.wave3LastBassDropBar = -1;
+    gameState.wave3LastScratchBar = -1;
+    gameState.shockwavePreWeaved = false;
+    gameState.bossStepWeaved = false;
+    gameState.wave3BeatWeaveTimer = 0;
+    kronosTeleMat.opacity = 0;
     if (gameState.bossShockwave && gameState.bossShockwave.mesh) {
       scene.remove(gameState.bossShockwave.mesh);
       gameState.bossShockwave.mesh.geometry.dispose();
@@ -2139,15 +1726,15 @@ function spawnWave(waveNum) {
     bruisers.forEach((b, idx) => {
       if (idx === 0) {
         b.active = true;
-        b.hp = 110;
-        b.maxHp = 110;
+        b.hp = waveCfg.bruiserHp;
+        b.maxHp = waveCfg.bruiserHp;
         b.state = 'stalking';
         b.stateTimer = 0;
         b.attackType = 'heavy_haymaker';
         b.isGuarding = false;
         b.slotIndex = 4;
         b.guardCooldown = 99;
-        b.attackCooldown = 2.4;
+        b.attackCooldown = 1.6;
         b.angle = -0.72;
         b.orbitRadius = 2.00;
         b.flying = null;
@@ -2371,9 +1958,20 @@ function formatClearTime(sec) {
 function triggerGameEnd(isVictory) {
   if (gameState.isGameOver) return;
   gameState.isGameOver = true;
-  if (gameState.runStartTimeMs > 0) {
-    gameState.runElapsedSec = (performance.now() - gameState.runStartTimeMs) * 0.001;
+  let historySpanSec = 0;
+  if (Array.isArray(gameState.hitHistory) && gameState.hitHistory.length >= 2) {
+    const firstHit = gameState.hitHistory[0];
+    const lastHit = gameState.hitHistory[gameState.hitHistory.length - 1];
+    if (typeof firstHit.songTime === 'number' && typeof lastHit.songTime === 'number' && lastHit.songTime > firstHit.songTime) {
+      historySpanSec = lastHit.songTime - firstHit.songTime;
+    } else if (typeof firstHit.timestamp === 'number' && typeof lastHit.timestamp === 'number' && lastHit.timestamp > firstHit.timestamp) {
+      historySpanSec = (lastHit.timestamp - firstHit.timestamp) * 0.001;
+    }
   }
+  const wallElapsedSec = (typeof gameState.runStartTimeMs === 'number')
+    ? Math.max(0, (performance.now() - gameState.runStartTimeMs) * 0.001)
+    : 0;
+  gameState.runElapsedSec = historySpanSec > 0 ? Math.max(historySpanSec, wallElapsedSec) : wallElapsedSec;
   audioEngine.pause();
   if (btnPlay) {
     btnPlay.classList.remove('playing');
@@ -2381,6 +1979,14 @@ function triggerGameEnd(isVictory) {
   }
 
   const acc = computeAccuracyRank();
+  const hasHistory = Array.isArray(gameState.hitHistory) && gameState.hitHistory.length > 0;
+  const trueConfirmedHits = hasHistory ? acc.confirmedCount : gameState.confirmedHits;
+  const truePerfectPct = Math.round(acc.perfectPct);
+  if (hasHistory) {
+    gameState.confirmedHits = trueConfirmedHits;
+    gameState.perfectHits = acc.perfectCount;
+  }
+
   const elKicker = document.getElementById('results-tag') || document.getElementById('results-kicker');
   const elTitle = document.getElementById('results-title');
   const elRankBadge = document.getElementById('results-rank') || document.getElementById('results-rank-badge');
@@ -2392,13 +1998,13 @@ function triggerGameEnd(isVictory) {
   if (elKicker) elKicker.textContent = isVictory ? 'STAGE CLEAR // VICTORY' : 'K.O. // DEFEATED';
   if (elTitle) elTitle.textContent = isVictory ? 'CYPHER CROWNED' : 'CHALLENGER DOWN';
   if (elRankBadge) elRankBadge.textContent = isVictory ? (acc.shortRank === '—' ? 'B' : acc.shortRank) : 'D';
-  if (elHits) elHits.textContent = String(gameState.confirmedHits);
-  if (elAccuracy) elAccuracy.textContent = `${Math.round(acc.perfectPct)}%`;
+  if (elHits) elHits.textContent = String(trueConfirmedHits);
+  if (elAccuracy) elAccuracy.textContent = `${truePerfectPct}%`;
   if (elTime) elTime.textContent = formatClearTime(gameState.runElapsedSec);
   if (elSubtext) {
     elSubtext.textContent = isVictory
-      ? `DJ Kronos defeated! Max Combo: ${gameState.maxCombo} · Off-Beat Misses: ${gameState.missedPresses}.`
-      : `Knocked out in Wave ${gameState.wave}/3. Confirmed Hits: ${gameState.confirmedHits}.`;
+      ? `DJ Kronos defeated! Confirmed Hits: ${trueConfirmedHits} (${truePerfectPct}% PERFECT) · Max Combo: ${gameState.maxCombo}.`
+      : `Knocked out in Wave ${gameState.wave}/3. Confirmed Hits: ${trueConfirmedHits} (${truePerfectPct}% PERFECT).`;
   }
   if (elResultsOverlay) {
     elResultsOverlay.classList.remove('hidden');
@@ -2422,6 +2028,7 @@ function restartGame() {
   gameState.perfectHits = 0;
   gameState.onBeatHits = 0;
   gameState.missedPresses = 0;
+  gameState.hitHistory = [];
   gameState.styleRank = '—';
   gameState.hype = 0.0;
   gameState.kronosRingState = 'idle';
@@ -2431,6 +2038,12 @@ function restartGame() {
   gameState.inputBuffer = null;
   gameState.playerPos.copy(gameState.basePos);
   gameState.playerTarget.copy(gameState.basePos);
+
+  if (!audioEngine.isPlaying) {
+    activeBarIdx = -1;
+    if (elLyricSection) elLyricSection.textContent = '';
+    if (elLyricLine) elLyricLine.textContent = '';
+  }
 
   if (elStartOverlay) elStartOverlay.classList.add('hidden');
   if (elPauseOverlay) elPauseOverlay.classList.add('hidden');
@@ -2443,6 +2056,178 @@ function restartGame() {
 // ============================================================================
 // ACTIVE-PHASE HIT RESOLUTION (Section 2.1, 2.2, 2.6, 2.8)
 // ============================================================================
+function getStrikeRecoilProfile(action, punchStep) {
+  let recoilType = 'hit-react-jab';
+  let recoilVector = new THREE.Vector3(0.00, 0.00, -0.35);
+  let targetTorsoRot = new THREE.Vector3(0.10, 0.18, -0.04);
+  let targetHeadRot = new THREE.Vector3(0.12, 0.15, -0.12);
+  let pushSpeed = 1.1;
+  let recoilDur = 0.55;
+  let microAxis = 'x';
+  let microAmp = 0.06;
+  let microDur = 0.048;
+  let vfxType = 'spark-burst';
+
+  if (action === 'kick') {
+    recoilType = 'hit-react-kick';
+    recoilVector = new THREE.Vector3(0.85, 0.30, -0.95);
+    targetTorsoRot = new THREE.Vector3(0.14, 0.45, 0.22);
+    targetHeadRot = new THREE.Vector3(0.10, 0.35, 0.18);
+    pushSpeed = 2.6;
+    recoilDur = 0.65;
+    microAxis = 'xy';
+    microAmp = 0.18;
+    microDur = 0.100;
+    vfxType = 'comic-starburst-3d';
+  } else if (punchStep === 1) {
+    recoilType = 'hit-react-cross';
+    recoilVector = new THREE.Vector3(-0.45, 0.00, -0.60);
+    targetTorsoRot = new THREE.Vector3(0.18, -0.25, 0.08);
+    targetHeadRot = new THREE.Vector3(-0.15, -0.28, 0.16);
+    pushSpeed = 1.4;
+    recoilDur = 0.55;
+    microAxis = 'x';
+    microAmp = 0.10;
+    microDur = 0.070;
+    vfxType = 'slash-spark';
+  } else if (punchStep === 2) {
+    recoilType = 'hit-react-uppercut';
+    recoilVector = new THREE.Vector3(0.00, 0.90, -0.30);
+    targetTorsoRot = new THREE.Vector3(-0.35, 0.00, 0.00);
+    targetHeadRot = new THREE.Vector3(-0.40, 0.00, 0.00);
+    pushSpeed = 1.0;
+    recoilDur = 0.65;
+    microAxis = 'y';
+    microAmp = 0.14;
+    microDur = 0.110;
+    vfxType = 'impact-ring';
+  }
+  return { recoilType, recoilVector, targetTorsoRot, targetHeadRot, pushSpeed, recoilDur, microAxis, microAmp, microDur, vfxType };
+}
+
+function applyBruiserConfirmedHit(obj, action, punchStep, timing, totalHitDmg, isBeatDropFinisher, profile, validTargetPos) {
+  const { recoilType, recoilVector, targetTorsoRot, targetHeadRot, pushSpeed, recoilDur, microAxis, microAmp, microDur } = profile;
+  if (obj.state === 'guard') {
+    if (action === 'kick') {
+      obj.state = 'guard_break';
+      obj.isGuarding = false;
+      obj.stateTimer = 1.2;
+      obj.recoilTotalTimer = 1.2;
+      obj.recoilType = 'guard-break';
+      obj.hp = Math.max(0, obj.hp - totalHitDmg);
+
+      const pushDir = new THREE.Vector3().subVectors(obj.rig.root.position, gameState.playerPos);
+      pushDir.y = 0;
+      if (pushDir.lengthSq() < 0.001) pushDir.set(0, 0, -1);
+      pushDir.normalize();
+      obj.velocity = pushDir.clone().multiplyScalar(2.4);
+
+      setStarburstText('GUARD SHATTER!', 1.25);
+      floorDial.updateBadge('GUARD SHATTERED!', '#ffe042');
+      audioEngine.playCombatSfx('guard-break', timing.grade, validTargetPos);
+      gameState.hype = Math.min(100.0, (gameState.hype || 0) + 12.0);
+      gameState.guardBreakActive = true;
+      obj.badge.update(obj.hp, obj.maxHp, 'guard_break', '💥 GUARD SHATTERED! 💥');
+
+      if (obj.hp <= 0) launchBruiserIntoStage(obj);
+    } else {
+      const chipDmg = Math.max(1, Math.round(totalHitDmg * 0.20));
+      obj.hp = Math.max(0, obj.hp - chipDmg);
+      audioEngine.playCombatSfx('guard-deflect', timing.grade, validTargetPos);
+      setStarburstText('BLOCKED!', 1.05);
+      floorDial.updateBadge('DEFLECTED!', '#00e5ff');
+      obj.badge.update(obj.hp, obj.maxHp, 'guard', '🛡️ BLOCKED (-80%)');
+
+      obj.isMicroShaking = true;
+      obj.microShakeDuration = 0.04;
+      obj.microShakeTimer = 0.04;
+      obj.microShakeAmp = 0.04;
+      obj.microShakeVertAmp = 0.005;
+      obj.microShakeAxis = 'x';
+      if (obj.hp <= 0) launchBruiserIntoStage(obj);
+    }
+  } else {
+    obj.isGuarding = false;
+    const wasWindup = obj.state === 'windup' || obj.state === 'striking';
+    obj.hp = Math.max(0, obj.hp - totalHitDmg);
+
+    const pushDir = new THREE.Vector3().subVectors(obj.rig.root.position, gameState.playerPos);
+    pushDir.y = 0;
+    if (pushDir.lengthSq() < 0.001) pushDir.set(0, 0, -1);
+    pushDir.normalize();
+
+    obj.recoilType = recoilType;
+    obj.recoilVector = recoilVector.clone();
+    obj.targetTorsoRot = targetTorsoRot;
+    obj.targetHeadRot = targetHeadRot;
+    obj.velocity = pushDir.clone().multiplyScalar(pushSpeed);
+    obj.state = wasWindup ? 'stunned' : 'hit';
+    obj.stateTimer = wasWindup ? 1.25 : recoilDur;
+    obj.recoilTotalTimer = obj.stateTimer;
+    obj.teleMat.opacity = 0;
+    obj.badge.update(obj.hp, obj.maxHp, obj.state);
+
+    obj.isMicroShaking = true;
+    obj.microShakeDuration = microDur;
+    obj.microShakeTimer = microDur;
+    obj.microShakeAmp = microAmp;
+    obj.microShakeVertAmp = microAxis === 'y' ? 0.055 : 0.008;
+    obj.microShakeAxis = microAxis;
+    obj.microShakeNormal = new THREE.Vector3(-pushDir.z, 0, pushDir.x).normalize();
+    obj.lastHitStrike = action === 'kick' ? 'kick' : (punchStep === 0 ? 'jab' : (punchStep === 1 ? 'cross' : 'uppercut'));
+
+    if (action === 'punch' && punchStep === 2) {
+      obj.verticalVelocity = 2.2;
+    }
+
+    if (obj.hp <= 0 || isBeatDropFinisher) {
+      obj.hp = 0;
+      launchBruiserIntoStage(obj);
+    }
+  }
+}
+
+function applyKronosConfirmedHit(action, timing, counterMult, styleMult, profile, validTargetPos, contactPoint) {
+  const { recoilType, recoilVector, targetTorsoRot, targetHeadRot, recoilDur, microAxis, microAmp, microDur } = profile;
+  const bossDmg = (action === 'kick' ? 11.5 : 7.5) * (timing.mult || 1.0) * counterMult * styleMult;
+  gameState.bossHp = Math.max(0, gameState.bossHp - bossDmg);
+  gameState.kronosRingState = 'hit';
+  gameState.kronosStateTimer = recoilDur;
+  gameState.kronosRecoilTotal = recoilDur;
+  gameState.kronosRecoilType = recoilType;
+  gameState.kronosRecoilVector = recoilVector.clone();
+  gameState.kronosTargetTorsoRot = targetTorsoRot;
+  gameState.kronosTargetHeadRot = targetHeadRot;
+  gameState.kronosIsMicroShaking = true;
+  gameState.kronosMicroShakeTimer = microDur;
+  gameState.kronosMicroShakeDuration = microDur;
+  gameState.kronosMicroShakeAmp = microAmp;
+  gameState.kronosMicroShakeAxis = microAxis;
+
+  if (counterMult >= 2.0) {
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
+    setStarburstText('CRITICAL PUNISH!', 1.25);
+  }
+
+  kronosRingBadge.update(gameState.bossHp, 100, 'hit', '★ BOSS DJ KRONOS ★');
+
+  if (gameState.bossHp <= 0) {
+    gameState.bossHp = 0;
+    gameState.kronosRingState = 'ko';
+    kronosRingBadge.update(0, 100, 'ko', '★ K.O.! VICTORY! ★');
+    setStarburstText('K.O.! STAGE CLEAR!', 1.35);
+    floorDial.updateBadge('STAGE CLEAR!', '#ffe042');
+    audioEngine.playCombatSfx('stage-ko', timing.grade, validTargetPos);
+    if (postProcessing && postProcessing.triggerImpact) {
+      postProcessing.triggerImpact('KO', contactPoint);
+    }
+    updateHudNumbers();
+    triggerGameEnd(true);
+    return true;
+  }
+  return false;
+}
+
 function resolveActivePhaseAttack(hitCtx) {
   if (!hitCtx || hitCtx.resolved) return;
   hitCtx.resolved = true;
@@ -2500,7 +2285,6 @@ function resolveActivePhaseAttack(hitCtx) {
     gameState.counterBonusTimer = 0;
   }
 
-  // Increment confirmed hit & accuracy counters
   gameState.combo += 1;
   gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
   gameState.comboDecayTimer = TUNING.COMBO_DECAY_SEC;
@@ -2511,72 +2295,10 @@ function resolveActivePhaseAttack(hitCtx) {
     gameState.onBeatHits += 1;
   }
   gameState.combatIdleTimer = 0;
-  updateStyleRankAndHype(0);
 
-  if (gameState.combo === 4 || gameState.combo === 8 || gameState.combo === 12) {
-    audioEngine.triggerCrowdHype(`combo-${gameState.combo}`, { combo: gameState.combo });
-  }
-
-  // Play impact foley SFX & apply scaled hit-stop on confirmed hit
-  audioEngine.playCombatSfx(moveKey, timing.grade, validTarget.pos);
-
-  if (isPerfect) {
-    gameState.hitStopTimer = action === 'kick' ? 0.100 :
-      (action === 'punch' && punchStep === 0) ? 0.048 :
-      (action === 'punch' && punchStep === 1) ? 0.070 :
-      (action === 'punch' && punchStep === 2) ? 0.110 : 0.048;
-  } else {
-    gameState.hitStopTimer = action === 'kick' ? 0.070 :
-      (action === 'punch' && punchStep === 0) ? 0.032 :
-      (action === 'punch' && punchStep === 1) ? 0.048 :
-      (action === 'punch' && punchStep === 2) ? 0.065 : 0.032;
-  }
-
-  let recoilType = 'hit-react-jab';
-  let recoilVector = new THREE.Vector3(0.00, 0.00, -0.35);
-  let targetTorsoRot = new THREE.Vector3(0.10, 0.18, -0.04);
-  let targetHeadRot = new THREE.Vector3(0.12, 0.15, -0.12);
-  let pushSpeed = 1.1;
-  let recoilDur = 0.55;
-  let microAxis = 'x';
-  let microAmp = 0.06;
-  let microDur = 0.048;
-  let vfxType = 'spark-burst';
-
-  if (action === 'kick') {
-    recoilType = 'hit-react-kick';
-    recoilVector = new THREE.Vector3(0.85, 0.30, -0.95);
-    targetTorsoRot = new THREE.Vector3(0.14, 0.45, 0.22);
-    targetHeadRot = new THREE.Vector3(0.10, 0.35, 0.18);
-    pushSpeed = 2.6;
-    recoilDur = 0.65;
-    microAxis = 'xy';
-    microAmp = 0.18;
-    microDur = 0.100;
-    vfxType = 'comic-starburst-3d';
-  } else if (punchStep === 1) {
-    recoilType = 'hit-react-cross';
-    recoilVector = new THREE.Vector3(-0.45, 0.00, -0.60);
-    targetTorsoRot = new THREE.Vector3(0.18, -0.25, 0.08);
-    targetHeadRot = new THREE.Vector3(-0.15, -0.28, 0.16);
-    pushSpeed = 1.4;
-    recoilDur = 0.55;
-    microAxis = 'x';
-    microAmp = 0.10;
-    microDur = 0.070;
-    vfxType = 'slash-spark';
-  } else if (punchStep === 2) {
-    recoilType = 'hit-react-uppercut';
-    recoilVector = new THREE.Vector3(0.00, 0.90, -0.30);
-    targetTorsoRot = new THREE.Vector3(-0.35, 0.00, 0.00);
-    targetHeadRot = new THREE.Vector3(-0.40, 0.00, 0.00);
-    pushSpeed = 1.0;
-    recoilDur = 0.65;
-    microAxis = 'y';
-    microAmp = 0.14;
-    microDur = 0.110;
-    vfxType = 'impact-ring';
-  }
+  const baseHitDmg = TUNING.MOVES[moveKey] ? TUNING.MOVES[moveKey].baseDmg : (action === 'kick' ? 48 : 32);
+  const profile = getStrikeRecoilProfile(action, punchStep);
+  const { recoilType, recoilVector, microAxis, microAmp, microDur, vfxType } = profile;
 
   const contactPoint = calculateContactPoint(obj, limbPos, action, punchStep);
   gameState.lastContactPoint = contactPoint.clone();
@@ -2584,155 +2306,13 @@ function resolveActivePhaseAttack(hitCtx) {
   const impactVFX = impactBurstPool.acquire(contactPoint, vfxType);
   gameState.activeImpactVFX.push(impactVFX);
 
-  const baseHitDmg = TUNING.MOVES[moveKey] ? TUNING.MOVES[moveKey].baseDmg : (action === 'kick' ? 48 : 32);
-  const styleMult = gameState.styleDamageMultiplier || 1.0;
-  let totalHitDmg = Math.round(baseHitDmg * (timing.mult || 1.0) * counterMult * styleMult);
-
-  if (isPerfect) {
-    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 8.0 * styleMult);
-  } else {
-    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 4.0 * styleMult);
-  }
-
-  floorDial.updateBadge(timing.label || 'ON BEAT!', timing.color || '#42f56c');
-  const burstWords = action === 'kick'
-    ? ['BEAT KICK!', 'HEAVY KICK!', 'KRA-KOOM!', 'BA-DOOM!']
-    : ['POW-SNAP!', 'KRA-KOOM!', 'ON-BEAT HIT!'];
-  setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
-
-  const isSrank = gameState.styleRank === 'S-RANK' || gameState.combo >= 10;
-  const isFinisherMove = action === 'kick' || (action === 'punch' && punchStep === 2);
-  const isBeatDropFinisher = isSrank && isFinisherMove;
-
-  if (isBeatDropFinisher) {
-    totalHitDmg = Math.round(totalHitDmg * 1.5);
-    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
-    setStarburstText('SPEAKERBOX K.O.!', 1.30);
-    floorDial.updateBadge('SPEAKERBOX K.O.!', '#ff1e38');
-    audioEngine.playCombatSfx('stage-ko', timing.grade, validTarget.pos);
-    gameState.lastFinisher = { action, timing: timing.grade, timestamp: performance.now() };
-  }
-
-  if (type === 'bruiser') {
-    if (obj.state === 'guard') {
-      if (action === 'kick') {
-        obj.state = 'guard_break';
-        obj.isGuarding = false;
-        obj.stateTimer = 1.2;
-        obj.recoilTotalTimer = 1.2;
-        obj.recoilType = 'guard-break';
-        obj.hp = Math.max(0, obj.hp - totalHitDmg);
-
-        const pushDir = new THREE.Vector3().subVectors(obj.rig.root.position, gameState.playerPos);
-        pushDir.y = 0;
-        if (pushDir.lengthSq() < 0.001) pushDir.set(0, 0, -1);
-        pushDir.normalize();
-        obj.velocity = pushDir.clone().multiplyScalar(2.4);
-
-        setStarburstText('GUARD SHATTER!', 1.25);
-        floorDial.updateBadge('GUARD SHATTERED!', '#ffe042');
-        audioEngine.playCombatSfx('guard-break', timing.grade, validTarget.pos);
-        gameState.hype = Math.min(100.0, (gameState.hype || 0) + 12.0);
-        gameState.guardBreakActive = true;
-        obj.badge.update(obj.hp, obj.maxHp, 'guard_break', '💥 GUARD SHATTERED! 💥');
-
-        if (obj.hp <= 0) launchBruiserIntoStage(obj);
-      } else {
-        const chipDmg = Math.max(1, Math.round(totalHitDmg * 0.20));
-        obj.hp = Math.max(0, obj.hp - chipDmg);
-        audioEngine.playCombatSfx('guard-deflect', timing.grade, validTarget.pos);
-        setStarburstText('BLOCKED!', 1.05);
-        floorDial.updateBadge('DEFLECTED!', '#00e5ff');
-        obj.badge.update(obj.hp, obj.maxHp, 'guard', '🛡️ BLOCKED (-80%)');
-
-        obj.isMicroShaking = true;
-        obj.microShakeDuration = 0.04;
-        obj.microShakeTimer = 0.04;
-        obj.microShakeAmp = 0.04;
-        obj.microShakeVertAmp = 0.005;
-        obj.microShakeAxis = 'x';
-        if (obj.hp <= 0) launchBruiserIntoStage(obj);
-      }
-    } else {
-      obj.isGuarding = false;
-      const wasWindup = obj.state === 'windup' || obj.state === 'striking';
-      obj.hp = Math.max(0, obj.hp - totalHitDmg);
-
-      const pushDir = new THREE.Vector3().subVectors(obj.rig.root.position, gameState.playerPos);
-      pushDir.y = 0;
-      if (pushDir.lengthSq() < 0.001) pushDir.set(0, 0, -1);
-      pushDir.normalize();
-
-      obj.recoilType = recoilType;
-      obj.recoilVector = recoilVector.clone();
-      obj.targetTorsoRot = targetTorsoRot;
-      obj.targetHeadRot = targetHeadRot;
-      obj.velocity = pushDir.clone().multiplyScalar(pushSpeed);
-      obj.state = wasWindup ? 'stunned' : 'hit';
-      obj.stateTimer = wasWindup ? 1.25 : recoilDur;
-      obj.recoilTotalTimer = obj.stateTimer;
-      obj.teleMat.opacity = 0;
-      obj.badge.update(obj.hp, obj.maxHp, obj.state);
-
-      obj.isMicroShaking = true;
-      obj.microShakeDuration = microDur;
-      obj.microShakeTimer = microDur;
-      obj.microShakeAmp = microAmp;
-      obj.microShakeVertAmp = microAxis === 'y' ? 0.055 : 0.008;
-      obj.microShakeAxis = microAxis;
-      obj.microShakeNormal = new THREE.Vector3(-pushDir.z, 0, pushDir.x).normalize();
-      obj.lastHitStrike = action === 'kick' ? 'kick' : (punchStep === 0 ? 'jab' : (punchStep === 1 ? 'cross' : 'uppercut'));
-
-      if (action === 'punch' && punchStep === 2) {
-        obj.verticalVelocity = 2.2;
-      }
-
-      if (obj.hp <= 0 || isBeatDropFinisher) {
-        obj.hp = 0;
-        launchBruiserIntoStage(obj);
-      }
-    }
-  } else if (type === 'kronos') {
-    const bossDmg = (action === 'kick' ? 11.5 : 7.5) * (timing.mult || 1.0) * counterMult * styleMult;
-    gameState.bossHp = Math.max(0, gameState.bossHp - bossDmg);
-    gameState.kronosRingState = 'hit';
-    gameState.kronosStateTimer = recoilDur;
-    gameState.kronosRecoilTotal = recoilDur;
-    gameState.kronosRecoilType = recoilType;
-    gameState.kronosRecoilVector = recoilVector.clone();
-    gameState.kronosTargetTorsoRot = targetTorsoRot;
-    gameState.kronosTargetHeadRot = targetHeadRot;
-    gameState.kronosIsMicroShaking = true;
-    gameState.kronosMicroShakeTimer = microDur;
-    gameState.kronosMicroShakeDuration = microDur;
-    gameState.kronosMicroShakeAmp = microAmp;
-    gameState.kronosMicroShakeAxis = microAxis;
-
-    if (counterMult >= 2.0) {
-      gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
-      setStarburstText('CRITICAL PUNISH!', 1.25);
-    }
-
-    kronosRingBadge.update(gameState.bossHp, 100, 'hit', '★ BOSS DJ KRONOS ★');
-
-    if (gameState.bossHp <= 0) {
-      gameState.bossHp = 0;
-      gameState.kronosRingState = 'ko';
-      kronosRingBadge.update(0, 100, 'ko', '★ K.O.! VICTORY! ★');
-      setStarburstText('K.O.! STAGE CLEAR!', 1.35);
-      floorDial.updateBadge('STAGE CLEAR!', '#ffe042');
-      audioEngine.playCombatSfx('stage-ko', timing.grade, validTarget.pos);
-      if (postProcessing && postProcessing.triggerImpact) {
-        postProcessing.triggerImpact('KO', contactPoint);
-      }
-      updateHudNumbers();
-      triggerGameEnd(true);
-      return;
-    }
-  }
-
-  gameState.lastHit = {
+  const hitEntry = {
     attackType: moveKey,
+    action,
+    grade: timing.grade,
+    confirmed: true,
+    timestamp: performance.now(),
+    songTime: audioEngine.getSongTime(),
     enemyIdx: validTarget.obj && validTarget.obj.idx !== undefined ? validTarget.obj.idx : 0,
     hitReactState: recoilType,
     recoilVector: recoilVector.clone(),
@@ -2749,14 +2329,214 @@ function resolveActivePhaseAttack(hitCtx) {
       count: action === 'kick' ? 16 : 12
     }
   };
-  gameState.hitHistory.unshift(gameState.lastHit);
-  if (gameState.hitHistory.length > 10) gameState.hitHistory.pop();
+  gameState.lastHit = hitEntry;
+  gameState.hitHistory.push(hitEntry);
+
+  updateStyleRankAndHype(0);
+
+  if (gameState.combo === 4 || gameState.combo === 8 || gameState.combo === 12) {
+    audioEngine.triggerCrowdHype(`combo-${gameState.combo}`, { combo: gameState.combo });
+  }
+
+  audioEngine.playCombatSfx(moveKey, timing.grade, validTarget.pos);
+
+  if (isPerfect) {
+    gameState.hitStopTimer = action === 'kick' ? 0.100 :
+      (action === 'punch' && punchStep === 0) ? 0.048 :
+      (action === 'punch' && punchStep === 1) ? 0.070 :
+      (action === 'punch' && punchStep === 2) ? 0.110 : 0.048;
+  } else {
+    gameState.hitStopTimer = action === 'kick' ? 0.070 :
+      (action === 'punch' && punchStep === 0) ? 0.032 :
+      (action === 'punch' && punchStep === 1) ? 0.048 :
+      (action === 'punch' && punchStep === 2) ? 0.065 : 0.032;
+  }
+
+  const styleMult = gameState.styleDamageMultiplier || 1.0;
+  let totalHitDmg = Math.round(baseHitDmg * (timing.mult || 1.0) * counterMult * styleMult);
+  hitEntry.damage = totalHitDmg;
+
+  gameState.hype = Math.min(100.0, (gameState.hype || 0) + (isPerfect ? 8.0 : 4.0) * styleMult);
+
+  floorDial.updateBadge(timing.label || 'ON BEAT!', timing.color || '#42f56c');
+  const burstWords = action === 'kick'
+    ? ['BEAT KICK!', 'HEAVY KICK!', 'KRA-KOOM!', 'BA-DOOM!']
+    : ['POW-SNAP!', 'KRA-KOOM!', 'ON-BEAT HIT!'];
+  setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
+
+  const isSrank = gameState.styleRank === 'S-RANK' || gameState.combo >= 10;
+  const isFinisherMove = action === 'kick' || (action === 'punch' && punchStep === 2);
+  const isBeatDropFinisher = isSrank && isFinisherMove;
+
+  if (isBeatDropFinisher) {
+    totalHitDmg = Math.round(totalHitDmg * 1.5);
+    hitEntry.damage = totalHitDmg;
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
+    setStarburstText('SPEAKERBOX K.O.!', 1.30);
+    floorDial.updateBadge('SPEAKERBOX K.O.!', '#ff1e38');
+    audioEngine.playCombatSfx('stage-ko', timing.grade, validTarget.pos);
+    gameState.lastFinisher = { action, timing: timing.grade, timestamp: performance.now() };
+  }
+
+  if (type === 'bruiser') {
+    applyBruiserConfirmedHit(obj, action, punchStep, timing, totalHitDmg, isBeatDropFinisher, profile, validTarget.pos);
+  } else if (type === 'kronos') {
+    if (applyKronosConfirmedHit(action, timing, counterMult, styleMult, profile, validTarget.pos, contactPoint)) {
+      return;
+    }
+  }
 
   gameState.cameraKick = action === 'kick' ? 0.35 : 0.22;
   gameState.cameraDutch = (action === 'kick' ? 1 : -1) * 0.035;
   triggerCameraJuice(action, isPerfect, punchStep);
   if (isPerfect && postProcessing && postProcessing.triggerImpact) {
     postProcessing.triggerImpact('PERFECT', contactPoint);
+  }
+  updateHudNumbers();
+}
+
+function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
+  if (!isBufferedDequeue && (nowSec - gameState.lastDodgeTime) < TUNING.DODGE_COOLDOWN_SEC) {
+    return;
+  }
+  gameState.lastDodgeTime = nowSec;
+
+  if (gameState.isAttacking || (gameState.pose !== 'idle' && gameState.pose !== 'dodge')) {
+    gameState.lastCancel = {
+      fromPose: gameState.pose,
+      toPose: 'dodge',
+      canceledWithinFrames: 1,
+      inputDropped: false,
+      timestamp: performance.now()
+    };
+    gameState.lastCancelLatency = 1;
+    gameState.cancelHistory.push(gameState.lastCancel);
+  }
+  gameState.isAttacking = false;
+  gameState.attackPhase = 'idle';
+  gameState.attackType = 'dodge';
+  gameState.pendingHit = null;
+  gameState.canCancel = false;
+  gameState.inputBuffer = null;
+  gameState.pose = 'dodge';
+  gameState.poseTimer = 0.34;
+  gameState.dodgeInvulnTimer = TUNING.DODGE_IFRAME_SEC;
+  if (timing.onBeat || timing.grade === 'SILENT') {
+    gameState.wave3BeatWeaveTimer = 0.52;
+  }
+
+  const side = Math.random() > 0.5 ? 1 : -1;
+  const newX = Math.max(-4.0, Math.min(4.0, gameState.playerPos.x + side * 0.62));
+  gameState.playerTarget.set(newX, 0, gameState.playerPos.z);
+  if (gameState.playerTarget.length() > TUNING.PLAYER_MAX_RADIUS) {
+    gameState.playerTarget.setLength(TUNING.PLAYER_MAX_RADIUS);
+  }
+  gameState.cameraDutch = side * 0.04;
+  triggerCameraJuice('dodge', timing.grade === 'PERFECT', 0);
+
+  let counteredAttacker = false;
+  bruisers.forEach((b) => {
+    if (!b.active) return;
+    const d = gameState.playerPos.distanceTo(b.rig.root.position);
+    if (d > TUNING.COUNTER_WEAVE_MAX_DIST) return;
+    if ((b.state === 'windup' && b.stateTimer <= TUNING.COUNTER_WEAVE_LAST_WINDUP_SEC) || b.state === 'striking') {
+      b.state = 'stunned';
+      b.stateTimer = 1.45;
+      b.teleMat.opacity = 0;
+      b.badge.update(b.hp, b.maxHp, 'stunned');
+      counteredAttacker = true;
+    }
+  });
+
+  if (gameState.kronosInRing) {
+    const kd = gameState.playerPos.distanceTo(kronosRig.root.position);
+    const w3Cfg = TUNING.WAVES[3];
+    // 1. BASS DROP SHOCKWAVE: weave on Beat 3 during windup_shockwave OR weave across active shockwave ring
+    if (
+      gameState.kronosRingState === 'windup_shockwave' ||
+      (gameState.bossShockwave && gameState.bossShockwave.active && !gameState.bossShockwave.evaded)
+    ) {
+      const canWeaveShockwave = gameState.kronosRingState === 'windup_shockwave' ||
+        Math.abs(kd - gameState.bossShockwave.radius) <= 1.25;
+      if (canWeaveShockwave && !gameState.shockwavePreWeaved) {
+        gameState.shockwavePreWeaved = true;
+        if (gameState.bossShockwave) {
+          gameState.bossShockwave.evaded = true;
+        }
+        gameState.shockwaveDodged = true;
+        gameState.kronosRingState = 'counter_stun';
+        gameState.kronosStateTimer = 0.85;
+        gameState.counterBonusTimer = 1.6;
+        gameState.bossCounterStunActive = true;
+        gameState.bossAttackPattern = 'idle';
+        kronosTeleMat.opacity = 0;
+        const reboundDmg = w3Cfg ? w3Cfg.bossBassDropReboundDmg : 28;
+        gameState.bossHp = Math.max(0, gameState.bossHp - reboundDmg);
+        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', `★ BASS REBOUND (-${reboundDmg})! ★`);
+        counteredAttacker = true;
+      }
+    } else if (
+      gameState.kronosRingState === 'windup_combo' ||
+      gameState.kronosRingState === 'striking_combo'
+    ) {
+      // 2. SCRATCH COMBO 3-HIT STRING: counter window on the 3rd hit (step === 2)
+      const step = gameState.bossComboStep || 0;
+      if (step === 2) {
+        gameState.bossStepWeaved = true;
+        gameState.kronosRingState = 'counter_stun';
+        gameState.kronosStateTimer = 0.85;
+        gameState.counterBonusTimer = 1.6;
+        gameState.bossCounterStunActive = true;
+        gameState.bossAttackPattern = 'idle';
+        kronosTeleMat.opacity = 0;
+        const riposteDmg = w3Cfg ? w3Cfg.bossCounterRiposteDmg : 26;
+        gameState.bossHp = Math.max(0, gameState.bossHp - riposteDmg);
+        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', `★ SCRATCH COUNTER (-${riposteDmg})! ★`);
+        counteredAttacker = true;
+      } else {
+        gameState.bossStepWeaved = true;
+      }
+    } else if (kd <= TUNING.COUNTER_WEAVE_MAX_DIST) {
+      const inLateWindup = (
+        gameState.kronosRingState === 'windup' &&
+        gameState.kronosStateTimer <= TUNING.COUNTER_WEAVE_LAST_WINDUP_SEC
+      ) || gameState.kronosRingState === 'striking';
+      if (inLateWindup) {
+        gameState.kronosRingState = 'stunned';
+        gameState.kronosStateTimer = 1.1;
+        gameState.bossAttackPattern = 'idle';
+        kronosTeleMat.opacity = 0;
+        kronosRingBadge.update(gameState.bossHp, 100, 'stunned', '★ KRONOS STUNNED! ★');
+        counteredAttacker = true;
+      }
+    }
+
+    if (gameState.bossHp <= 0) {
+      gameState.bossHp = 0;
+      gameState.kronosRingState = 'ko';
+      kronosTeleMat.opacity = 0;
+      kronosRingBadge.update(0, 100, 'ko', '★ K.O.! VICTORY! ★');
+      setStarburstText('K.O.! STAGE CLEAR!', 1.35);
+      floorDial.updateBadge('STAGE CLEAR!', '#ffe042');
+      audioEngine.playCombatSfx('stage-ko', timing.grade, kronosRig.root.position);
+      updateHudNumbers();
+      triggerGameEnd(true);
+      return;
+    }
+  }
+
+  if (counteredAttacker) {
+    gameState.counterBonusTimer = (gameState.kronosRingState === 'counter_stun') ? 1.6 : Math.max(gameState.counterBonusTimer, 1.5);
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + (gameState.kronosRingState === 'counter_stun' ? 25.0 : 15.0));
+    floorDial.updateBadge('COUNTER WEAVE!', '#ffe042');
+    setStarburstText('COUNTER WEAVE!', 1.16);
+    audioEngine.playCombatSfx('counter-weave', timing.grade, gameState.playerPos);
+    if (postProcessing && postProcessing.triggerImpact) {
+      postProcessing.triggerImpact('COUNTER', challengerRig.root.position);
+    }
+  } else {
+    setStarburstText('WEAVE!', 1.06);
+    audioEngine.playCombatSfx('dodge', timing.grade, gameState.playerPos);
   }
   updateHudNumbers();
 }
@@ -2776,100 +2556,7 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
 
   // 1. BALANCED DODGE / WEAVE (Key: A) — Cooldown > i-frames, Last-155ms Counter Window, No Heal, No Combo Increment
   if (action === 'dodge') {
-    if (!isBufferedDequeue && (nowSec - gameState.lastDodgeTime) < TUNING.DODGE_COOLDOWN_SEC) {
-      return;
-    }
-    gameState.lastDodgeTime = nowSec;
-
-    if (gameState.isAttacking || (gameState.pose !== 'idle' && gameState.pose !== 'dodge')) {
-      gameState.lastCancel = {
-        fromPose: gameState.pose,
-        toPose: 'dodge',
-        canceledWithinFrames: 1,
-        inputDropped: false,
-        timestamp: performance.now()
-      };
-      gameState.lastCancelLatency = 1;
-      gameState.cancelHistory.push(gameState.lastCancel);
-    }
-    gameState.isAttacking = false;
-    gameState.attackPhase = 'idle';
-    gameState.attackType = 'dodge';
-    gameState.pendingHit = null;
-    gameState.canCancel = false;
-    gameState.inputBuffer = null;
-    gameState.pose = 'dodge';
-    gameState.poseTimer = 0.34;
-    gameState.dodgeInvulnTimer = TUNING.DODGE_IFRAME_SEC;
-
-    const side = Math.random() > 0.5 ? 1 : -1;
-    const newX = Math.max(-4.0, Math.min(4.0, gameState.playerPos.x + side * 0.62));
-    gameState.playerTarget.set(newX, 0, gameState.playerPos.z);
-    if (gameState.playerTarget.length() > TUNING.PLAYER_MAX_RADIUS) {
-      gameState.playerTarget.setLength(TUNING.PLAYER_MAX_RADIUS);
-    }
-    gameState.cameraDutch = side * 0.04;
-    triggerCameraJuice('dodge', timing.grade === 'PERFECT', 0);
-
-    // Counter Weave ONLY if dodging in the last ~155ms of an enemy windup within 2.2m (or active shockwave front)
-    let counteredAttacker = false;
-    bruisers.forEach((b) => {
-      if (!b.active) return;
-      const d = gameState.playerPos.distanceTo(b.rig.root.position);
-      if (d > TUNING.COUNTER_WEAVE_MAX_DIST) return;
-      if ((b.state === 'windup' && b.stateTimer <= TUNING.COUNTER_WEAVE_LAST_WINDUP_SEC) || b.state === 'striking') {
-        b.state = 'stunned';
-        b.stateTimer = 1.45;
-        b.teleMat.opacity = 0;
-        b.badge.update(b.hp, b.maxHp, 'stunned');
-        counteredAttacker = true;
-      }
-    });
-
-    if (gameState.kronosInRing) {
-      const kd = gameState.playerPos.distanceTo(kronosRig.root.position);
-      if (gameState.bossShockwave && gameState.bossShockwave.active && !gameState.bossShockwave.evaded) {
-        const waveDist = Math.abs(kd - gameState.bossShockwave.radius);
-        if (waveDist <= 0.85) {
-          gameState.bossShockwave.evaded = true;
-          gameState.shockwaveDodged = true;
-          gameState.kronosRingState = 'counter_stun';
-          gameState.kronosStateTimer = 2.0;
-          gameState.counterBonusTimer = 2.0;
-          gameState.bossCounterStunActive = true;
-          gameState.bossAttackPattern = 'idle';
-          kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', '★ COUNTER-STUN PUNISH! ★');
-          counteredAttacker = true;
-        }
-      } else if (kd <= TUNING.COUNTER_WEAVE_MAX_DIST) {
-        const inLateWindup = (
-          (gameState.kronosRingState === 'windup' || gameState.kronosRingState === 'windup_combo') &&
-          gameState.kronosStateTimer <= TUNING.COUNTER_WEAVE_LAST_WINDUP_SEC
-        ) || gameState.kronosRingState === 'striking' || gameState.kronosRingState === 'striking_combo';
-        if (inLateWindup) {
-          gameState.kronosRingState = 'stunned';
-          gameState.kronosStateTimer = 1.45;
-          gameState.bossAttackPattern = 'idle';
-          kronosRingBadge.update(gameState.bossHp, 100, 'stunned', '★ KRONOS STUNNED! ★');
-          counteredAttacker = true;
-        }
-      }
-    }
-
-    if (counteredAttacker) {
-      gameState.counterBonusTimer = (gameState.kronosRingState === 'counter_stun') ? 2.0 : Math.max(gameState.counterBonusTimer, 1.8);
-      gameState.hype = Math.min(100.0, (gameState.hype || 0) + (gameState.kronosRingState === 'counter_stun' ? 25.0 : 15.0));
-      floorDial.updateBadge('COUNTER WEAVE!', '#ffe042');
-      setStarburstText('COUNTER WEAVE!', 1.16);
-      audioEngine.playCombatSfx('counter-weave', timing.grade, gameState.playerPos);
-      if (postProcessing && postProcessing.triggerImpact) {
-        postProcessing.triggerImpact('COUNTER', challengerRig.root.position);
-      }
-    } else {
-      setStarburstText('WEAVE!', 1.06);
-      audioEngine.playCombatSfx('dodge', timing.grade, gameState.playerPos);
-    }
-    updateHudNumbers();
+    executeDodgeAction(nowSec, timing, isBufferedDequeue);
     return;
   }
 
@@ -3203,66 +2890,66 @@ const CHALLENGER_POSES = {
   },
   'punch-jab': {
     chamber: {
-      hips: [0.02, 0.05, 0], torso: [0.04, 0.08, 0], headGroup: [0, 0.04, 0],
-      leftArm: [0.55, -0.10, -0.30], leftElbow: [1.45, 0, 0],
-      rightArm: [0.70, -0.15, 0.40], rightElbow: [1.35, 0, 0],
-      leftLeg: [0.10, 0.08, -0.12], leftKnee: [-0.20, 0, 0], leftAnkle: [0.08, 0, 0.08],
-      rightLeg: [0.05, -0.05, 0.12], rightKnee: [-0.10, 0, 0], rightAnkle: [0.15, 0, -0.08]
+      hips: [0.02, -0.08, 0], torso: [0.05, -0.04, 0], headGroup: [-0.02, 0.08, 0],
+      leftArm: [0.82, -0.14, -0.28], leftElbow: [1.12, 0, 0],
+      rightArm: [0.78, 0.24, 0.38], rightElbow: [1.38, 0, 0],
+      leftLeg: [0.16, 0.10, -0.14], leftKnee: [-0.28, 0, 0], leftAnkle: [0.12, 0, 0.10],
+      rightLeg: [-0.08, -0.10, 0.14], rightKnee: [-0.18, 0, 0], rightAnkle: [0.24, 0, -0.10]
     },
     apex: {
-      hips: [0.06, 0.15, 0], torso: [0.02, 0.24, 0], headGroup: [0, 0.08, 0],
-      leftArm: [1.48, 0.12, -0.15], leftElbow: [0.08, 0, 0],
-      rightArm: [0.75, -0.25, 0.45], rightElbow: [1.40, 0, 0],
-      leftLeg: [-0.15, 0, -0.10], leftKnee: [-0.08, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [0.18, 0, 0.14], rightKnee: [-0.10, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [0.06, -0.24, 0], torso: [0.08, -0.34, -0.04], headGroup: [-0.04, 0.26, 0],
+      leftArm: [1.54, -0.06, -0.12], leftElbow: [0.08, 0, 0],
+      rightArm: [0.82, 0.26, 0.36], rightElbow: [1.42, 0, 0],
+      leftLeg: [0.08, 0.06, -0.12], leftKnee: [-0.14, 0, 0], leftAnkle: [0.06, 0, 0.06],
+      rightLeg: [-0.18, -0.08, 0.16], rightKnee: [-0.12, 0, 0], rightAnkle: [0.22, 0, -0.08]
     }
   },
   'punch-cross': {
     chamber: {
-      hips: [0.04, -0.18, 0], torso: [0.02, -0.25, 0], headGroup: [0, -0.06, 0],
-      leftArm: [0.20, -0.10, -0.45], leftElbow: [1.25, 0, 0],
-      rightArm: [0.85, 0.10, 0.60], rightElbow: [1.45, 0, 0],
-      leftLeg: [-0.05, 0, -0.10], leftKnee: [-0.10, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [0.10, 0, 0.15], rightKnee: [-0.05, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [0.04, -0.26, 0], torso: [0.06, -0.32, 0.03], headGroup: [-0.02, 0.22, 0],
+      leftArm: [0.92, -0.16, -0.26], leftElbow: [1.10, 0, 0],
+      rightArm: [0.62, 0.28, 0.44], rightElbow: [1.42, 0, 0],
+      leftLeg: [0.14, 0.08, -0.14], leftKnee: [-0.24, 0, 0], leftAnkle: [0.10, 0, 0.08],
+      rightLeg: [-0.10, -0.12, 0.16], rightKnee: [-0.22, 0, 0], rightAnkle: [0.26, 0, -0.12]
     },
     apex: {
-      hips: [0.12, -0.45, 0], torso: [0, -0.55, 0], headGroup: [0, -0.15, 0],
-      leftArm: [-0.40, 0, -0.50], leftElbow: [1.10, 0, 0],
-      rightArm: [1.45, 0.20, 0.85], rightElbow: [0.10, 0, 0],
-      leftLeg: [-0.22, 0, -0.10], leftKnee: [-0.10, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [0.28, 0, 0.25], rightKnee: [-0.08, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [0.10, 0.30, 0], torso: [0.12, 0.44, -0.05], headGroup: [-0.06, -0.34, 0],
+      leftArm: [0.72, -0.24, -0.38], leftElbow: [1.42, 0, 0],
+      rightArm: [1.56, 0.08, 0.14], rightElbow: [0.08, 0, 0],
+      leftLeg: [0.22, 0.04, -0.12], leftKnee: [-0.18, 0, 0], leftAnkle: [0.06, 0, 0.04],
+      rightLeg: [-0.24, 0.12, 0.18], rightKnee: [-0.10, 0, 0], rightAnkle: [0.30, 0, -0.08]
     }
   },
   'punch-uppercut': {
     chamber: {
-      hips: [-0.08, -0.15, 0.04], torso: [-0.04, -0.18, 0.08], headGroup: [0.04, -0.05, 0],
-      leftArm: [0.65, 0.15, -0.40], leftElbow: [1.35, 0, 0],
-      rightArm: [0.80, -0.20, 0.25], rightElbow: [1.45, 0, 0],
-      leftLeg: [0.08, 0, -0.12], leftKnee: [-0.20, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [0.02, 0, 0.10], rightKnee: [-0.15, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [0.06, -0.24, 0.06], torso: [0.14, -0.30, 0.10], headGroup: [-0.04, 0.20, -0.04],
+      leftArm: [0.74, -0.20, -0.36], leftElbow: [1.38, 0, 0],
+      rightArm: [0.32, 0.18, 0.32], rightElbow: [1.52, 0, 0],
+      leftLeg: [0.28, 0.08, -0.16], leftKnee: [-0.46, 0, 0], leftAnkle: [0.18, 0, 0.10],
+      rightLeg: [-0.06, -0.10, 0.16], rightKnee: [-0.36, 0, 0], rightAnkle: [0.32, 0, -0.10]
     },
     apex: {
-      hips: [-0.04, -0.25, 0.08], torso: [-0.08, -0.35, 0.14], headGroup: [0.08, -0.12, 0],
-      leftArm: [0.65, 0.35, -0.45], leftElbow: [1.35, 0, 0],
-      rightArm: [1.75, -0.15, 0.35], rightElbow: [1.25, 0, 0],
-      leftLeg: [-0.08, 0, -0.10], leftKnee: [-0.12, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [0.12, 0, 0.16], rightKnee: [-0.08, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [-0.06, 0.28, -0.06], torso: [-0.12, 0.42, -0.10], headGroup: [0.06, -0.28, 0.04],
+      leftArm: [0.68, -0.26, -0.42], leftElbow: [1.40, 0, 0],
+      rightArm: [1.72, 0.12, 0.16], rightElbow: [0.68, 0, 0],
+      leftLeg: [0.08, 0.04, -0.12], leftKnee: [-0.12, 0, 0], leftAnkle: [0.04, 0, 0.04],
+      rightLeg: [-0.18, 0.10, 0.14], rightKnee: [-0.08, 0, 0], rightAnkle: [0.22, 0, -0.06]
     }
   },
   kick: {
     chamber: {
-      hips: [-0.04, -0.08, 0.15], torso: [0.06, -0.14, 0.10], headGroup: [-0.02, -0.10, -0.05],
-      leftArm: [0.45, 0.10, -0.45], leftElbow: [1.15, 0, 0],
-      rightArm: [0.20, -0.10, 0.80], rightElbow: [0.80, 0, 0],
-      leftLeg: [0.12, 0, -0.20], leftKnee: [-0.25, 0, 0], leftAnkle: [0.08, 0, 0.08],
-      rightLeg: [0.45, 0.08, 0.85], rightKnee: [-0.85, 0, 0], rightAnkle: [0, 0, 0]
+      hips: [-0.08, 0.18, 0.14], torso: [-0.06, 0.12, 0.10], headGroup: [0.02, -0.12, -0.04],
+      leftArm: [0.58, -0.12, -0.42], leftElbow: [1.22, 0, 0],
+      rightArm: [0.36, 0.16, 0.56], rightElbow: [1.05, 0, 0],
+      leftLeg: [0.08, 0.14, -0.18], leftKnee: [-0.22, 0, 0], leftAnkle: [0.12, 0, 0.10],
+      rightLeg: [1.18, -0.18, 0.38], rightKnee: [-1.15, 0, 0], rightAnkle: [0.25, 0, 0]
     },
     apex: {
-      hips: [-0.06, -0.14, 0.34], torso: [0.12, -0.28, 0.22], headGroup: [-0.06, -0.28, -0.12],
-      leftArm: [0.38, 0.25, -0.58], leftElbow: [0.95, 0, 0],
-      rightArm: [-0.35, -0.25, 1.35], rightElbow: [0.25, 0, 0],
-      leftLeg: [0.04, 0, -0.34], leftKnee: [-0.08, 0, 0], leftAnkle: [0, 0, 0],
-      rightLeg: [-0.04, 0.05, 2.46], rightKnee: [0.0, 0, 0.06], rightAnkle: [0, 0, 0]
+      hips: [-0.16, 0.42, 0.28], torso: [-0.14, -0.22, 0.18], headGroup: [0.06, -0.18, -0.08],
+      leftArm: [0.46, 0.12, -0.52], leftElbow: [1.05, 0, 0],
+      rightArm: [-0.18, -0.14, 0.92], rightElbow: [0.48, 0, 0],
+      leftLeg: [-0.10, 0.18, -0.22], leftKnee: [-0.14, 0, 0], leftAnkle: [0.08, 0, 0.08],
+      rightLeg: [1.46, -0.24, 0.62], rightKnee: [-0.06, 0, 0], rightAnkle: [-0.35, 0, 0]
     }
   },
   dodge: {
@@ -3332,16 +3019,24 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
         const tau = Math.min(1.0, Math.max(0.0, t / Math.max(0.001, startupEnd)));
         const ease = tau * tau * (3.0 - 2.0 * tau);
         targetJoints = lerpPoseDict(idleConfig, config.chamber, ease);
-        targetHipsY = 1.00 - ease * 0.04;
-        kickSmear.smearGroup.visible = false;
+        targetHipsY = 1.00 - ease * (actKey === 'punch-uppercut' ? 0.07 : 0.03);
+        if (actKey === 'kick' && tau > 0.55 && kickSmear.updateSweep) {
+          kickSmear.updateSweep((tau - 0.55) / 0.45 * 0.35, false, beatPulse);
+        } else {
+          kickSmear.smearGroup.visible = false;
+        }
       } else if (t < activeEnd) {
         const tau = Math.min(1.0, Math.max(0.0, (t - startupEnd) / Math.max(0.001, p.active || 0.060)));
         const ease = Math.sin(tau * Math.PI * 0.5);
         targetJoints = lerpPoseDict(config.chamber, config.apex, ease);
-        targetHipsY = 1.00 + (actKey === 'kick' ? 0.02 : (actKey === 'punch-uppercut' ? 0.05 : 0.01)) * ease;
+        targetHipsY = 1.00 + (actKey === 'kick' ? 0.03 : (actKey === 'punch-uppercut' ? 0.06 : 0.01)) * ease;
         if (actKey === 'kick') {
-          kickSmear.smearGroup.visible = true;
-          kickSmear.arcMat.opacity = 0.92 + beatPulse * 0.08;
+          if (kickSmear.updateSweep) {
+            kickSmear.updateSweep(0.35 + 0.65 * ease, false, beatPulse);
+          } else {
+            kickSmear.smearGroup.visible = true;
+            kickSmear.arcMat.opacity = 0.92 + beatPulse * 0.08;
+          }
         } else {
           kickSmear.smearGroup.visible = false;
         }
@@ -3351,8 +3046,12 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016) {
         targetJoints = lerpPoseDict(config.apex, idleConfig, ease);
         targetHipsY = 1.00 - (1.0 - ease) * 0.02;
         if (actKey === 'kick') {
-          kickSmear.arcMat.opacity = Math.max(0, 0.92 * (1.0 - ease));
-          if (ease > 0.8) kickSmear.smearGroup.visible = false;
+          if (kickSmear.updateSweep) {
+            kickSmear.updateSweep(ease, true, beatPulse);
+          } else {
+            kickSmear.arcMat.opacity = Math.max(0, 0.92 * (1.0 - ease));
+            if (ease > 0.8) kickSmear.smearGroup.visible = false;
+          }
         } else {
           kickSmear.smearGroup.visible = false;
         }
@@ -3663,8 +3362,11 @@ window.addEventListener('wheel', onWheel, { passive: true });
 function syncViewportResize() {
   const w = Math.max(1, Math.floor(window.innerWidth || _lastCanvasW || 1280));
   const h = Math.max(1, Math.floor(window.innerHeight || _lastCanvasH || 800));
+  const isPhone = w <= 600 || IS_LOW_TIER;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(isPhone ? 1.0 : Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.shadowMap.enabled = !isPhone;
   renderer.setSize(w, h);
   renderer.getSize(_rendererSizeVec);
   _lastCanvasW = Math.max(1, Math.floor(_rendererSizeVec.x || w));
@@ -3755,10 +3457,12 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
 
   // Per-move startupDur / activeDur / recoveryDur lifecycle + Active-Phase Hit Resolution
   if (gameState.isAttacking) {
-    gameState.attackTimer += rawDt;
+    gameState.attackTimer += dt;
     const p = gameState.phaseDurations;
     const startupEnd = p.startup || 0.065;
-    const activeEnd = startupEnd + (p.active || 0.060);
+    const activeDur = p.active || 0.060;
+    const activeEnd = startupEnd + activeDur;
+    const impactApexTime = startupEnd + activeDur * 0.45;
     const total = p.total || (activeEnd + (p.recovery || 0.160));
 
     if (gameState.attackTimer < startupEnd) {
@@ -3767,7 +3471,7 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
     } else if (gameState.attackTimer < activeEnd) {
       gameState.attackPhase = 'active';
       gameState.canCancel = false;
-      if (gameState.pendingHit && !gameState.pendingHit.resolved) {
+      if (gameState.pendingHit && !gameState.pendingHit.resolved && gameState.attackTimer >= impactApexTime) {
         resolveActivePhaseAttack(gameState.pendingHit);
       }
     } else if (gameState.attackTimer < total) {
@@ -3883,378 +3587,757 @@ function applyPlayerDamage(dmg, hitWord, kickAmt = 0.28, dutchAmt = 0.04) {
   }
 }
 
+function updateBruiserBadgeAndFlying(b, dt) {
+  const idx = b.idx;
+  if (b.badge && b.badge.mesh) {
+    b.badge.mesh.lookAt(camera.position);
+    if (b.state !== 'ko' && b.state !== 'flying') {
+      let closeNeighbor = null;
+      let minD = 999;
+      for (let i = 0; i < bruisers.length; i++) {
+        const other = bruisers[i];
+        if (other === b || !other.active || other.state === 'ko' || other.state === 'flying') continue;
+        const dx = b.rig.root.position.x - other.rig.root.position.x;
+        const dz = b.rig.root.position.z - other.rig.root.position.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < 1.4 && dist < minD) {
+          minD = dist;
+          closeNeighbor = other;
+        }
+      }
+      const isTelegraph = b.state === 'windup' || b.state === 'striking';
+      let targetY = 2.18;
+      let targetRenderOrder = 10;
+      if (closeNeighbor) {
+        const neighborTelegraph = closeNeighbor.state === 'windup' || closeNeighbor.state === 'striking';
+        if (isTelegraph && !neighborTelegraph) { targetY = 2.42; targetRenderOrder = 30; }
+        else if (!isTelegraph && neighborTelegraph) { targetY = 2.08; targetRenderOrder = 10; }
+        else if (idx > closeNeighbor.idx) { targetY = 2.42; targetRenderOrder = 20; }
+        else { targetY = 2.08; targetRenderOrder = 10; }
+      } else if (isTelegraph) {
+        targetY = 2.42; targetRenderOrder = 25;
+      }
+      b.badge.mesh.position.y = THREE.MathUtils.lerp(b.badge.mesh.position.y, targetY, Math.min(1.0, dt * 10));
+      b.badge.mesh.renderOrder = targetRenderOrder;
+    }
+  }
+
+  if (b.state === 'flying' && b.flying) {
+    b.flying.t += dt / b.flying.duration;
+    const u = Math.min(1.0, b.flying.t);
+    b.rig.root.position.lerpVectors(b.flying.startPos, b.flying.targetPos, u);
+    b.rig.root.position.y = Math.sin(u * Math.PI) * 3.6 + u * 2.2;
+    b.rig.root.rotation.x += dt * 14.0;
+    b.rig.root.rotation.z += dt * 8.0;
+    if (b.blender) b.blender.update(dt);
+
+    if (u >= 1.0) {
+      b.state = 'ko';
+      b.active = false;
+      b.hp = 0;
+      b.rig.root.visible = false;
+      b.flying = null;
+      if (!reducedMotionEnabled) gameState.cameraKick = 0.45;
+      setStarburstText('SPEAKERBOX K.O.!', 1.25);
+      floorDial.updateBadge('STAGE K.O.!', '#ffe042');
+      audioEngine.playCombatSfx('stage-ko', 'PERFECT', b.rig.root.position);
+      if (postProcessing && postProcessing.triggerImpact) {
+        postProcessing.triggerImpact('KO', b.rig.root.position);
+      }
+      gameState.hype = Math.min(100.0, (gameState.hype || 0) + 15.0);
+      updateHudNumbers();
+    }
+    return true;
+  }
+  return false;
+}
+
+function updateBruiserMicroShake(b, rawDt) {
+  if (gameState.hitStopTimer <= 0 || !b.isMicroShaking) {
+    if (b.isMicroShaking && gameState.hitStopTimer <= 0) {
+      b.isMicroShaking = false;
+      b.microShakeTimer = 0;
+      b.rig.hips.position.x = 0;
+      b.rig.hips.position.z = 0;
+      if (b.state !== 'hit') b.rig.hips.position.y = 1.0;
+    }
+  } else if (b.microShakeTimer > 0) {
+    b.microShakeTimer -= rawDt;
+    if (b.microShakeTimer <= 0) {
+      b.isMicroShaking = false;
+      b.rig.hips.position.x = 0;
+      b.rig.hips.position.z = 0;
+    } else {
+      const t = b.microShakeDuration - b.microShakeTimer;
+      const decay = Math.exp(-22.0 * t);
+      const latShake = b.microShakeAmp * decay * Math.sin(2 * Math.PI * 50.0 * t);
+      const vertShake = b.microShakeVertAmp * decay * Math.sin(2 * Math.PI * 50.0 * t + Math.PI * 0.5);
+      if (b.microShakeNormal) {
+        b.rig.hips.position.x = b.microShakeNormal.x * latShake;
+        b.rig.hips.position.z = b.microShakeNormal.z * latShake;
+      }
+      b.rig.hips.position.y += vertShake;
+    }
+  }
+}
+
+function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
+  if (b.state === 'hit') {
+    b.stateTimer -= dt;
+    const progress = Math.max(0, b.stateTimer / (b.recoilTotalTimer || 0.35));
+    const ease = Math.sin(progress * Math.PI * 0.5);
+    const torsoTgt = b.targetTorsoRot ? [b.targetTorsoRot.x * ease, b.targetTorsoRot.y * ease, b.targetTorsoRot.z * ease] : [-0.32 * ease, 0, 0];
+    const headTgt = b.targetHeadRot ? [b.targetHeadRot.x * ease, b.targetHeadRot.y * ease, b.targetHeadRot.z * ease] : [0, 0, 0];
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: torsoTgt, headGroup: headTgt,
+        leftArm: [-0.4 * ease, 0, -0.5 * ease], rightArm: [-0.4 * ease, 0, 0.5 * ease],
+        leftElbow: [0.6 * ease, 0, 0], rightElbow: [0.6 * ease, 0, 0],
+        leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
+        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+      });
+    }
+    if (b.verticalVelocity) {
+      b.rig.hips.position.y += b.verticalVelocity * dt;
+      b.verticalVelocity -= 14.0 * dt;
+      if (b.rig.hips.position.y <= 1.0) { b.rig.hips.position.y = 1.0; b.verticalVelocity = 0; }
+    } else {
+      b.rig.hips.position.y = 1.0 - 0.04 * ease;
+    }
+    if (b.velocity && b.velocity.lengthSq() > 0.001) {
+      b.rig.root.position.addScaledVector(b.velocity, dt);
+      b.velocity.multiplyScalar(Math.exp(-12.0 * dt));
+    }
+    if (b.stateTimer <= 0) {
+      b.state = 'stalking';
+      b.recoilType = 'none';
+      b.isMicroShaking = false;
+      b.verticalVelocity = 0;
+      b.rig.hips.position.x = 0;
+      b.rig.hips.position.z = 0;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    }
+  } else if (b.state === 'stunned') {
+    b.stateTimer -= dt;
+    b.rig.hips.position.y = 0.92 + Math.sin(elapsed * 8) * 0.04;
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: [0.22, Math.sin(elapsed * 10) * 0.25, 0],
+        headGroup: [0.10, Math.sin(elapsed * 8) * 0.15, 0],
+        leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
+        leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
+        leftLeg: [-0.10, 0, 0], rightLeg: [-0.10, 0, 0],
+        leftKnee: [-0.12, 0, 0], rightKnee: [-0.12, 0, 0]
+      });
+    }
+    if (b.stateTimer <= 0) {
+      b.state = 'stalking';
+      b.attackCooldown = 1.6;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    }
+  } else if (b.state === 'guard_break') {
+    b.stateTimer -= dt;
+    b.isGuarding = false;
+    b.rig.hips.position.y = 0.92 + Math.sin(elapsed * 12.0) * 0.04;
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: [-0.25, Math.sin(elapsed * 8.0) * 0.15, 0], headGroup: [-0.20, 0, 0],
+        leftArm: [0.35, 0, -0.45], leftElbow: [0.20, 0, 0],
+        rightArm: [0.35, 0, 0.45], rightElbow: [0.20, 0, 0],
+        leftLeg: [-0.15, 0, 0], rightLeg: [-0.15, 0, 0],
+        leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
+      });
+    }
+    if (b.stateTimer <= 0) {
+      b.state = 'stalking';
+      b.attackCooldown = 1.8;
+      b.guardCooldown = 4.5;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    }
+  }
+}
+
+function updateBruiserWindupState(b, dt, elapsed) {
+  b.stateTimer -= dt;
+  b.isGuarding = false;
+  const toPlayer = new THREE.Vector3().subVectors(gameState.playerPos, b.rig.root.position);
+  toPlayer.y = 0;
+  const dist = toPlayer.length();
+  if (dist > 1.38) {
+    toPlayer.normalize().multiplyScalar(dt * 1.9);
+    b.rig.root.position.add(toPlayer);
+  }
+  b.rig.hips.position.y = 0.95;
+
+  if (b.attackType === 'quick_hook') {
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: [0.12, 0.45, 0],
+        leftArm: [-1.45, 0.40, -0.30], leftElbow: [1.25, 0, 0],
+        rightArm: [-0.85, -0.20, 0.20], rightElbow: [1.30, 0, 0],
+        leftLeg: [-0.15, 0, 0], rightLeg: [0.15, 0, 0],
+        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+      });
+    }
+    const flashColor = (!reducedMotionEnabled && Math.sin(elapsed * 16) > 0) ? 0x00e5ff : 0xffe042;
+    b.teleMat.color.setHex(flashColor);
+    b.teleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.92 + Math.sin(elapsed * 12) * 0.14));
+    b.teleMat.opacity = 0.92;
+  } else {
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: [-0.18, -0.55, 0],
+        rightArm: [-2.15, 0, 0.45], rightElbow: [1.1, 0, 0],
+        leftArm: [-0.85, 0, -0.25], leftElbow: [1.15, 0, 0],
+        leftLeg: [0.15, 0, 0], rightLeg: [-0.15, 0, 0],
+        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+      });
+    }
+    b.teleMat.color.setHex(0xff1e38);
+    b.teleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.88 + Math.sin(elapsed * 10) * 0.16));
+    b.teleMat.opacity = 0.88;
+  }
+
+  if (b.stateTimer <= 0) {
+    b.state = 'striking';
+    b.stateTimer = b.attackType === 'quick_hook' ? 0.18 : 0.22;
+    b.badge.update(b.hp, b.maxHp, 'striking', null, b.attackType);
+  }
+}
+
+function updateBruiserStrikingState(b, dt, contextState) {
+  const idx = b.idx;
+  b.stateTimer -= dt;
+  b.isGuarding = false;
+  b.rig.hips.position.y = 1.02;
+  if (b.blender) {
+    if (b.attackType === 'quick_hook') {
+      b.blender.setTarget({
+        torso: [0.22, -0.55, 0],
+        leftArm: [-1.25, 0.45, 0.35], leftElbow: [0.35, 0, 0],
+        rightArm: [-0.60, -0.25, 0.30], rightElbow: [1.20, 0, 0],
+        leftLeg: [0.18, 0, 0], rightLeg: [-0.18, 0, 0],
+        leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
+      });
+    } else {
+      b.blender.setTarget({
+        torso: [0.28, 0.65, 0],
+        rightArm: [-1.35, -0.25, -0.15], rightElbow: [0.15, 0, 0],
+        leftArm: [-0.5, 0, -0.3], leftElbow: [0.8, 0, 0],
+        leftLeg: [-0.20, 0, 0], rightLeg: [0.20, 0, 0],
+        leftKnee: [-0.08, 0, 0], rightKnee: [-0.12, 0, 0], headGroup: [0, 0, 0]
+      });
+    }
+  }
+  b.teleMat.opacity = 0.95;
+
+  if (b.stateTimer <= 0) {
+    b.teleMat.opacity = 0;
+    const hitDist = b.rig.root.position.distanceTo(gameState.playerPos);
+    const waveCfg = (contextState && contextState.waveCfg) || TUNING.WAVES[gameState.wave] || TUNING.WAVES[1];
+    const isDodging = gameState.dodgeInvulnTimer > 0 || (gameState.wave === 3 && (gameState.wave3BeatWeaveTimer || 0) > 0);
+    if (isDodging) {
+      b.state = 'stunned';
+      b.stateTimer = b.attackType === 'quick_hook' ? 1.15 : 1.45;
+      b.badge.update(b.hp, b.maxHp, 'stunned');
+      floorDial.updateBadge('EVADED!', '#ffe042');
+    } else if (hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS) {
+      const strikeDmg = b.attackType === 'quick_hook' ? waveCfg.quickHookDmg : waveCfg.haymakerDmg;
+      applyPlayerDamage(strikeDmg, 'BAM! DODGE [A]!', b.attackType === 'quick_hook' ? 0.25 : 0.38, b.attackType === 'quick_hook' ? -0.035 : 0.055);
+      b.state = 'stalking';
+      b.attackCooldown = 1.6 + idx * 0.5;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    } else {
+      floorDial.updateBadge('OUTSPACED!', '#24e5ff');
+      b.state = 'stalking';
+      b.attackCooldown = 1.6;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    }
+  }
+}
+
+function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime, chart, beatSec, contextState) {
+  const idx = b.idx;
+  if (b.state === 'guard') {
+    b.stateTimer -= dt;
+    b.isGuarding = true;
+    const slot = RADIAL_SLOTS[b.slotIndex !== undefined ? b.slotIndex : (idx % 6)];
+    const desiredX = gameState.playerPos.x + Math.sin(slot.angle) * slot.radius;
+    const desiredZ = gameState.playerPos.z - Math.cos(slot.angle) * slot.radius;
+    b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 2.8);
+    b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 2.8);
+    b.rig.hips.position.y = 0.98 + Math.sin(elapsed * 5.0) * 0.02;
+    if (b.blender) {
+      b.blender.setTarget({
+        torso: [0.08, 0, 0], headGroup: [0.12, 0, 0],
+        leftArm: [-1.15, 0.35, -0.22], leftElbow: [1.60, 0, 0],
+        rightArm: [-1.15, -0.35, 0.22], rightElbow: [1.60, 0, 0],
+        leftLeg: [0.10, 0, 0], rightLeg: [-0.10, 0, 0],
+        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+      });
+    }
+    b.teleMat.opacity = 0;
+    if (b.stateTimer <= 0) {
+      b.state = 'stalking';
+      b.isGuarding = false;
+      b.guardCooldown = 4.2 + idx * 1.5;
+      b.badge.update(b.hp, b.maxHp, 'stalking');
+    }
+    return;
+  }
+
+  b.isGuarding = false;
+  const slot = RADIAL_SLOTS[b.slotIndex !== undefined ? b.slotIndex : (idx % 6)];
+  let desiredX = gameState.playerPos.x + Math.sin(slot.angle) * slot.radius;
+  let desiredZ = gameState.playerPos.z - Math.cos(slot.angle) * slot.radius;
+
+  for (let i = 0; i < bruisers.length; i++) {
+    const other = bruisers[i];
+    if (other === b || !other.active || other.state === 'ko' || other.state === 'flying') continue;
+    const ox = b.rig.root.position.x - other.rig.root.position.x;
+    const oz = b.rig.root.position.z - other.rig.root.position.z;
+    const d2 = ox * ox + oz * oz;
+    if (d2 < 1.69 && d2 > 0.0001) {
+      const d = Math.sqrt(d2);
+      const repel = (1.30 - d) * 0.75;
+      desiredX += (ox / d) * repel;
+      desiredZ += (oz / d) * repel;
+    }
+  }
+
+  b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 3.4);
+  b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 3.4);
+
+  const stride = Math.sin(elapsed * 6.5 + idx * 1.7) * 0.28;
+  b.rig.hips.position.y = 1.00 + beatPulse * 0.08;
+  if (b.blender) {
+    b.blender.setTarget({
+      torso: [0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0],
+      leftArm: [-0.95 + beatPulse * 0.15, 0.25, -0.22], leftElbow: [1.15, 0, 0],
+      rightArm: [-0.95 - beatPulse * 0.15, -0.25, 0.22], rightElbow: [1.15, 0, 0],
+      leftLeg: [stride, 0, 0], rightLeg: [-stride, 0, 0],
+      leftKnee: [0, 0, 0], rightKnee: [0, 0, 0], headGroup: [0, 0, 0]
+    });
+  }
+  b.teleMat.opacity = 0;
+
+  const waveCfg = (contextState && contextState.waveCfg) || TUNING.WAVES[gameState.wave] || TUNING.WAVES[1];
+  const canAddAttacker = contextState
+    ? (contextState.activeAttackerCount < contextState.maxSimultaneousAttackers)
+    : true;
+
+  if (b.guardCooldown > 0) b.guardCooldown -= dt;
+  if (gameState.wave === 2 && b.guardCooldown <= 0 && canAddAttacker) {
+    b.state = 'guard';
+    b.isGuarding = true;
+    b.stateTimer = 2.2;
+    b.guardCooldown = 4.5 + idx * 1.4;
+    b.badge.update(b.hp, b.maxHp, 'guard', '🛡️ GUARD [BREAK: KICK D]!');
+    return;
+  }
+
+  b.attackCooldown -= dt;
+  if (b.attackCooldown <= 0 && canAddAttacker) {
+    const nextType = (b.attackType === 'quick_hook') ? 'heavy_haymaker' : 'quick_hook';
+    const beatsAhead = nextType === 'heavy_haymaker' ? 2.0 : 1.0;
+    const q = quantizeWindupToBeat(songTime, chart, beatsAhead);
+    if (q.canStart || b.attackCooldown < -beatSec) {
+      b.state = 'windup';
+      b.attackType = nextType;
+      const scaledWindup = waveCfg.windupSec || q.windupDur;
+      b.stateTimer = scaledWindup;
+      b.windupTotalDur = scaledWindup;
+      if (b.attackType === 'heavy_haymaker') {
+        b.teleMat.color.setHex(0xff1e38);
+        b.badge.update(b.hp, b.maxHp, 'windup', '! DODGE [A] / COUNTER !', 'heavy_haymaker');
+      } else {
+        b.teleMat.color.setHex(0x00e5ff);
+        b.badge.update(b.hp, b.maxHp, 'windup', '! QUICK HOOK [A] !', 'quick_hook');
+      }
+      audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', b.rig.root.position);
+      if (contextState) {
+        contextState.activeAttackerCount += 1;
+        contextState.someoneWindingUp = contextState.activeAttackerCount >= contextState.maxSimultaneousAttackers;
+      }
+
+      bruisers.forEach((other) => {
+        if (other !== b && other.active && other.state === 'stalking') {
+          other.attackCooldown = Math.max(other.attackCooldown, beatSec * 0.75);
+        }
+      });
+    }
+  }
+}
+
+function updateKronosHitAndStunState(dt, elapsed, beatSec) {
+  if (gameState.kronosRingState === 'hit') {
+    gameState.kronosStateTimer -= dt;
+    kronosTeleMat.opacity = 0;
+    const progress = Math.max(0, gameState.kronosStateTimer / (gameState.kronosRecoilTotal || 0.40));
+    const ease = Math.sin(progress * Math.PI * 0.5);
+    const torsoTgt = gameState.kronosTargetTorsoRot
+      ? [gameState.kronosTargetTorsoRot.x * ease, gameState.kronosTargetTorsoRot.y * ease, gameState.kronosTargetTorsoRot.z * ease]
+      : [-0.28 * ease, 0, 0];
+    const headTgt = gameState.kronosTargetHeadRot && kronosRig.headGroup
+      ? [gameState.kronosTargetHeadRot.x * ease, gameState.kronosTargetHeadRot.y * ease, gameState.kronosTargetHeadRot.z * ease]
+      : [0, 0, 0];
+    if (kronosBlender) {
+      kronosBlender.setTarget({
+        torso: torsoTgt, headGroup: headTgt,
+        leftArm: [-0.5 * ease, 0, -0.4 * ease], rightArm: [-0.5 * ease, 0, 0.4 * ease],
+        leftElbow: [0.7 * ease, 0, 0], rightElbow: [0.7 * ease, 0, 0],
+        leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
+        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
+      });
+    }
+    if (gameState.kronosStateTimer <= 0) {
+      if (gameState.counterBonusTimer > 0) {
+        gameState.kronosRingState = 'counter_stun';
+        gameState.kronosStateTimer = gameState.counterBonusTimer;
+        gameState.bossCounterStunActive = true;
+        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', '★ COUNTER-STUN PUNISH! ★');
+      } else {
+        gameState.kronosRingState = 'stalking';
+        gameState.kronosRecoilType = 'none';
+        gameState.kronosIsMicroShaking = false;
+        kronosRig.hips.position.x = 0;
+        kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
+      }
+    }
+  } else if (gameState.kronosRingState === 'counter_stun' || gameState.kronosRingState === 'stunned') {
+    gameState.kronosStateTimer -= dt;
+    kronosTeleMat.opacity = 0;
+    if (gameState.kronosRingState === 'counter_stun') {
+      gameState.counterBonusTimer = Math.max(0, gameState.kronosStateTimer);
+      gameState.bossCounterStunActive = true;
+    }
+    if (kronosBlender) {
+      kronosBlender.setTarget({
+        torso: [0.28, Math.sin(elapsed * 10.0) * 0.22, 0],
+        headGroup: [0.18, Math.sin(elapsed * 8.0) * 0.16, 0],
+        leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
+        leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
+        leftLeg: [-0.12, 0, 0], rightLeg: [-0.12, 0, 0],
+        leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
+      });
+    }
+    if (gameState.kronosStateTimer <= 0) {
+      gameState.kronosRingState = 'stalking';
+      gameState.counterBonusTimer = 0;
+      gameState.bossCounterStunActive = false;
+      gameState.kronosAttackCooldown = beatSec * 0.55;
+      kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
+    }
+  }
+}
+
+function updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg) {
+  if (gameState.kronosRingState === 'windup_combo') {
+    gameState.kronosStateTimer -= dt;
+    const step = gameState.bossComboStep || 0;
+    const toPlayer = new THREE.Vector3().subVectors(gameState.playerPos, kronosRig.root.position);
+    toPlayer.y = 0;
+    if (toPlayer.length() > 1.25) {
+      toPlayer.normalize().multiplyScalar(dt * 2.4);
+      kronosRig.root.position.add(toPlayer);
+    }
+    kronosTeleMat.color.setHex(step === 2 ? 0xffe042 : 0x00e5ff);
+    kronosTeleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.92 + Math.sin(elapsed * 16.0) * 0.14));
+    kronosTeleMat.opacity = 0.92;
+
+    if (kronosBlender) {
+      if (step === 0) {
+        kronosBlender.setTarget({ torso: [-0.15, 0.35, 0], leftArm: [-1.45, 0.25, -0.2], leftElbow: [1.2, 0, 0], rightArm: [-0.65, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
+      } else if (step === 1) {
+        kronosBlender.setTarget({ torso: [-0.18, -0.45, 0], rightArm: [-1.85, -0.3, 0.3], rightElbow: [1.3, 0, 0], leftArm: [-0.75, 0.2, -0.2], leftElbow: [0.9, 0, 0] });
+      } else {
+        kronosRig.hips.position.y = 1.08 + Math.sin(elapsed * 14.0) * 0.08;
+        kronosBlender.setTarget({ torso: [-0.35, 0, 0], leftArm: [-2.4, 0, -0.35], leftElbow: [0.4, 0, 0], rightArm: [-2.4, 0, 0.35], rightElbow: [0.4, 0, 0], headGroup: [-0.15, 0, 0] });
+      }
+    }
+    if (gameState.kronosStateTimer <= 0) {
+      gameState.kronosRingState = 'striking_combo';
+      gameState.kronosStateTimer = beatSec * 0.28;
+      const label = step === 2 ? '! SCRATCH COUNTER [3/3 · A] !' : (step === 1 ? '! SCRATCH CUT [2/3] !' : '! SCRATCH SLASH [1/3] !');
+      kronosRingBadge.update(gameState.bossHp, 100, 'striking', label, 'scratch_combo');
+    }
+    return false;
+  }
+
+  gameState.kronosStateTimer -= dt;
+  const step = gameState.bossComboStep || 0;
+  kronosTeleMat.color.setHex(step === 2 ? 0xffe042 : 0x00e5ff);
+  kronosTeleMat.opacity = 0.96;
+
+  if (kronosBlender) {
+    if (step === 0) {
+      kronosBlender.setTarget({ torso: [0.22, 0.45, 0], leftArm: [-1.65, 0, -0.1], leftElbow: [0.15, 0, 0], rightArm: [-0.5, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
+    } else if (step === 1) {
+      kronosBlender.setTarget({ torso: [0.25, -0.55, 0], rightArm: [-1.55, 0, 0.15], rightElbow: [0.2, 0, 0], leftArm: [-0.6, 0.2, -0.2], leftElbow: [0.7, 0, 0] });
+    } else {
+      kronosRig.hips.position.y = 0.94;
+      kronosBlender.setTarget({ torso: [0.45, 0, 0], leftArm: [-1.2, 0, -0.25], leftElbow: [0.8, 0, 0], rightArm: [-1.2, 0, 0.25], rightElbow: [0.8, 0, 0], headGroup: [0.2, 0, 0] });
+    }
+  }
+  if (gameState.kronosStateTimer <= 0) {
+    const isDodging = gameState.dodgeInvulnTimer > 0 || (gameState.wave3BeatWeaveTimer || 0) > 0 || gameState.bossStepWeaved;
+    const hitDist = kronosRig.root.position.distanceTo(gameState.playerPos);
+    const scratchDmgs = (w3Cfg && w3Cfg.bossScratchHitDmg) || [10, 12, 18];
+
+    if (step === 2) {
+      kronosTeleMat.opacity = 0;
+      gameState.bossStepWeaved = false;
+      if (isDodging) {
+        const riposteDmg = w3Cfg ? w3Cfg.bossCounterRiposteDmg : 26;
+        gameState.bossHp = Math.max(0, gameState.bossHp - riposteDmg);
+        gameState.kronosRingState = 'counter_stun';
+        gameState.kronosStateTimer = 0.85;
+        gameState.counterBonusTimer = 1.6;
+        gameState.bossCounterStunActive = true;
+        gameState.bossAttackPattern = 'idle';
+        gameState.kronosAttackCooldown = beatSec * 0.75;
+        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', `★ SCRATCH COUNTER (-${riposteDmg})! ★`);
+        setStarburstText('COUNTER WEAVE!', 1.2);
+        audioEngine.playCombatSfx('counter-weave', 'PERFECT', kronosRig.root.position);
+        updateHudNumbers();
+        if (gameState.bossHp <= 0) {
+          gameState.bossHp = 0;
+          gameState.kronosRingState = 'ko';
+          kronosRingBadge.update(0, 100, 'ko', '★ K.O.! VICTORY! ★');
+          triggerGameEnd(true);
+          return true;
+        }
+      } else {
+        if (hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS + 0.35) {
+          applyPlayerDamage(scratchDmgs[2], 'SCRATCH FINISHER!', 0.36, 0.05);
+        }
+        gameState.kronosRingState = 'stalking';
+        gameState.bossAttackPattern = 'idle';
+        gameState.kronosAttackCooldown = beatSec * 0.75;
+        kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
+      }
+    } else {
+      if (!isDodging && hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS + 0.25) {
+        applyPlayerDamage(scratchDmgs[step], step === 0 ? 'SCRATCH SLASH!' : 'SCRATCH CUT!', 0.22, -0.03);
+      }
+      gameState.bossComboStep = step + 1;
+      gameState.bossStepWeaved = false;
+      gameState.kronosRingState = 'windup_combo';
+      gameState.kronosStateTimer = beatSec * 0.72;
+      const nextLabel = (step === 0) ? '! SCRATCH CUT [2/3] !' : '! SCRATCH COUNTER [3/3 · A] !';
+      kronosTeleMat.color.setHex(step === 0 ? 0x00e5ff : 0xffe042);
+      kronosRingBadge.update(gameState.bossHp, 100, 'windup', nextLabel, 'scratch_combo');
+    }
+  }
+  return false;
+}
+
+function updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg) {
+  if (gameState.kronosRingState === 'windup_shockwave') {
+    gameState.kronosStateTimer -= dt;
+    kronosTeleMat.color.setHex(0xff1e38);
+    kronosTeleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.95 + Math.sin(elapsed * 18.0) * 0.18));
+    kronosTeleMat.opacity = 0.94;
+
+    const totalWindup = gameState.kronosWindupTotal || (beatSec * 1.5);
+    const leapProgress = 1.0 - (gameState.kronosStateTimer / Math.max(0.1, totalWindup));
+    const jumpHeight = Math.sin(Math.min(1.0, Math.max(0, leapProgress)) * Math.PI) * 0.42;
+    kronosRig.hips.position.y = 1.04 + jumpHeight;
+    if (kronosBlender) {
+      kronosBlender.setTarget({
+        torso: [-0.35, 0, 0],
+        leftArm: [-2.2, 0.3, -0.4], leftElbow: [0.6, 0, 0],
+        rightArm: [-2.2, -0.3, 0.4], rightElbow: [0.6, 0, 0],
+        leftLeg: [0.35, 0, 0], rightLeg: [-0.25, 0, 0],
+        leftKnee: [-0.4, 0, 0], rightKnee: [-0.3, 0, 0]
+      });
+    }
+    if (gameState.kronosStateTimer <= 0) {
+      kronosRig.hips.position.y = 0.90;
+      kronosTeleMat.opacity = 0;
+      setStarburstText('BASS DROP!', 1.25);
+      if (!reducedMotionEnabled) cameraJuice.trauma = Math.min(1.0, cameraJuice.trauma + 0.45);
+      audioEngine.playCombatSfx('subwoofer-bass-drop', 'PERFECT', kronosRig.root.position);
+
+      const shockwaveMesh = buildSubwooferShockwaveRing();
+      const spawnPos = kronosRig.root.position.clone();
+      shockwaveMesh.position.set(spawnPos.x, 0.04, spawnPos.z);
+      scene.add(shockwaveMesh);
+
+      const preWeaved = Boolean(gameState.shockwavePreWeaved);
+      gameState.bossShockwave = {
+        active: true,
+        radius: 0.25,
+        innerRadius: 0.25,
+        maxRadius: 6.5,
+        speed: 5.5,
+        evaded: preWeaved,
+        hit: false,
+        mesh: shockwaveMesh,
+        pos: spawnPos
+      };
+      gameState.bossShockwaveActive = true;
+      gameState.kronosRingState = 'shockwave_active';
+      gameState.kronosStateTimer = (6.5 - 0.25) / 5.5;
+      kronosRingBadge.update(gameState.bossHp, 100, 'striking', '! SUBWOOFER BASS DROP !', 'bass_drop');
+    }
+  } else if (gameState.kronosRingState === 'shockwave_active') {
+    gameState.kronosStateTimer -= dt;
+    kronosRig.hips.position.y = 0.95;
+    if (kronosBlender) {
+      kronosBlender.setTarget({
+        torso: [0.38, 0, 0],
+        leftArm: [-1.2, 0, -0.3], leftElbow: [0.9, 0, 0],
+        rightArm: [-1.2, 0, 0.3], rightElbow: [0.9, 0, 0]
+      });
+    }
+    if (gameState.kronosStateTimer <= 0) {
+      if (gameState.bossShockwave && gameState.bossShockwave.mesh) {
+        scene.remove(gameState.bossShockwave.mesh);
+        gameState.bossShockwave.mesh.geometry.dispose();
+        gameState.bossShockwave.mesh.material.dispose();
+      }
+      gameState.bossShockwave = null;
+      gameState.bossShockwaveActive = false;
+      gameState.kronosRingState = 'stalking';
+      gameState.bossAttackPattern = 'idle';
+      gameState.kronosAttackCooldown = beatSec * 0.65;
+      kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
+    }
+  }
+
+  if (gameState.bossShockwave && gameState.bossShockwave.active) {
+    const wave = gameState.bossShockwave;
+    wave.radius += wave.speed * dt;
+    const progress = Math.min(1.0, (wave.radius - 0.25) / (wave.maxRadius - 0.25));
+    const curScale = Math.max(0.1, wave.radius / 0.55);
+    wave.mesh.scale.set(curScale, curScale, 1);
+    wave.mesh.material.opacity = Math.max(0.0, 0.95 * (1.0 - progress));
+    wave.mesh.material.color.setHex(0xff1e38);
+
+    const d = gameState.playerPos.distanceTo(wave.pos);
+    const inWaveFront = Math.abs(d - wave.radius) <= 0.75;
+    const isPlayerDodging = gameState.dodgeInvulnTimer > 0 || (gameState.wave3BeatWeaveTimer || 0) > 0;
+
+    if (inWaveFront) {
+      if (isPlayerDodging && !wave.evaded) {
+        wave.evaded = true;
+        gameState.shockwaveDodged = true;
+        gameState.hype = Math.min(100.0, (gameState.hype || 0) + 25.0);
+        floorDial.updateBadge('COUNTER WEAVE!', '#ffe042');
+        setStarburstText('COUNTER WEAVE!', 1.25);
+        audioEngine.playCombatSfx('counter-weave', 'PERFECT', gameState.playerPos);
+
+        const reboundDmg = w3Cfg ? w3Cfg.bossBassDropReboundDmg : 28;
+        gameState.bossHp = Math.max(0, gameState.bossHp - reboundDmg);
+        gameState.kronosRingState = 'counter_stun';
+        gameState.kronosStateTimer = 0.85;
+        gameState.counterBonusTimer = 1.6;
+        gameState.bossCounterStunActive = true;
+        gameState.bossAttackPattern = 'idle';
+        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', `★ BASS REBOUND (-${reboundDmg})! ★`);
+        updateHudNumbers();
+        if (gameState.bossHp <= 0) {
+          gameState.bossHp = 0;
+          gameState.kronosRingState = 'ko';
+          kronosRingBadge.update(0, 100, 'ko', '★ K.O.! VICTORY! ★');
+          triggerGameEnd(true);
+          return true;
+        }
+      } else if (!isPlayerDodging && !wave.hit && !wave.evaded) {
+        wave.hit = true;
+        const bassDropDmg = w3Cfg ? w3Cfg.bossBassDropDmg : 26;
+        applyPlayerDamage(bassDropDmg, 'SUB-BASS IMPACT!', 0.40, 0.06);
+        const knockDir = gameState.playerPos.clone().sub(wave.pos).normalize();
+        if (knockDir.lengthSq() < 0.001) knockDir.set(0, 0, 1);
+        gameState.playerTarget.addScaledVector(knockDir, 1.25);
+      }
+    }
+
+    if (wave.radius >= wave.maxRadius) {
+      scene.remove(wave.mesh);
+      wave.mesh.geometry.dispose();
+      wave.mesh.material.dispose();
+      gameState.bossShockwave = null;
+      gameState.bossShockwaveActive = false;
+      if (gameState.kronosRingState === 'shockwave_active') {
+        gameState.kronosRingState = 'stalking';
+        gameState.bossAttackPattern = 'idle';
+        gameState.kronosAttackCooldown = beatSec * 0.65;
+        kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
+      }
+    }
+  }
+  return false;
+}
+
+function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState) {
+  kronosTeleMat.opacity = 0;
+  const kAngle = elapsed * 0.55;
+  const targetKx = gameState.playerPos.x + Math.sin(kAngle) * 1.48;
+  const targetKz = gameState.playerPos.z - Math.cos(kAngle) * 1.48;
+  kronosRig.root.position.x = THREE.MathUtils.lerp(kronosRig.root.position.x, targetKx, dt * 3.2);
+  kronosRig.root.position.z = THREE.MathUtils.lerp(kronosRig.root.position.z, targetKz, dt * 3.2);
+  kronosRig.hips.position.y = 1.04 + beatPulse * 0.09;
+
+  const kStride = Math.sin(elapsed * 6.0) * 0.25;
+  if (kronosBlender) {
+    kronosBlender.setTarget({
+      torso: [0.06, Math.sin(elapsed * 2.8) * 0.15, 0],
+      leftArm: [-0.85 + beatPulse * 0.18, 0.2, -0.2], leftElbow: [1.10, 0, 0],
+      rightArm: [-0.90 - beatPulse * 0.18, -0.2, 0.2], rightElbow: [1.10, 0, 0],
+      leftLeg: [kStride, 0, 0], rightLeg: [-kStride, 0, 0],
+      leftKnee: [-0.05, 0, 0], rightKnee: [-0.05, 0, 0], headGroup: [0, 0, 0]
+    });
+  }
+
+  const canBossAttack = contextState
+    ? (contextState.activeAttackerCount < contextState.maxSimultaneousAttackers)
+    : true;
+  gameState.kronosAttackCooldown -= dt;
+  if (gameState.kronosAttackCooldown <= 0 && canBossAttack) {
+    const windupDur = beatSec * 0.72;
+    gameState.bossAttackPattern = 'scratch_combo';
+    gameState.bossComboStep = 0;
+    gameState.bossStepWeaved = false;
+    gameState.kronosRingState = 'windup_combo';
+    gameState.kronosStateTimer = windupDur;
+    kronosTeleMat.color.setHex(0x00e5ff);
+    kronosTeleMat.opacity = 0.92;
+    kronosRingBadge.update(gameState.bossHp, 100, 'windup', '! SCRATCH SLASH [1/3] !', 'scratch_combo');
+    audioEngine.scheduleBossTelegraphCue('scratch_combo', beatSec, windupDur, kronosRig.root.position);
+    if (contextState) {
+      contextState.activeAttackerCount += 1;
+      contextState.someoneWindingUp = contextState.activeAttackerCount >= contextState.maxSimultaneousAttackers;
+    }
+  }
+}
+
 function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart, contextState) {
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
 
   if (!entity.isBoss) {
     const b = entity;
-    const idx = b.idx;
     if (!b.active) return;
-
-    if (b.badge && b.badge.mesh) {
-      b.badge.mesh.lookAt(camera.position);
-      if (b.state !== 'ko' && b.state !== 'flying') {
-        let closeNeighbor = null;
-        let minD = 999;
-        for (let i = 0; i < bruisers.length; i++) {
-          const other = bruisers[i];
-          if (other === b || !other.active || other.state === 'ko' || other.state === 'flying') continue;
-          const dx = b.rig.root.position.x - other.rig.root.position.x;
-          const dz = b.rig.root.position.z - other.rig.root.position.z;
-          const dist = Math.sqrt(dx * dx + dz * dz);
-          if (dist < 1.4 && dist < minD) {
-            minD = dist;
-            closeNeighbor = other;
-          }
-        }
-        const isTelegraph = b.state === 'windup' || b.state === 'striking';
-        let targetY = 2.18;
-        let targetRenderOrder = 10;
-        if (closeNeighbor) {
-          const neighborTelegraph = closeNeighbor.state === 'windup' || closeNeighbor.state === 'striking';
-          if (isTelegraph && !neighborTelegraph) { targetY = 2.42; targetRenderOrder = 30; }
-          else if (!isTelegraph && neighborTelegraph) { targetY = 2.08; targetRenderOrder = 10; }
-          else if (idx > closeNeighbor.idx) { targetY = 2.42; targetRenderOrder = 20; }
-          else { targetY = 2.08; targetRenderOrder = 10; }
-        } else if (isTelegraph) {
-          targetY = 2.42; targetRenderOrder = 25;
-        }
-        b.badge.mesh.position.y = THREE.MathUtils.lerp(b.badge.mesh.position.y, targetY, Math.min(1.0, dt * 10));
-        b.badge.mesh.renderOrder = targetRenderOrder;
-      }
-    }
-
-    if (b.state === 'flying' && b.flying) {
-      b.flying.t += dt / b.flying.duration;
-      const u = Math.min(1.0, b.flying.t);
-      b.rig.root.position.lerpVectors(b.flying.startPos, b.flying.targetPos, u);
-      b.rig.root.position.y = Math.sin(u * Math.PI) * 3.6 + u * 2.2;
-      b.rig.root.rotation.x += dt * 14.0;
-      b.rig.root.rotation.z += dt * 8.0;
-      if (b.blender) b.blender.update(dt);
-
-      if (u >= 1.0) {
-        b.state = 'ko';
-        b.active = false;
-        b.hp = 0;
-        b.rig.root.visible = false;
-        b.flying = null;
-        if (!reducedMotionEnabled) gameState.cameraKick = 0.45;
-        setStarburstText('SPEAKERBOX K.O.!', 1.25);
-        floorDial.updateBadge('STAGE K.O.!', '#ffe042');
-        audioEngine.playCombatSfx('stage-ko', 'PERFECT', b.rig.root.position);
-        if (postProcessing && postProcessing.triggerImpact) {
-          postProcessing.triggerImpact('KO', b.rig.root.position);
-        }
-        gameState.hype = Math.min(100.0, (gameState.hype || 0) + 15.0);
-        updateHudNumbers();
-      }
-      return;
-    }
-
+    if (updateBruiserBadgeAndFlying(b, dt)) return;
     if (b.state === 'ko') return;
 
     b.rig.root.lookAt(gameState.playerPos.x, 0, gameState.playerPos.z);
+    updateBruiserMicroShake(b, rawDt);
 
-    if (gameState.hitStopTimer <= 0 || !b.isMicroShaking) {
-      if (b.isMicroShaking && gameState.hitStopTimer <= 0) {
-        b.isMicroShaking = false;
-        b.microShakeTimer = 0;
-        b.rig.hips.position.x = 0;
-        b.rig.hips.position.z = 0;
-        if (b.state !== 'hit') b.rig.hips.position.y = 1.0;
-      }
-    } else if (b.microShakeTimer > 0) {
-      b.microShakeTimer -= rawDt;
-      if (b.microShakeTimer <= 0) {
-        b.isMicroShaking = false;
-        b.rig.hips.position.x = 0;
-        b.rig.hips.position.z = 0;
-      } else {
-        const t = b.microShakeDuration - b.microShakeTimer;
-        const decay = Math.exp(-22.0 * t);
-        const latShake = b.microShakeAmp * decay * Math.sin(2 * Math.PI * 50.0 * t);
-        const vertShake = b.microShakeVertAmp * decay * Math.sin(2 * Math.PI * 50.0 * t + Math.PI * 0.5);
-        if (b.microShakeNormal) {
-          b.rig.hips.position.x = b.microShakeNormal.x * latShake;
-          b.rig.hips.position.z = b.microShakeNormal.z * latShake;
-        }
-        b.rig.hips.position.y += vertShake;
-      }
-    }
-
-    // Gate AI progression until gameStarted && !isPaused && !isGameOver
     if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) {
       if (b.blender) b.blender.update(dt);
       return;
     }
 
-    if (b.state === 'hit') {
-      b.stateTimer -= dt;
-      const progress = Math.max(0, b.stateTimer / (b.recoilTotalTimer || 0.35));
-      const ease = Math.sin(progress * Math.PI * 0.5);
-      const torsoTgt = b.targetTorsoRot ? [b.targetTorsoRot.x * ease, b.targetTorsoRot.y * ease, b.targetTorsoRot.z * ease] : [-0.32 * ease, 0, 0];
-      const headTgt = b.targetHeadRot ? [b.targetHeadRot.x * ease, b.targetHeadRot.y * ease, b.targetHeadRot.z * ease] : [0, 0, 0];
-      if (b.blender) {
-        b.blender.setTarget({
-          torso: torsoTgt, headGroup: headTgt,
-          leftArm: [-0.4 * ease, 0, -0.5 * ease], rightArm: [-0.4 * ease, 0, 0.5 * ease],
-          leftElbow: [0.6 * ease, 0, 0], rightElbow: [0.6 * ease, 0, 0],
-          leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
-          leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
-        });
-      }
-      if (b.verticalVelocity) {
-        b.rig.hips.position.y += b.verticalVelocity * dt;
-        b.verticalVelocity -= 14.0 * dt;
-        if (b.rig.hips.position.y <= 1.0) { b.rig.hips.position.y = 1.0; b.verticalVelocity = 0; }
-      } else {
-        b.rig.hips.position.y = 1.0 - 0.04 * ease;
-      }
-      if (b.velocity && b.velocity.lengthSq() > 0.001) {
-        b.rig.root.position.addScaledVector(b.velocity, dt);
-        b.velocity.multiplyScalar(Math.exp(-12.0 * dt));
-      }
-      if (b.stateTimer <= 0) {
-        b.state = 'stalking';
-        b.recoilType = 'none';
-        b.isMicroShaking = false;
-        b.verticalVelocity = 0;
-        b.rig.hips.position.x = 0;
-        b.rig.hips.position.z = 0;
-        b.badge.update(b.hp, b.maxHp, 'stalking');
-      }
-    } else if (b.state === 'stunned') {
-      b.stateTimer -= dt;
-      b.rig.hips.position.y = 0.92 + Math.sin(elapsed * 8) * 0.04;
-      if (b.blender) {
-        b.blender.setTarget({
-          torso: [0.22, Math.sin(elapsed * 10) * 0.25, 0],
-          headGroup: [0.10, Math.sin(elapsed * 8) * 0.15, 0],
-          leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
-          leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
-          leftLeg: [-0.10, 0, 0], rightLeg: [-0.10, 0, 0],
-          leftKnee: [-0.12, 0, 0], rightKnee: [-0.12, 0, 0]
-        });
-      }
-      if (b.stateTimer <= 0) {
-        b.state = 'stalking';
-        b.attackCooldown = 1.6;
-        b.badge.update(b.hp, b.maxHp, 'stalking');
-      }
-    } else if (b.state === 'guard_break') {
-      b.stateTimer -= dt;
-      b.isGuarding = false;
-      b.rig.hips.position.y = 0.92 + Math.sin(elapsed * 12.0) * 0.04;
-      if (b.blender) {
-        b.blender.setTarget({
-          torso: [-0.25, Math.sin(elapsed * 8.0) * 0.15, 0], headGroup: [-0.20, 0, 0],
-          leftArm: [0.35, 0, -0.45], leftElbow: [0.20, 0, 0],
-          rightArm: [0.35, 0, 0.45], rightElbow: [0.20, 0, 0],
-          leftLeg: [-0.15, 0, 0], rightLeg: [-0.15, 0, 0],
-          leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
-        });
-      }
-      if (b.stateTimer <= 0) {
-        b.state = 'stalking';
-        b.attackCooldown = 1.8;
-        b.guardCooldown = 4.5;
-        b.badge.update(b.hp, b.maxHp, 'stalking');
-      }
-    } else if (b.state === 'guard') {
-      b.stateTimer -= dt;
-      b.isGuarding = true;
-      const slot = RADIAL_SLOTS[b.slotIndex !== undefined ? b.slotIndex : (idx % 6)];
-      const desiredX = gameState.playerPos.x + Math.sin(slot.angle) * slot.radius;
-      const desiredZ = gameState.playerPos.z - Math.cos(slot.angle) * slot.radius;
-      b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 2.8);
-      b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 2.8);
-      b.rig.hips.position.y = 0.98 + Math.sin(elapsed * 5.0) * 0.02;
-      if (b.blender) {
-        b.blender.setTarget({
-          torso: [0.08, 0, 0], headGroup: [0.12, 0, 0],
-          leftArm: [-1.15, 0.35, -0.22], leftElbow: [1.60, 0, 0],
-          rightArm: [-1.15, -0.35, 0.22], rightElbow: [1.60, 0, 0],
-          leftLeg: [0.10, 0, 0], rightLeg: [-0.10, 0, 0],
-          leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
-        });
-      }
-      b.teleMat.opacity = 0;
-      if (b.stateTimer <= 0) {
-        b.state = 'stalking';
-        b.isGuarding = false;
-        b.guardCooldown = 4.2 + idx * 1.5;
-        b.badge.update(b.hp, b.maxHp, 'stalking');
-      }
+    if (b.state === 'hit' || b.state === 'stunned' || b.state === 'guard_break') {
+      updateBruiserHitStunGuardBreakState(b, dt, elapsed);
     } else if (b.state === 'windup') {
-      b.stateTimer -= dt;
-      b.isGuarding = false;
-      // Step forward into striking range (~1.38m) so spacing/stepping back beyond 1.55m evades without dodge
-      const toPlayer = new THREE.Vector3().subVectors(gameState.playerPos, b.rig.root.position);
-      toPlayer.y = 0;
-      const dist = toPlayer.length();
-      if (dist > 1.38) {
-        toPlayer.normalize().multiplyScalar(dt * 1.9);
-        b.rig.root.position.add(toPlayer);
-      }
-      b.rig.hips.position.y = 0.95;
-
-      if (b.attackType === 'quick_hook') {
-        if (b.blender) {
-          b.blender.setTarget({
-            torso: [0.12, 0.45, 0],
-            leftArm: [-1.45, 0.40, -0.30], leftElbow: [1.25, 0, 0],
-            rightArm: [-0.85, -0.20, 0.20], rightElbow: [1.30, 0, 0],
-            leftLeg: [-0.15, 0, 0], rightLeg: [0.15, 0, 0],
-            leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
-          });
-        }
-        const flashColor = (!reducedMotionEnabled && Math.sin(elapsed * 16) > 0) ? 0x00e5ff : 0xffe042;
-        b.teleMat.color.setHex(flashColor);
-        b.teleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.92 + Math.sin(elapsed * 12) * 0.14));
-        b.teleMat.opacity = 0.92;
-      } else {
-        if (b.blender) {
-          b.blender.setTarget({
-            torso: [-0.18, -0.55, 0],
-            rightArm: [-2.15, 0, 0.45], rightElbow: [1.1, 0, 0],
-            leftArm: [-0.85, 0, -0.25], leftElbow: [1.15, 0, 0],
-            leftLeg: [0.15, 0, 0], rightLeg: [-0.15, 0, 0],
-            leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
-          });
-        }
-        b.teleMat.color.setHex(0xff1e38);
-        b.teleRing.scale.setScalar(reducedMotionEnabled ? 1.0 : (0.88 + Math.sin(elapsed * 10) * 0.16));
-        b.teleMat.opacity = 0.88;
-      }
-
-      if (b.stateTimer <= 0) {
-        b.state = 'striking';
-        b.stateTimer = b.attackType === 'quick_hook' ? 0.18 : 0.22;
-        b.badge.update(b.hp, b.maxHp, 'striking', null, b.attackType);
-      }
+      updateBruiserWindupState(b, dt, elapsed);
     } else if (b.state === 'striking') {
-      b.stateTimer -= dt;
-      b.isGuarding = false;
-      b.rig.hips.position.y = 1.02;
-      if (b.blender) {
-        if (b.attackType === 'quick_hook') {
-          b.blender.setTarget({
-            torso: [0.22, -0.55, 0],
-            leftArm: [-1.25, 0.45, 0.35], leftElbow: [0.35, 0, 0],
-            rightArm: [-0.60, -0.25, 0.30], rightElbow: [1.20, 0, 0],
-            leftLeg: [0.18, 0, 0], rightLeg: [-0.18, 0, 0],
-            leftKnee: [-0.10, 0, 0], rightKnee: [-0.10, 0, 0], headGroup: [0, 0, 0]
-          });
-        } else {
-          b.blender.setTarget({
-            torso: [0.28, 0.65, 0],
-            rightArm: [-1.35, -0.25, -0.15], rightElbow: [0.15, 0, 0],
-            leftArm: [-0.5, 0, -0.3], leftElbow: [0.8, 0, 0],
-            leftLeg: [-0.20, 0, 0], rightLeg: [0.20, 0, 0],
-            leftKnee: [-0.08, 0, 0], rightKnee: [-0.12, 0, 0], headGroup: [0, 0, 0]
-          });
-        }
-      }
-      b.teleMat.opacity = 0.95;
-
-      if (b.stateTimer <= 0) {
-        b.teleMat.opacity = 0;
-        const hitDist = b.rig.root.position.distanceTo(gameState.playerPos);
-        if (gameState.dodgeInvulnTimer > 0) {
-          b.state = 'stunned';
-          b.stateTimer = b.attackType === 'quick_hook' ? 1.15 : 1.45;
-          b.badge.update(b.hp, b.maxHp, 'stunned');
-          floorDial.updateBadge('EVADED!', '#ffe042');
-        } else if (hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS) {
-          const strikeDmg = b.attackType === 'quick_hook' ? 10 : 18;
-          applyPlayerDamage(strikeDmg, 'BAM! DODGE [A]!', b.attackType === 'quick_hook' ? 0.25 : 0.38, b.attackType === 'quick_hook' ? -0.035 : 0.055);
-          b.state = 'stalking';
-          b.attackCooldown = 2.0 + idx * 0.6;
-          b.badge.update(b.hp, b.maxHp, 'stalking');
-        } else {
-          // Outspaced! Player stepped out of 1.55m strike radius without needing dodge
-          floorDial.updateBadge('OUTSPACED!', '#24e5ff');
-          b.state = 'stalking';
-          b.attackCooldown = 1.8;
-          b.badge.update(b.hp, b.maxHp, 'stalking');
-        }
-      }
+      updateBruiserStrikingState(b, dt, contextState);
     } else {
-      // Stalking with pairwise separation force so bruisers never overlap
-      b.isGuarding = false;
-      const slot = RADIAL_SLOTS[b.slotIndex !== undefined ? b.slotIndex : (idx % 6)];
-      let desiredX = gameState.playerPos.x + Math.sin(slot.angle) * slot.radius;
-      let desiredZ = gameState.playerPos.z - Math.cos(slot.angle) * slot.radius;
-
-      for (let i = 0; i < bruisers.length; i++) {
-        const other = bruisers[i];
-        if (other === b || !other.active || other.state === 'ko' || other.state === 'flying') continue;
-        const ox = b.rig.root.position.x - other.rig.root.position.x;
-        const oz = b.rig.root.position.z - other.rig.root.position.z;
-        const d2 = ox * ox + oz * oz;
-        if (d2 < 1.69 && d2 > 0.0001) {
-          const d = Math.sqrt(d2);
-          const repel = (1.30 - d) * 0.75;
-          desiredX += (ox / d) * repel;
-          desiredZ += (oz / d) * repel;
-        }
-      }
-
-      b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 3.4);
-      b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 3.4);
-
-      const stride = Math.sin(elapsed * 6.5 + idx * 1.7) * 0.28;
-      b.rig.hips.position.y = 1.00 + beatPulse * 0.08;
-      if (b.blender) {
-        b.blender.setTarget({
-          torso: [0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0],
-          leftArm: [-0.95 + beatPulse * 0.15, 0.25, -0.22], leftElbow: [1.15, 0, 0],
-          rightArm: [-0.95 - beatPulse * 0.15, -0.25, 0.22], rightElbow: [1.15, 0, 0],
-          leftLeg: [stride, 0, 0], rightLeg: [-stride, 0, 0],
-          leftKnee: [0, 0, 0], rightKnee: [0, 0, 0], headGroup: [0, 0, 0]
-        });
-      }
-      b.teleMat.opacity = 0;
-
-      if (b.guardCooldown > 0) b.guardCooldown -= dt;
-      if (gameState.wave === 2 && b.guardCooldown <= 0 && !contextState.someoneWindingUp) {
-        b.state = 'guard';
-        b.isGuarding = true;
-        b.stateTimer = 2.2;
-        b.guardCooldown = 4.5 + idx * 1.4;
-        b.badge.update(b.hp, b.maxHp, 'guard', '🛡️ GUARD [BREAK: KICK D]!');
-        if (b.blender) b.blender.update(dt);
-        return;
-      }
-
-      b.attackCooldown -= dt;
-      if (b.attackCooldown <= 0 && !contextState.someoneWindingUp) {
-        const nextType = (b.attackType === 'quick_hook') ? 'heavy_haymaker' : 'quick_hook';
-        const beatsAhead = nextType === 'heavy_haymaker' ? 2.0 : 1.0;
-        const q = quantizeWindupToBeat(songTime, chart, beatsAhead);
-        if (q.canStart || b.attackCooldown < -beatSec) {
-          b.state = 'windup';
-          b.attackType = nextType;
-          b.stateTimer = q.windupDur;
-          b.windupTotalDur = q.windupDur;
-          if (b.attackType === 'heavy_haymaker') {
-            b.teleMat.color.setHex(0xff1e38);
-            b.badge.update(b.hp, b.maxHp, 'windup', '! DODGE [A] / COUNTER !', 'heavy_haymaker');
-          } else {
-            b.teleMat.color.setHex(0x00e5ff);
-            b.badge.update(b.hp, b.maxHp, 'windup', '! QUICK HOOK [A] !', 'quick_hook');
-          }
-          audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', b.rig.root.position);
-          contextState.someoneWindingUp = true;
-
-          bruisers.forEach((other) => {
-            if (other !== b && other.active && other.state === 'stalking') {
-              other.attackCooldown = Math.max(other.attackCooldown, beatSec * 1.0);
-            }
-          });
-        }
-      }
+      updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime, chart, beatSec, contextState);
     }
 
     if (b.blender) b.blender.update(dt);
@@ -4268,8 +4351,9 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
     return;
   }
 
-  // BOSS DJ KRONOS FSM (Booth in Waves 1-2, Active Multi-Pattern Ring Combat in Wave 3)
+  // BOSS DJ KRONOS FSM (Booth in Waves 1-2, Beat-Grid Ring Combat in Wave 3)
   if (!gameState.kronosInRing) {
+    kronosTeleMat.opacity = 0;
     kronosRig.hips.position.y = 1.04 + beatPulse * 0.08;
     if (kronosBlender) {
       kronosBlender.setTarget({
@@ -4316,301 +4400,56 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
     return;
   }
 
-  if (gameState.kronosRingState === 'hit') {
-    gameState.kronosStateTimer -= dt;
-    const progress = Math.max(0, gameState.kronosStateTimer / (gameState.kronosRecoilTotal || 0.40));
-    const ease = Math.sin(progress * Math.PI * 0.5);
-    const torsoTgt = gameState.kronosTargetTorsoRot
-      ? [gameState.kronosTargetTorsoRot.x * ease, gameState.kronosTargetTorsoRot.y * ease, gameState.kronosTargetTorsoRot.z * ease]
-      : [-0.28 * ease, 0, 0];
-    const headTgt = gameState.kronosTargetHeadRot && kronosRig.headGroup
-      ? [gameState.kronosTargetHeadRot.x * ease, gameState.kronosTargetHeadRot.y * ease, gameState.kronosTargetHeadRot.z * ease]
-      : [0, 0, 0];
-    if (kronosBlender) {
-      kronosBlender.setTarget({
-        torso: torsoTgt, headGroup: headTgt,
-        leftArm: [-0.5 * ease, 0, -0.4 * ease], rightArm: [-0.5 * ease, 0, 0.4 * ease],
-        leftElbow: [0.7 * ease, 0, 0], rightElbow: [0.7 * ease, 0, 0],
-        leftLeg: [-0.15 * ease, 0, 0], rightLeg: [-0.15 * ease, 0, 0],
-        leftKnee: [-0.08, 0, 0], rightKnee: [-0.08, 0, 0]
-      });
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      if (gameState.counterBonusTimer > 0) {
-        gameState.kronosRingState = 'counter_stun';
-        gameState.kronosStateTimer = gameState.counterBonusTimer;
-        gameState.bossCounterStunActive = true;
-        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', '★ COUNTER-STUN PUNISH! ★');
-      } else {
-        gameState.kronosRingState = 'stalking';
-        gameState.kronosRecoilType = 'none';
-        gameState.kronosIsMicroShaking = false;
-        kronosRig.hips.position.x = 0;
-        kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
-      }
-    }
-  } else if (gameState.kronosRingState === 'counter_stun' || gameState.kronosRingState === 'stunned') {
-    gameState.kronosStateTimer -= dt;
-    if (gameState.kronosRingState === 'counter_stun') {
-      gameState.counterBonusTimer = Math.max(0, gameState.kronosStateTimer);
-      gameState.bossCounterStunActive = true;
-    }
-    if (kronosBlender) {
-      kronosBlender.setTarget({
-        torso: [0.28, Math.sin(elapsed * 10.0) * 0.22, 0],
-        headGroup: [0.18, Math.sin(elapsed * 8.0) * 0.16, 0],
-        leftArm: [-0.2, 0, -0.35], rightArm: [-0.2, 0, 0.35],
-        leftElbow: [0.35, 0, 0], rightElbow: [0.35, 0, 0],
-        leftLeg: [-0.12, 0, 0], rightLeg: [-0.12, 0, 0],
-        leftKnee: [-0.14, 0, 0], rightKnee: [-0.14, 0, 0]
-      });
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      gameState.kronosRingState = 'stalking';
-      gameState.counterBonusTimer = 0;
-      gameState.bossCounterStunActive = false;
-      gameState.kronosAttackCooldown = 1.8;
-      kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
-    }
-  } else if (gameState.kronosRingState === 'windup_combo') {
-    gameState.kronosStateTimer -= dt;
-    const step = gameState.bossComboStep || 0;
-    const toPlayer = new THREE.Vector3().subVectors(gameState.playerPos, kronosRig.root.position);
-    toPlayer.y = 0;
-    if (toPlayer.length() > 1.35) {
-      toPlayer.normalize().multiplyScalar(dt * 2.1);
-      kronosRig.root.position.add(toPlayer);
-    }
-    if (kronosBlender) {
-      if (step === 0) {
-        kronosBlender.setTarget({ torso: [-0.15, 0.35, 0], leftArm: [-1.45, 0.25, -0.2], leftElbow: [1.2, 0, 0], rightArm: [-0.65, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
-      } else if (step === 1) {
-        kronosBlender.setTarget({ torso: [-0.18, -0.45, 0], rightArm: [-1.85, -0.3, 0.3], rightElbow: [1.3, 0, 0], leftArm: [-0.75, 0.2, -0.2], leftElbow: [0.9, 0, 0] });
-      } else {
-        kronosRig.hips.position.y = 1.08 + Math.sin(elapsed * 14.0) * 0.08;
-        kronosBlender.setTarget({ torso: [-0.35, 0, 0], leftArm: [-2.4, 0, -0.35], leftElbow: [0.4, 0, 0], rightArm: [-2.4, 0, 0.35], rightElbow: [0.4, 0, 0], headGroup: [-0.15, 0, 0] });
-      }
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      gameState.kronosRingState = 'striking_combo';
-      gameState.kronosStateTimer = step === 2 ? 0.30 : 0.22;
-      const label = step === 2 ? '! MIC DROP SLAM [A] !' : (step === 1 ? '! BOSS HOOK !' : '! BOSS JAB !');
-      kronosRingBadge.update(gameState.bossHp, 100, 'striking', label, 'mic_drop_combo');
-    }
-  } else if (gameState.kronosRingState === 'striking_combo') {
-    gameState.kronosStateTimer -= dt;
-    const step = gameState.bossComboStep || 0;
-    if (kronosBlender) {
-      if (step === 0) {
-        kronosBlender.setTarget({ torso: [0.22, 0.45, 0], leftArm: [-1.65, 0, -0.1], leftElbow: [0.15, 0, 0], rightArm: [-0.5, -0.2, 0.2], rightElbow: [0.8, 0, 0] });
-      } else if (step === 1) {
-        kronosBlender.setTarget({ torso: [0.25, -0.55, 0], rightArm: [-1.55, 0, 0.15], rightElbow: [0.2, 0, 0], leftArm: [-0.6, 0.2, -0.2], leftElbow: [0.7, 0, 0] });
-      } else {
-        kronosRig.hips.position.y = 0.94;
-        kronosBlender.setTarget({ torso: [0.45, 0, 0], leftArm: [-1.2, 0, -0.25], leftElbow: [0.8, 0, 0], rightArm: [-1.2, 0, 0.25], rightElbow: [0.8, 0, 0], headGroup: [0.2, 0, 0] });
-      }
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      const isDodging = gameState.dodgeInvulnTimer > 0;
-      const hitDist = kronosRig.root.position.distanceTo(gameState.playerPos);
-      if (step === 2) {
-        if (isDodging) {
-          gameState.kronosRingState = 'stunned';
-          gameState.kronosStateTimer = 1.5;
-          gameState.bossAttackPattern = 'idle';
-          gameState.kronosAttackCooldown = 2.0;
-          kronosRingBadge.update(gameState.bossHp, 100, 'stunned', '★ KRONOS STUNNED! ★');
-          setStarburstText('COUNTER WEAVE!', 1.2);
-          audioEngine.playCombatSfx('counter-weave', 'PERFECT', kronosRig.root.position);
-        } else {
-          if (hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS + 0.15) {
-            applyPlayerDamage(16, 'MIC DROP SLAM!', 0.36, 0.05);
-          }
-          gameState.kronosRingState = 'stalking';
-          gameState.bossAttackPattern = 'idle';
-          gameState.kronosAttackCooldown = 2.0;
-          kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
-        }
-      } else {
-        if (!isDodging && hitDist <= TUNING.ENEMY_MELEE_STRIKE_RADIUS) {
-          applyPlayerDamage(step === 0 ? 7 : 9, step === 0 ? 'BOSS JAB!' : 'BOSS HOOK!', 0.22, -0.03);
-        }
-        gameState.bossComboStep = step + 1;
-        gameState.kronosRingState = 'windup_combo';
-        gameState.kronosStateTimer = (step === 0) ? beatSec * 0.5 : beatSec * 1.0;
-        const nextLabel = (step === 0) ? '! BOSS HOOK !' : '! MIC DROP SLAM [A] !';
-        kronosRingBadge.update(gameState.bossHp, 100, 'windup', nextLabel, 'mic_drop_combo');
-        audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', kronosRig.root.position);
-      }
-    }
-  } else if (gameState.kronosRingState === 'windup_shockwave') {
-    gameState.kronosStateTimer -= dt;
-    const leapProgress = 1.0 - (gameState.kronosStateTimer / Math.max(0.1, beatSec * 1.5));
-    const jumpHeight = Math.sin(Math.min(1.0, Math.max(0, leapProgress)) * Math.PI) * 0.42;
-    kronosRig.hips.position.y = 1.04 + jumpHeight;
-    if (kronosBlender) {
-      kronosBlender.setTarget({
-        torso: [-0.35, 0, 0],
-        leftArm: [-2.2, 0.3, -0.4], leftElbow: [0.6, 0, 0],
-        rightArm: [-2.2, -0.3, 0.4], rightElbow: [0.6, 0, 0],
-        leftLeg: [0.35, 0, 0], rightLeg: [-0.25, 0, 0],
-        leftKnee: [-0.4, 0, 0], rightKnee: [-0.3, 0, 0]
-      });
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      kronosRig.hips.position.y = 0.90;
-      setStarburstText('BASS DROP!', 1.25);
-      if (!reducedMotionEnabled) cameraJuice.trauma = Math.min(1.0, cameraJuice.trauma + 0.45);
-      audioEngine.playCombatSfx('subwoofer-bass-drop', 'PERFECT', kronosRig.root.position);
+  const w3Cfg = TUNING.WAVES[3];
+  gameState.wave3BeatFloat = (gameState.wave3BeatFloat || 0) + dt / beatSec;
+  const totalBeats = gameState.wave3BeatFloat;
+  const barIndex = Math.floor(totalBeats / 4);
+  const beatInBar = totalBeats - barIndex * 4;
 
-      const shockwaveMesh = buildSubwooferShockwaveRing();
-      const spawnPos = kronosRig.root.position.clone();
-      shockwaveMesh.position.set(spawnPos.x, 0.04, spawnPos.z);
-      scene.add(shockwaveMesh);
-
-      gameState.bossShockwave = {
-        active: true,
-        radius: 0.25,
-        innerRadius: 0.25,
-        maxRadius: 6.5,
-        speed: 5.2,
-        evaded: false,
-        hit: false,
-        mesh: shockwaveMesh,
-        pos: spawnPos
-      };
-      gameState.bossShockwaveActive = true;
-      gameState.kronosRingState = 'shockwave_active';
-      gameState.kronosStateTimer = (6.5 - 0.25) / 5.2;
-      kronosRingBadge.update(gameState.bossHp, 100, 'striking', '! SUBWOOFER BASS DROP !', 'bass_shockwave');
-    }
-  } else if (gameState.kronosRingState === 'shockwave_active') {
-    gameState.kronosStateTimer -= dt;
-    kronosRig.hips.position.y = 0.95;
-    if (kronosBlender) {
-      kronosBlender.setTarget({
-        torso: [0.38, 0, 0],
-        leftArm: [-1.2, 0, -0.3], leftElbow: [0.9, 0, 0],
-        rightArm: [-1.2, 0, 0.3], rightElbow: [0.9, 0, 0]
-      });
-    }
-    if (gameState.kronosStateTimer <= 0) {
-      if (gameState.bossShockwave && gameState.bossShockwave.mesh) {
-        scene.remove(gameState.bossShockwave.mesh);
-        gameState.bossShockwave.mesh.geometry.dispose();
-        gameState.bossShockwave.mesh.material.dispose();
-      }
-      gameState.bossShockwave = null;
-      gameState.bossShockwaveActive = false;
-      gameState.kronosRingState = 'stalking';
-      gameState.bossAttackPattern = 'idle';
-      gameState.kronosAttackCooldown = 2.0;
-      kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
-    }
-  } else {
-    // Boss stalking inside Cypher Ring
-    const kAngle = elapsed * 0.55;
-    const targetKx = gameState.playerPos.x + Math.sin(kAngle) * 1.78;
-    const targetKz = gameState.playerPos.z - Math.cos(kAngle) * 1.78;
-    kronosRig.root.position.x = THREE.MathUtils.lerp(kronosRig.root.position.x, targetKx, dt * 2.8);
-    kronosRig.root.position.z = THREE.MathUtils.lerp(kronosRig.root.position.z, targetKz, dt * 2.8);
-    kronosRig.hips.position.y = 1.04 + beatPulse * 0.09;
-
-    const kStride = Math.sin(elapsed * 6.0) * 0.25;
-    if (kronosBlender) {
-      kronosBlender.setTarget({
-        torso: [0.06, Math.sin(elapsed * 2.8) * 0.15, 0],
-        leftArm: [-0.85 + beatPulse * 0.18, 0.2, -0.2], leftElbow: [1.10, 0, 0],
-        rightArm: [-0.90 - beatPulse * 0.18, -0.2, 0.2], rightElbow: [1.10, 0, 0],
-        leftLeg: [kStride, 0, 0], rightLeg: [-kStride, 0, 0],
-        leftKnee: [-0.05, 0, 0], rightKnee: [-0.05, 0, 0], headGroup: [0, 0, 0]
-      });
-    }
-
-    gameState.kronosAttackCooldown -= dt;
-    if (gameState.kronosAttackCooldown <= 0 && !contextState.someoneWindingUp) {
-      const distToPlayer = kronosRig.root.position.distanceTo(gameState.playerPos);
-      const preferCombo = distToPlayer <= 2.2;
-      const doCombo = ((gameState.bossPatternCycle || 0) % 2 === 0) ? preferCombo : !preferCombo;
-      const q = quantizeWindupToBeat(songTime, chart, doCombo ? 1.0 : 2.0);
-      if (q.canStart || gameState.kronosAttackCooldown < -beatSec) {
-        gameState.bossPatternCycle = (gameState.bossPatternCycle || 0) + 1;
-        if (doCombo) {
-          gameState.bossAttackPattern = 'mic_drop_combo';
-          gameState.bossComboStep = 0;
-          gameState.kronosRingState = 'windup_combo';
-          gameState.kronosStateTimer = q.windupDur;
-          kronosRingBadge.update(gameState.bossHp, 100, 'windup', '! BOSS JAB !', 'mic_drop_combo');
-          audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', kronosRig.root.position);
-        } else {
-          gameState.bossAttackPattern = 'bass_shockwave';
-          gameState.kronosRingState = 'windup_shockwave';
-          gameState.kronosStateTimer = q.windupDur;
-          kronosRingBadge.update(gameState.bossHp, 100, 'windup', '! SUBWOOFER BASS DROP !', 'bass_shockwave');
-          audioEngine.playCombatSfx('subwoofer-bass-drop', 'PERFECT', kronosRig.root.position);
-        }
-        contextState.someoneWindingUp = true;
-      }
-    }
+  // Every 4th bar (barIndex % 4 === 3, starting on Beat 3 -> 4th-bar downbeat): trigger BASS DROP ring shockwave
+  if (
+    (barIndex % 4) === 3 &&
+    beatInBar >= 2.0 &&
+    gameState.wave3LastBassDropBar !== barIndex &&
+    gameState.kronosRingState !== 'ko' &&
+    gameState.kronosRingState !== 'windup_shockwave' &&
+    gameState.kronosRingState !== 'shockwave_active'
+  ) {
+    gameState.wave3LastBassDropBar = barIndex;
+    const windupDur = Math.max(beatSec * 0.85, (4.0 - beatInBar) * beatSec);
+    gameState.bossAttackPattern = 'bass_drop';
+    gameState.kronosRingState = 'windup_shockwave';
+    gameState.kronosStateTimer = windupDur;
+    gameState.kronosWindupTotal = windupDur;
+    gameState.shockwavePreWeaved = false;
+    kronosTeleMat.color.setHex(0xff1e38);
+    kronosTeleMat.opacity = 0.92;
+    kronosRingBadge.update(gameState.bossHp, 100, 'windup', '! BASS DROP [WEAVE BEAT 3] !', 'bass_drop');
+    audioEngine.scheduleBossTelegraphCue('bass_drop', beatSec, windupDur, kronosRig.root.position);
   }
 
-  // Active Expanding Subwoofer Bass-Drop Shockwave Ring
-  if (gameState.bossShockwave && gameState.bossShockwave.active) {
-    const wave = gameState.bossShockwave;
-    wave.radius += wave.speed * dt;
-    const progress = Math.min(1.0, (wave.radius - 0.25) / (wave.maxRadius - 0.25));
-    const curScale = Math.max(0.1, wave.radius / 0.55);
-    wave.mesh.scale.set(curScale, curScale, 1);
-    wave.mesh.material.opacity = Math.max(0.0, 0.95 * (1.0 - progress));
-    if (progress > 0.45) wave.mesh.material.color.setHex(0xff1e38);
+  if (gameState.kronosRingState === 'hit' || gameState.kronosRingState === 'counter_stun' || gameState.kronosRingState === 'stunned') {
+    updateKronosHitAndStunState(dt, elapsed, beatSec);
+  } else if (gameState.kronosRingState === 'windup_combo' || gameState.kronosRingState === 'striking_combo') {
+    if (updateKronosScratchComboState(dt, elapsed, beatSec, w3Cfg)) return;
+  } else if (gameState.kronosRingState === 'windup_shockwave' || gameState.kronosRingState === 'shockwave_active') {
+    if (updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg)) return;
+  } else {
+    updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, contextState);
+  }
 
-    const d = gameState.playerPos.distanceTo(wave.pos);
-    const inWaveFront = Math.abs(d - wave.radius) <= 0.65;
-    const isPlayerDodging = gameState.dodgeInvulnTimer > 0;
-
-    if (inWaveFront) {
-      if (isPlayerDodging && !wave.evaded) {
-        wave.evaded = true;
-        gameState.shockwaveDodged = true;
-        gameState.hype = Math.min(100.0, (gameState.hype || 0) + 25.0);
-        floorDial.updateBadge('COUNTER WEAVE!', '#ffe042');
-        setStarburstText('COUNTER WEAVE!', 1.25);
-        audioEngine.playCombatSfx('counter-weave', 'PERFECT', gameState.playerPos);
-
-        gameState.kronosRingState = 'counter_stun';
-        gameState.kronosStateTimer = 2.0;
-        gameState.counterBonusTimer = 2.0;
-        gameState.bossCounterStunActive = true;
-        gameState.bossAttackPattern = 'idle';
-        kronosRingBadge.update(gameState.bossHp, 100, 'counter_stun', '★ COUNTER-STUN PUNISH! ★');
-      } else if (!isPlayerDodging && !wave.hit && !wave.evaded) {
-        wave.hit = true;
-        applyPlayerDamage(22, 'SUB-BASS IMPACT!', 0.40, 0.06);
-        const knockDir = gameState.playerPos.clone().sub(wave.pos).normalize();
-        if (knockDir.lengthSq() < 0.001) knockDir.set(0, 0, 1);
-        gameState.playerTarget.addScaledVector(knockDir, 1.25);
-      }
-    }
-
-    if (wave.radius >= wave.maxRadius) {
-      scene.remove(wave.mesh);
-      wave.mesh.geometry.dispose();
-      wave.mesh.material.dispose();
-      gameState.bossShockwave = null;
-      gameState.bossShockwaveActive = false;
-      if (gameState.kronosRingState === 'shockwave_active') {
-        gameState.kronosRingState = 'stalking';
-        gameState.bossAttackPattern = 'idle';
-        gameState.kronosAttackCooldown = 2.0;
-        kronosRingBadge.update(gameState.bossHp, 100, 'stalking', '★ BOSS DJ KRONOS ★');
-      }
-    }
+  if (gameState.kronosRingState !== 'windup_shockwave' && gameState.kronosRingState !== 'shockwave_active' && gameState.bossShockwave && gameState.bossShockwave.active) {
+    if (updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg)) return;
   }
 
   if (kronosBlender) kronosBlender.update(dt);
 }
 
+let _vfxFrameCount = 0;
+
 function updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart) {
+  _vfxFrameCount += 1;
+  const isPhoneViewport = (window.innerWidth || 1280) <= 600 || IS_LOW_TIER;
   const bpm = (chart && chart.bpm) || KRONOS_BPM;
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
 
@@ -4628,13 +4467,25 @@ function updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart) {
     }
   }
 
-  boomboxStage.updateStageDisplays(
-    audioEngine.isPlaying ? audioEngine.freqData : null,
-    bass,
-    beatPulse,
-    dt,
-    gameState.hype
-  );
+  if (!isPhoneViewport) {
+    if ((_vfxFrameCount % 2) === 0) {
+      boomboxStage.updateStageDisplays(
+        audioEngine.isPlaying ? audioEngine.freqData : null,
+        bass,
+        beatPulse,
+        dt * 2,
+        gameState.hype
+      );
+    }
+  } else if (audioEngine.isPlaying && (_vfxFrameCount % 12) === 0) {
+    boomboxStage.updateStageDisplays(
+      audioEngine.freqData,
+      bass,
+      beatPulse,
+      dt * 12,
+      gameState.hype
+    );
+  }
 
   if (songTime !== null && !reducedMotionEnabled) {
     const beatSin = Math.sin((Math.PI * songTime) / beatSec);
@@ -4653,12 +4504,6 @@ function updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart) {
   });
   boomboxStage.platters.forEach((p) => {
     p.rotation.y += dt * (audioEngine.isPlaying ? 4.2 : 0.8);
-  });
-
-  kickSmear.pebbles.forEach(({ mesh, basePos, phase }) => {
-    mesh.position.y = basePos.y + Math.sin(elapsed * 4.2 + phase) * 0.04;
-    mesh.rotation.x += dt * 1.8;
-    mesh.rotation.y += dt * 2.2;
   });
 
   // Beat ring pulses ONLY when audio is playing (and respects reduced motion)
@@ -4687,30 +4532,41 @@ function updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart) {
     }
   }
 
-  const hypeRatio = Math.max(0, Math.min(1.0, (gameState.hype || 0) / 100));
-  const jumpAmp = reducedMotionEnabled ? 0.04 : (0.14 + 0.14 * hypeRatio);
-  if (instancedCrowdHandle && instancedCrowdHandle.update) {
-    instancedCrowdHandle.update(elapsed, bpm, jumpAmp);
+  if (instancedCrowdHandle) {
+    if (instancedCrowdHandle.instancedGroup) {
+      instancedCrowdHandle.instancedGroup.visible = !isPhoneViewport;
+    }
+    if (!isPhoneViewport && instancedCrowdHandle.update) {
+      const hypeRatio = Math.max(0, Math.min(1.0, (gameState.hype || 0) / 100));
+      const jumpAmp = reducedMotionEnabled ? 0.04 : (0.14 + 0.14 * hypeRatio);
+      instancedCrowdHandle.update(elapsed, bpm, jumpAmp);
+    }
   }
 
   for (let i = gameState.activeImpactVFX.length - 1; i >= 0; i--) {
     const vfx = gameState.activeImpactVFX[i];
-    const alive = vfx.update(dt, camera.position);
+    const alive = vfx && typeof vfx.update === 'function' ? vfx.update(dt, camera.position) : false;
     if (!alive) {
-      if (vfx.dispose) vfx.dispose(scene);
+      if (vfx && typeof vfx.dispose === 'function') vfx.dispose(scene);
       gameState.activeImpactVFX.splice(i, 1);
     }
   }
 
   for (let i = gameState.activeSmears.length - 1; i >= 0; i--) {
     const s = gameState.activeSmears[i];
-    s.life -= dt;
-    s.mesh.material.opacity = Math.max(0, s.life / 0.22);
-    s.mesh.scale.multiplyScalar(1 + dt * 2.2);
-    if (s.life <= 0) {
-      if (s.release) s.release();
-      else scene.remove(s.mesh);
-      gameState.activeSmears.splice(i, 1);
+    if (s && typeof s.update === 'function') {
+      const alive = s.update(dt);
+      if (!alive) {
+        gameState.activeSmears.splice(i, 1);
+      }
+    } else if (s) {
+      s.life -= dt;
+      s.mesh.material.opacity = Math.max(0, s.life / 0.22);
+      s.mesh.scale.multiplyScalar(1 + dt * 2.2);
+      if (s.life <= 0) {
+        if (s.release) s.release();
+        gameState.activeSmears.splice(i, 1);
+      }
     }
   }
 
@@ -4780,38 +4636,10 @@ function updateCamera(dt, rawDt, elapsed) {
   camera.updateProjectionMatrix();
 }
 
-const clock = new THREE.Clock();
-let _debugHarnessRef = null;
-let _crowdDeferredScheduled = false;
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  const curWinW = Math.max(1, Math.floor(window.innerWidth || _lastCanvasW));
-  const curWinH = Math.max(1, Math.floor(window.innerHeight || _lastCanvasH));
-  if (curWinW !== _lastCanvasW || curWinH !== _lastCanvasH) {
-    syncViewportResize();
+function updateEnemies(dt, rawDt, elapsed, beatPulse, songTime, chart) {
+  if (gameState.wave3BeatWeaveTimer > 0) {
+    gameState.wave3BeatWeaveTimer = Math.max(0, gameState.wave3BeatWeaveTimer - dt);
   }
-
-  const rawDt = Math.min(clock.getDelta(), 0.1);
-  if (gameState.hitStopTimer > 0) {
-    gameState.hitStopTimer -= rawDt;
-  }
-  const dt = gameState.hitStopTimer > 0 ? rawDt * TUNING.HIT_STOP.DILATION : rawDt;
-  const elapsed = clock.getElapsedTime();
-
-  if (postProcessing && postProcessing.update) {
-    postProcessing.update(dt, rawDt);
-  }
-
-  const chart = audioEngine.getActiveChart();
-  const songTime = audioEngine.getSongTime();
-  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
-  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
-  const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;
-  const beatPhase = songTime !== null ? (beatFloat % 1) : 0;
-  const beatPulse = songTime !== null ? Math.exp(-beatPhase * 4.5) : 0;
-  const bass = audioEngine.getBassEnergy();
 
   // Single findBestCombatTarget evaluation per frame
   gameState.priorityTargetCache = findBestCombatTarget(
@@ -4849,16 +4677,22 @@ function animate() {
     occupiedSlots.add(bestSlot);
   }
 
-  const contextState = {
-    someoneWindingUp: bruisers.some((b) => b.active && (b.state === 'windup' || b.state === 'striking')) ||
-      (gameState.kronosInRing && (
-        gameState.kronosRingState === 'windup' || gameState.kronosRingState === 'striking' ||
-        gameState.kronosRingState === 'windup_combo' || gameState.kronosRingState === 'striking_combo' ||
-        gameState.kronosRingState === 'windup_shockwave' || gameState.kronosRingState === 'shockwave_active'
-      ))
-  };
+  const waveCfg = TUNING.WAVES[gameState.wave] || TUNING.WAVES[1];
+  let activeAttackerCount = bruisers.filter((b) => b.active && (b.state === 'windup' || b.state === 'striking')).length;
+  if (gameState.kronosInRing && (
+    gameState.kronosRingState === 'windup' || gameState.kronosRingState === 'striking' ||
+    gameState.kronosRingState === 'windup_combo' || gameState.kronosRingState === 'striking_combo' ||
+    gameState.kronosRingState === 'windup_shockwave' || gameState.kronosRingState === 'shockwave_active'
+  )) {
+    activeAttackerCount += 1;
+  }
 
-  updatePlayer(dt, rawDt, elapsed, beatPulse);
+  const contextState = {
+    waveCfg,
+    activeAttackerCount,
+    maxSimultaneousAttackers: waveCfg.maxSimultaneousAttackers,
+    someoneWindingUp: activeAttackerCount >= waveCfg.maxSimultaneousAttackers
+  };
 
   for (let i = 0; i < bruisers.length; i++) {
     updateFighterFSM(bruisers[i], dt, rawDt, elapsed, beatPulse, songTime, chart, contextState);
@@ -4874,10 +4708,52 @@ function animate() {
   }
 
   updateFighterFSM({ isBoss: true }, dt, rawDt, elapsed, beatPulse, songTime, chart, contextState);
-  updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart);
-  updateCamera(dt, rawDt, elapsed);
+}
+
+function updateHud(dt) {
   updateStyleRankAndHype(dt);
   updateHudNumbers();
+}
+
+const clock = new THREE.Clock();
+let _debugHarnessRef = null;
+let _crowdDeferredScheduled = false;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const _cpuStart = performance.now();
+
+  const curWinW = Math.max(1, Math.floor(window.innerWidth || _lastCanvasW));
+  const curWinH = Math.max(1, Math.floor(window.innerHeight || _lastCanvasH));
+  if (curWinW !== _lastCanvasW || curWinH !== _lastCanvasH) {
+    syncViewportResize();
+  }
+
+  const rawDt = Math.min(clock.getDelta(), 0.1);
+  if (gameState.hitStopTimer > 0) {
+    gameState.hitStopTimer -= rawDt;
+  }
+  const dt = gameState.hitStopTimer > 0 ? rawDt * TUNING.HIT_STOP.DILATION : rawDt;
+  const elapsed = clock.getElapsedTime();
+
+  if (postProcessing && postProcessing.update) {
+    postProcessing.update(dt, rawDt);
+  }
+
+  const chart = audioEngine.getActiveChart();
+  const songTime = audioEngine.getSongTime();
+  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;
+  const beatPhase = songTime !== null ? (beatFloat % 1) : 0;
+  const beatPulse = songTime !== null ? Math.exp(-beatPhase * 4.5) : 0;
+  const bass = audioEngine.getBassEnergy();
+
+  updatePlayer(dt, rawDt, elapsed, beatPulse);
+  updateEnemies(dt, rawDt, elapsed, beatPulse, songTime, chart);
+  updateVFX(dt, elapsed, beatPulse, beatPhase, bass, songTime, chart);
+  updateCamera(dt, rawDt, elapsed);
+  updateHud(dt);
 
   if (_debugHarnessRef && _debugHarnessRef.recordJointSampleFrame) {
     _debugHarnessRef.recordJointSampleFrame();
@@ -4891,11 +4767,17 @@ function animate() {
       buildDeferredInstancedCrowd();
     }, 0);
   }
+
+  const _cpuMs = performance.now() - _cpuStart;
+  gameState.lastFrameCpuMs = _cpuMs;
+  if (window.__kronosRecordCpuFrames && Array.isArray(window.__kronosFrameCpuSamples)) {
+    window.__kronosFrameCpuSamples.push(_cpuMs);
+  }
 }
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261017b').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261017c').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
@@ -4950,14 +4832,16 @@ if (IS_DEBUG_MODE) {
         const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;
         const beatPhase = songTime !== null ? (beatFloat % 1) : 0;
         const beatPulse = songTime !== null ? Math.exp(-beatPhase * 4.5) : 0;
+        const bass = audioEngine.getBassEnergy();
         const elapsed = clock.getElapsedTime();
         updatePlayer(dtSec, dtSec, elapsed, beatPulse);
-        const contextState = { someoneWindingUp: false };
-        for (let i = 0; i < bruisers.length; i++) {
-          updateFighterFSM(bruisers[i], dtSec, dtSec, elapsed, beatPulse, songTime, chart, contextState);
+        updateEnemies(dtSec, dtSec, elapsed, beatPulse, songTime, chart);
+        updateVFX(dtSec, elapsed, beatPulse, beatPhase, bass, songTime, chart);
+        updateCamera(dtSec, dtSec, elapsed);
+        updateHud(dtSec);
+        if (_debugHarnessRef && _debugHarnessRef.recordJointSampleFrame) {
+          _debugHarnessRef.recordJointSampleFrame();
         }
-        updateFighterFSM({ isBoss: true }, dtSec, dtSec, elapsed, beatPulse, songTime, chart, contextState);
-        updateHudNumbers();
       },
       updateHudNumbers,
       buildChallengerModel,
@@ -4966,6 +4850,9 @@ if (IS_DEBUG_MODE) {
       buildSpectatorModel,
       buildSubwooferShockwaveRing,
       setStarburstText,
+      kickSmear,
+      kronosTeleRing,
+      kronosTeleMat,
       lights: {
         keyLight,
         hemiLight,
