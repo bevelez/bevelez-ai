@@ -1062,7 +1062,7 @@ export function createCombatDirector(options = {}) {
 
       if (attacker.rig && typeof attacker.rig.playClip === 'function') {
         const spec = ENEMY_CLIP_SPECS[m.pattern] || ENEMY_CLIP_SPECS.hook;
-        attacker.rig.playClip(spec.clip, { fadeInSec: 0.05, timeScale: playRate, loop: false });
+        attacker.rig.playClip(spec.clip, { fadeInSec: 0.14, timeScale: playRate, loop: false });
       }
 
       state.scheduledStrikes.push({

@@ -81,6 +81,98 @@ export function prepareHandBuiltRigForClips(rig, pivots = CHALLENGER_CLIP_PIVOTS
   return report;
 }
 
+const HUMANOID_NAMES = Object.freeze([
+  'hips', 'spine', 'torso', 'neck', 'head',
+  'leftShoulder', 'leftArm', 'leftElbow', 'leftHand',
+  'rightShoulder', 'rightArm', 'rightElbow', 'rightHand',
+  'leftLeg', 'leftKnee', 'leftAnkle', 'rightLeg', 'rightKnee', 'rightAnkle'
+]);
+
+function canonicalRigKey(name) {
+  return name === 'head' ? 'headGroup' : name;
+}
+
+/**
+ * Conforms any hand-built rig to the hierarchy of a clip skeleton (the node tree of an
+ * animation-only GLB): names the joints, inserts the pivots the rig lacks at the skeleton's
+ * local offsets, and re-parents existing joints under them. Joint world positions must already
+ * match the skeleton (they do for all three Kronos fighters); the report's `maxDeviationM` says
+ * how far any joint moved, so a mismatch is visible instead of silent.
+ *
+ * @param {Object} rig - hand-built rig ({ root, hips, torso, headGroup, leftArm, ... })
+ * @param {THREE.Object3D} skeletonRoot - scene of the animation-only GLB
+ */
+export function conformRigToClipSkeleton(rig, skeletonRoot) {
+  const report = { named: [], inserted: [], reparented: [], skipped: [], maxDeviationM: 0 };
+  if (!rig || !rig.root || !skeletonRoot) return report;
+  if (rig._clipPivotsReady) return rig._clipPivotsReport || report;
+
+  for (const key of NAMED_JOINTS) {
+    const node = rig[key];
+    if (node && node.isObject3D) {
+      node.name = key;
+      report.named.push(key);
+    }
+  }
+  const before = sampleRigJointWorldPositions(rig);
+
+  const glbByName = new Map();
+  skeletonRoot.traverse((n) => { if (n.name && HUMANOID_NAMES.includes(n.name)) glbByName.set(n.name, n); });
+
+  // Parent-first order: traverse visits parents before children.
+  skeletonRoot.traverse((node) => {
+    if (!glbByName.has(node.name) || node.name === 'hips') return;
+    const key = canonicalRigKey(node.name);
+    const glbParent = node.parent;
+    if (!glbParent || !glbByName.has(glbParent.name)) return;
+    const parentRig = rig[canonicalRigKey(glbParent.name)];
+    if (!parentRig || !parentRig.isObject3D) {
+      report.skipped.push(`${key}: parent ${glbParent.name} missing`);
+      return;
+    }
+    let rigNode = rig[key];
+    if (!rigNode || !rigNode.isObject3D) {
+      rigNode = new THREE.Group();
+      rigNode.name = key;
+      rigNode.position.copy(node.position);
+      parentRig.add(rigNode);
+      rig[key] = rigNode;
+      report.inserted.push(key);
+    } else if (rigNode.parent !== parentRig) {
+      if (rigNode.parent) rigNode.parent.remove(rigNode);
+      parentRig.add(rigNode);
+      rigNode.position.copy(node.position);
+      report.reparented.push(key);
+    }
+  });
+
+  rig.root.updateMatrixWorld(true);
+  const after = sampleRigJointWorldPositions(rig);
+  for (const k of Object.keys(before)) {
+    if (!after[k]) continue;
+    const d = Math.hypot(after[k][0] - before[k][0], after[k][1] - before[k][1], after[k][2] - before[k][2]);
+    if (d > report.maxDeviationM) report.maxDeviationM = Number(d.toFixed(4));
+  }
+  rig._clipPivotsReady = true;
+  rig._clipPivotsReport = report;
+  return report;
+}
+
+/**
+ * Removes root-translation tracks from clips so game-side physics (launch, knockback, slide)
+ * keeps control of the hips, except for the clips listed in `keepFor` (idle dances).
+ */
+export function stripHipsTranslation(animations, keepFor = ['idle-dance', 'boss-idle']) {
+  const out = [];
+  for (const clip of animations || []) {
+    if (!clip || keepFor.includes(clip.name)) { out.push(clip); continue; }
+    const c = clip.clone();
+    c.tracks = c.tracks.filter((t) => !/(^|\.)hips\.position$/.test(t.name));
+    out.push(c);
+  }
+  return out;
+}
+
 /**
  * Returns the world-space position of each named joint, for parity checks against a clip skeleton.
  */

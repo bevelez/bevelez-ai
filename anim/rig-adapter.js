@@ -605,7 +605,9 @@ export function wrapCharacterRig(rig, options = {}) {
       action.reset();
       action.time = startTime;
       action.play();
-      if (fadeInSec > 1e-4 && prevAction.isRunning()) {
+      // A finished LoopOnce action still holds its clamped pose with its weight, so crossfading
+      // from it is what keeps hurt -> idle and strike -> idle continuous instead of a hard cut.
+      if (fadeInSec > 1e-4 && prevAction.enabled && prevAction.getEffectiveWeight() > 1e-4) {
         prevAction.crossFadeTo(action, fadeInSec, false);
       } else {
         prevAction.stop();

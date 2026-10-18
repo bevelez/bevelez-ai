@@ -16,18 +16,19 @@ import {
   getSectionAtTime,
   getLightingCueAtTime,
   computeRunResultsSummary
-} from './kronos-tracks.js?v=20261018h';
-import { wrapCharacterRig, loadGLBAsset, loadClipsManifest } from './anim/rig-adapter.js?v=20261018h';
-import { prepareHandBuiltRigForClips, CHALLENGER_CLIP_PIVOTS } from './anim/handbuilt-rig.js?v=20261018h';
-import * as beatWarpModule from './anim/beatwarp.js?v=20261018h';
+} from './kronos-tracks.js?v=20261018k';
+import { wrapCharacterRig, loadGLBAsset, loadClipsManifest } from './anim/rig-adapter.js?v=20261018k';
+import { conformRigToClipSkeleton, stripHipsTranslation } from './anim/handbuilt-rig.js?v=20261018k';
+import * as beatWarpModule from './anim/beatwarp.js?v=20261018k';
 import {
   scheduleAction as scheduleBeatWarpAction,
   tickBeatWarp,
   cancelActorSchedules,
   clearActiveSchedules,
+  hasActiveScheduleFor,
   setClipsManifest as setBeatWarpClipsManifest
-} from './anim/beatwarp.js?v=20261018h';
-import * as audioClockModule from './audio/clock.js?v=20261018h';
+} from './anim/beatwarp.js?v=20261018k';
+import * as audioClockModule from './audio/clock.js?v=20261018k';
 import {
   bindAudioEngine as clockBindAudioEngine,
   setActiveChart as clockSetActiveChart,
@@ -35,13 +36,13 @@ import {
   songTimeToContextTime as clockSongTimeToContextTime,
   nextSubdivision as clockNextSubdivision,
   nearestSubdivision as clockNearestSubdivision
-} from './audio/clock.js?v=20261018h';
+} from './audio/clock.js?v=20261018k';
 import {
   applyEnemyHitReaction,
   getDirectionalHitReactionProfile,
   updateEnemyReactionState
-} from './combat/reactions.js?v=20261018h';
-import * as combatDirectorModule from './combat/director.js?v=20261018h';
+} from './combat/reactions.js?v=20261018k';
+import * as combatDirectorModule from './combat/director.js?v=20261018k';
 import {
   tick as tickCombatDirector,
   evaluateCounterInput as directorEvaluateCounterInput,
@@ -50,7 +51,7 @@ import {
   grantFeverProgress as directorGrantFeverProgress,
   getDirectorTelemetry,
   resetDirector
-} from './combat/director.js?v=20261018h';
+} from './combat/director.js?v=20261018k';
 
 // Slice 2: enemies strike only on chart moveset markers through combat/director.js.
 const DIRECTOR_ENABLED = true;
@@ -80,22 +81,22 @@ const SECTION_ROSTERS = Object.freeze({
 });
 const FEVER_RUSH_BARS = 2;
 const FINISHER_INVULN_SEC = 1.2;
-import { createContactShadowDecal } from './models/shared.js?v=20261018h';
+import { createContactShadowDecal } from './models/shared.js?v=20261018k';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261018h';
-import { buildKronosBossModel } from './models/kronos.js?v=20261018h';
-import { buildBruiserModel } from './models/bruiser.js?v=20261018h';
+} from './models/challenger.js?v=20261018k';
+import { buildKronosBossModel } from './models/kronos.js?v=20261018k';
+import { buildBruiserModel } from './models/bruiser.js?v=20261018k';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261018h';
+} from './models/crowd.js?v=20261018k';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261018h';
+} from './models/stage.js?v=20261018k';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -105,15 +106,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261018h';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261018h';
+} from './models/arena.js?v=20261018k';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261018k';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261018h';
+} from './kronos-sfx.js?v=20261018k';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -1215,26 +1216,55 @@ const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
 // Authored fight clips (assets/models/kronos-clips-challenger.glb, animation-only) drive the
 // hand-built Challenger through an AnimationMixer. The hand-built rig keeps its meshes; only four
 // pivots (spine, neck, shoulders) are inserted so every clip track binds by name.
-const _clipPreloadPromise = (async () => {
-  const [{ animations }, manifest] = await Promise.all([
-    loadGLBAsset('./assets/models/kronos-clips-challenger.glb?v=20261018h'),
-    loadClipsManifest('./assets/models/clips.json?v=20261018h')
-  ]);
-  const pivotReport = prepareHandBuiltRigForClips(challengerRig, CHALLENGER_CLIP_PIVOTS);
-  wrapCharacterRig(challengerRig, {
-    animations,
+/**
+ * Attaches the authored clips of one fighter type to a hand-built rig: conform the hierarchy to
+ * the clip skeleton, build an AnimationMixer, keep hips translation only for the idle dances
+ * (enemy launch/knockback physics owns the hips otherwise).
+ */
+async function attachClipsToRig(rig, type, manifest) {
+  const { scene, animations } = await loadGLBAsset(`./assets/models/kronos-clips-${type}.glb?v=20261018k`);
+  const report = conformRigToClipSkeleton(rig, scene);
+  const clips = type === 'challenger' ? animations : stripHipsTranslation(animations);
+  wrapCharacterRig(rig, {
+    animations: clips,
     clipMetadata: manifest && manifest.clips ? manifest.clips : undefined,
     preserveDirectJointProps: true
   });
+  rig.clipDriven = true;
+  rig.clipType = type;
+  rig.clipPivotReport = report;
+  if (report.maxDeviationM > 0.005) {
+    console.warn(`[kronos] ${type} rig moved ${report.maxDeviationM} m while conforming to its clip skeleton`, report);
+  }
+  return clips.length;
+}
+
+const _clipPreloadPromise = (async () => {
+  const manifest = await loadClipsManifest('./assets/models/clips.json?v=20261018k');
   if (manifest) setBeatWarpClipsManifest(manifest);
-  challengerRig.clipDriven = true;
-  challengerRig.clipPivotReport = pivotReport;
-  return animations.length;
+  _clipManifest = manifest;
+  return attachClipsToRig(challengerRig, 'challenger', manifest);
 })().catch((err) => {
   console.warn('[kronos] authored clips unavailable; Challenger falls back to the pose blender', err);
   challengerRig.clipDriven = false;
   return 0;
 });
+let _clipManifest = null;
+let _enemyClipPreloadPromise = null;
+function preloadEnemyClips() {
+  if (_enemyClipPreloadPromise) return _enemyClipPreloadPromise;
+  _enemyClipPreloadPromise = _clipPreloadPromise.then((n) => {
+    if (!n || !_clipManifest) return [];
+    return Promise.all([
+      attachClipsToRig(kronosRig, 'kronos', _clipManifest),
+      ...bruisers.map((b) => attachClipsToRig(b.rig, 'bruiser', _clipManifest))
+    ]);
+  }).catch((err) => {
+    console.warn('[kronos] enemy clips unavailable; enemies stay on the pose blender', err);
+    return [];
+  });
+  return _enemyClipPreloadPromise;
+}
 
 const kronosRig = buildKronosBossModel();
 kronosRig.root.position.set(0, 1.38, 1.25);
@@ -2134,7 +2164,9 @@ function launchBruiserIntoStage(b) {
   b.state = 'flying';
   b.teleMat.opacity = 0;
   b.badge.update(0, b.maxHp, 'ko', 'SPEAKERBOX K.O.!');
-  if (b.blender) {
+  if (b.rig && b.rig.clipDriven && b.rig.playClip) {
+    b.rig.playClip('KO-fall', { fadeInSec: 0.05, loop: false });
+  } else if (b.blender) {
     b.blender.setTarget({
       torso: [-0.35, 0, 0],
       headGroup: [-0.2, 0, 0],
@@ -3436,6 +3468,30 @@ function findBruiserByDirectorId(id) {
   return null;
 }
 
+const STRIKE_CLIP_BY_PATTERN = Object.freeze({
+  quick_hook: 'hook',
+  hook: 'hook',
+  double_tap: 'double-tap',
+  heavy_haymaker: 'haymaker',
+  haymaker: 'haymaker',
+  bass_drop: 'bass-drop'
+});
+
+/** Plays an enemy's strike clip time-scaled so its authored impact frame lands on the marker. */
+function playEnemyStrikeClip(rig, strike, songTime) {
+  if (!rig || !rig.clipDriven || !rig.playClip) return;
+  let clipName = STRIKE_CLIP_BY_PATTERN[strike.pattern] || STRIKE_CLIP_BY_PATTERN[strike.attackType] || null;
+  if (strike.pattern === 'scratch_combo' || strike.attackType === 'scratch_combo') {
+    clipName = ['scratch-1', 'scratch-2', 'scratch-3'][Math.max(0, Math.min(2, strike.comboStep || 0))];
+  }
+  if (!clipName || strike.pattern === 'charge') return; // the charge keeps its hand-posed rush
+  const meta = rig.clipMetadata ? rig.clipMetadata[clipName] : null;
+  const impactFrame = meta && Number.isFinite(meta.impactFrame) ? meta.impactFrame : 0.3;
+  const remaining = Math.max(0.08, strike.markerTime - songTime);
+  const timeScale = Math.max(0.35, Math.min(3.0, impactFrame / remaining));
+  rig.playClip(clipName, { fadeInSec: 0.14, loop: false, timeScale });
+}
+
 /** Visual-only subwoofer shockwave for a director-resolved bass drop (damage is the director's). */
 function spawnBassDropShockwaveVisual() {
   if (gameState.bossShockwave && gameState.bossShockwave.mesh) {
@@ -3491,7 +3547,8 @@ function runCombatDirector(songTime, dt, chart, waveCfg) {
     maxSimultaneousAttackers: waveCfg.maxSimultaneousAttackers + (gameState.kronosInRing ? 1 : 0),
     onPlayerHit: (dmg, strike) => {
       const light = strike.attackType === 'quick_hook' || strike.attackType === 'double_tap';
-      applyPlayerDamage(dmg, 'BAM! COUNTER [F] / DODGE [A]!', light ? 0.25 : 0.38, light ? -0.035 : 0.055);
+      applyPlayerDamage(dmg, light ? 'BAM!' : 'WHAM!', light ? 0.25 : 0.38, light ? -0.035 : 0.055);
+      floorDial.updateBadge('HIT! COUNTER [F] · DODGE [A]', '#ff1e38');
     }
   });
 
@@ -3510,13 +3567,17 @@ function runCombatDirector(songTime, dt, chart, waveCfg) {
       } else {
         const b = findBruiserByDirectorId(s.attackerId);
         audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', b ? b.rig.root.position : gameState.playerPos);
+        if (b) playEnemyStrikeClip(b.rig, s, songTime);
       }
+      if (s.attackerId === 'kronos') playEnemyStrikeClip(kronosRig, s, songTime);
     }
   }
   _directorKnownStrikes = nowIds;
   gameState.directorScheduled = result.scheduledStrikes;
 
   for (const r of result.resolvedStrikes) {
+    const rig = r.attackerId === 'kronos' ? kronosRig : (findBruiserByDirectorId(r.attackerId) || {}).rig;
+    if (rig && rig._activeAction && !rig._activeAction.paused) rig._activeAction.timeScale = 1.0;
     if (r.attackerId === 'kronos' && (r.attackType === 'bass_drop' || r.pattern === 'bass_drop')) {
       spawnBassDropShockwaveVisual();
       if (r.evaded) setStarburstText('BASS REBOUND!', 1.22);
@@ -3982,6 +4043,20 @@ class ContinuousPoseBlender {
     this.applyToRig();
   }
 
+  /** Reads the rig's current joint rotations into the blender so it resumes from the clip's last pose. */
+  syncCurrentFromRig() {
+    for (let i = 0; i < this.allJoints.length; i++) {
+      const j = this.allJoints[i];
+      const node = this.rig[j];
+      if (node && node.rotation && this.current[j]) {
+        this.current[j].x = node.rotation.x;
+        this.current[j].y = node.rotation.y;
+        this.current[j].z = node.rotation.z;
+      }
+    }
+    if (this.rig.hips && this.rig.hips.position) this.currentHipsPos.copy(this.rig.hips.position);
+  }
+
   updateYawOnly(dt) {
     if (dt <= 0) return;
     const clampedDt = Math.min(dt, 0.1);
@@ -4202,7 +4277,23 @@ function poseChallengerClipDriven(rig, pose, elapsed, beatPulse, dt, rawDt) {
   }
   kickSmear.smearGroup.visible = false;
   if (pose === 'hurt' || gameState.playerHitStunTimer > 0 || pose === 'dodge' || pose === 'counter') return;
-  ensureChallengerIdleClip(audioEngine.getSongTime());
+  const songTime = audioEngine.getSongTime();
+  // Beat-locked footwork: while the Challenger drifts, step clips plant on the half-beats.
+  const prev = gameState._stepPrevPos || (gameState._stepPrevPos = gameState.playerPos.clone());
+  const speed = dt > 0 ? prev.distanceTo(gameState.playerPos) / dt : 0;
+  prev.copy(gameState.playerPos);
+  if (songTime !== null && speed > 0.30 && !hasActiveScheduleFor(challengerRig)) {
+    gameState._stepSide = !gameState._stepSide;
+    scheduleBeatWarpAction(challengerRig, gameState._stepSide ? 'step-L' : 'step-R', songTime, {
+      chart: audioEngine.getActiveChart(),
+      clock: beatWarpClock,
+      scheduleWhooshSfx: false,
+      scheduleImpactSfx: false
+    });
+    return;
+  }
+  if (hasActiveScheduleFor(challengerRig)) return;
+  ensureChallengerIdleClip(songTime);
 }
 
 function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016, rawDt = dt) {
@@ -4385,11 +4476,12 @@ if (elBtnStartCypher) {
   elBtnStartCypher.disabled = true;
   elBtnStartCypher.textContent = 'LOADING MOVES…';
   setBootProgress('Loading authored fight clips…', 92);
-  _clipPreloadPromise.then((clipCount) => {
+  _clipPreloadPromise.then((clipCount) => preloadEnemyClips().then((enemyCounts) => {
     elBtnStartCypher.disabled = false;
     elBtnStartCypher.textContent = _startBtnText;
-    setBootProgress(clipCount > 0 ? `Arena Ready · ${clipCount} fight clips · 92 BPM` : 'Arena Ready · 92 BPM Cypher Loaded', 100);
-  });
+    const total = clipCount + (Array.isArray(enemyCounts) ? enemyCounts.reduce((a, b) => a + (b || 0), 0) : 0);
+    setBootProgress(total > 0 ? `Arena Ready · ${total} fight clips · 92 BPM` : 'Arena Ready · 92 BPM Cypher Loaded', 100);
+  }));
   elBtnStartCypher.addEventListener('click', () => {
     enterCypherFromStartOverlay();
   });
@@ -5731,6 +5823,40 @@ function updateKronosStalkingState(dt, elapsed, beatPulse, beatSec, songTime, ch
   }
 }
 
+/**
+ * Enemy animation arbitration: while an authored clip is running the mixer owns the joints and the
+ * pose blender stands down; when the clip ends the blender resumes from the clip's last pose.
+ */
+function updateEnemyAnimation(rig, blender, dt) {
+  if (gameState.debugFreezeClip) return;
+  const clipActive = Boolean(rig && rig.clipDriven && rig.isClipPlaying && rig.isClipPlaying());
+  if (clipActive) {
+    rig._clipWasActive = true;
+  } else if (blender) {
+    if (rig && rig._clipWasActive) {
+      blender.syncCurrentFromRig();
+      rig._clipWasActive = false;
+    }
+    blender.update(dt);
+  }
+  if (rig && rig.clipDriven && rig.update) rig.update(dt);
+}
+
+function ensureEnemyIdleClip(rig, clipName, songTime) {
+  if (!rig || !rig.clipDriven || !rig.playClip) return;
+  if (rig._activeClipName === clipName && rig._activeAction && rig._activeAction.isRunning()) return;
+  if (rig._activeAction && rig._activeAction.isRunning()) return; // another clip (hurt, strike) owns the body
+  const chart = audioEngine.getActiveChart();
+  const barSec = (chart && chart.barSec) || KRONOS_BAR_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const clip = rig.clips ? rig.clips.get(clipName) : null;
+  const clipDur = clip && clip.duration > 0 ? clip.duration : 2.6;
+  const phase = (songTime !== null && songTime !== undefined && barSec > 0)
+    ? ((((songTime - firstOffset) % barSec) + barSec) % barSec) / barSec
+    : 0;
+  rig.playClip(clipName, { loop: true, fadeInSec: 0.18, startTime: phase * clipDur, timeScale: clipDur / barSec });
+}
+
 function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart, contextState) {
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
 
@@ -5744,7 +5870,7 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
     updateBruiserMicroShake(b, rawDt);
 
     if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) {
-      if (b.blender) b.blender.update(dt);
+      updateEnemyAnimation(b.rig, b.blender, dt);
       return;
     }
 
@@ -5768,7 +5894,8 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
       updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime, chart, beatSec, contextState);
     }
 
-    if (b.blender) b.blender.update(dt);
+    if (b.state === 'stalking' || b.state === 'guard') ensureEnemyIdleClip(b.rig, 'idle-dance', songTime);
+    updateEnemyAnimation(b.rig, b.blender, dt);
     if (b.state !== 'flying') {
       const rad = Math.hypot(b.rig.root.position.x, b.rig.root.position.z);
       if (rad > TUNING.ARENA_RADIUS) {
@@ -5793,7 +5920,7 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
         leftKnee: [0, 0, 0], rightKnee: [0, 0, 0],
         headGroup: [0, Math.sin(elapsed * 2.4) * 0.10, 0]
       });
-      kronosBlender.update(dt);
+      updateEnemyAnimation(kronosRig, kronosBlender, dt);
     }
     return;
   }
@@ -5824,7 +5951,7 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
   }
 
   if (!gameState.gameStarted || gameState.isPaused || gameState.isGameOver) {
-    if (kronosBlender) kronosBlender.update(dt);
+    updateEnemyAnimation(kronosRig, kronosBlender, dt);
     return;
   }
 
@@ -5886,7 +6013,8 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
     if (updateKronosBassDropState(dt, elapsed, beatSec, w3Cfg)) return;
   }
 
-  if (kronosBlender) kronosBlender.update(dt);
+  if (gameState.kronosRingState === 'stalking') ensureEnemyIdleClip(kronosRig, 'boss-idle', songTime);
+  updateEnemyAnimation(kronosRig, kronosBlender, dt);
 }
 
 let _vfxFrameCount = 0;
@@ -6255,7 +6383,7 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261018h').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261018k').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
