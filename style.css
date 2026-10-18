@@ -158,6 +158,59 @@ body.warping-to-vault {
   backdrop-filter: blur(8px);
 }
 
+/* Outrun Radio station dial */
+.radio-dial {
+  display: inline-flex;
+  align-items: center;
+  min-height: 31px;
+  padding: 0 4px 0 9px;
+  background: rgba(8, 5, 22, 0.68);
+  border: 1px solid rgba(0, 243, 255, 0.25);
+  border-radius: 6px;
+  backdrop-filter: blur(10px);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.dial-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--neon-cyan);
+  margin-right: 4px;
+}
+
+.dial-btn,
+.dial-name {
+  appearance: none;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  cursor: pointer;
+  line-height: 1;
+  transition: color 0.2s ease;
+}
+
+.dial-btn {
+  font-size: 1.05rem;
+  padding: 4px 6px;
+}
+
+.dial-name {
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ffffff;
+  padding: 5px 3px;
+}
+
+.dial-btn:hover,
+.dial-name:hover {
+  color: var(--neon-cyan);
+}
+
 /* Cyber Buttons */
 .cyber-btn {
   display: inline-flex;
@@ -797,8 +850,20 @@ body.is-steering .hero-wrapper {
 
 @media (max-width: 540px) {
   #audio-visualizer,
-  #btn-cinema {
+  #btn-cinema,
+  .dial-label,
+  .dial-btn,
+  .lyria-text {
     display: none;
+  }
+
+  .radio-dial {
+    padding: 0 6px;
+  }
+
+  .dial-name {
+    font-size: 0.62rem;
+    letter-spacing: 0.05em;
   }
 
   .audio-cluster {

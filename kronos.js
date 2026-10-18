@@ -9,23 +9,23 @@ import {
   KRONOS_TRACK_CHARTS,
   estimateBpmFromAudioBuffer,
   buildCustomTrackChart
-} from './kronos-tracks.js?v=20261017c';
-import { createContactShadowDecal } from './models/shared.js?v=20261017c';
+} from './kronos-tracks.js?v=20261017d';
+import { createContactShadowDecal } from './models/shared.js?v=20261017d';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261017c';
-import { buildKronosBossModel } from './models/kronos.js?v=20261017c';
-import { buildBruiserModel } from './models/bruiser.js?v=20261017c';
+} from './models/challenger.js?v=20261017d';
+import { buildKronosBossModel } from './models/kronos.js?v=20261017d';
+import { buildBruiserModel } from './models/bruiser.js?v=20261017d';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261017c';
+} from './models/crowd.js?v=20261017d';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261017c';
+} from './models/stage.js?v=20261017d';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -35,15 +35,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261017c';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261017c';
+} from './models/arena.js?v=20261017d';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261017d';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261017c';
+} from './kronos-sfx.js?v=20261017d';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -574,8 +574,8 @@ class KronosAudioEngine {
   async toggle() {
     this.userGestureUnlocked = true;
     this.initContext();
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume().catch(() => {});
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
     }
     if (this.isPlaying) {
       this.pause();
@@ -587,8 +587,8 @@ class KronosAudioEngine {
   async play() {
     this.userGestureUnlocked = true;
     this.initContext();
-    if (this.ctx.state === 'suspended') {
-      await this.ctx.resume().catch(() => {});
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
     }
     const trackKey = this.activeTrackKey === 'custom' ? 'flow' : this.activeTrackKey;
     const activeEl = this.tracks[trackKey];
@@ -597,7 +597,10 @@ class KronosAudioEngine {
       return false;
     }
     try {
-      await activeEl.play();
+      const playPromise = activeEl.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        await playPromise;
+      }
       this.isPlaying = !activeEl.paused;
       this.updateGains();
       return this.isPlaying;
@@ -610,6 +613,19 @@ class KronosAudioEngine {
   pause() {
     this.isPlaying = false;
     Object.values(this.tracks).forEach((el) => el.pause());
+  }
+
+  async restart(autoPlay = false) {
+    const shouldPlay = Boolean(autoPlay || this.isPlaying);
+    Object.values(this.tracks).forEach((el) => {
+      try {
+        el.currentTime = 0;
+      } catch (e) {}
+    });
+    if (shouldPlay && this.userGestureUnlocked) {
+      return await this.play();
+    }
+    return this.isPlaying;
   }
 
   async selectTrack(key) {
@@ -698,6 +714,11 @@ class KronosAudioEngine {
     });
   }
 
+  getOutputLatencySec() {
+    if (!this.ctx) return 0;
+    return this.ctx.outputLatency || this.ctx.baseLatency || 0;
+  }
+
   getSongTime() {
     if (IS_DEBUG_MODE && typeof gameState !== 'undefined') {
       if (gameState._debugMusicPlaying) {
@@ -710,7 +731,7 @@ class KronosAudioEngine {
     const activeMediaKey = this.activeTrackKey === 'custom' ? 'flow' : this.activeTrackKey;
     const activeEl = this.tracks[activeMediaKey];
     if (this.isPlaying && activeEl && !activeEl.paused) {
-      return Math.max(0, activeEl.currentTime);
+      return Math.max(0, activeEl.currentTime - this.getOutputLatencySec());
     }
     return null;
   }
@@ -2011,7 +2032,7 @@ function triggerGameEnd(isVictory) {
   }
 }
 
-function restartGame() {
+function restartGame(options = {}) {
   gameState.isGameOver = false;
   gameState.isPaused = false;
   gameState.gameStarted = true;
@@ -2032,6 +2053,14 @@ function restartGame() {
   gameState.styleRank = '—';
   gameState.hype = 0.0;
   gameState.kronosRingState = 'idle';
+  gameState.bossAttackPattern = 'idle';
+  gameState.bossComboStep = 0;
+  gameState.lastProcessedBeatIdx = -1;
+  gameState.wave3StartBeatIdx = undefined;
+  gameState.wave3BeatFloat = 0;
+  gameState.wave3BarIdx = 0;
+  gameState.wave3BeatInBar = 0;
+  gameState.wave3BeatWeaveTimer = 0;
   gameState.isAttacking = false;
   gameState.attackPhase = 'idle';
   gameState.pendingHit = null;
@@ -2039,11 +2068,30 @@ function restartGame() {
   gameState.playerPos.copy(gameState.basePos);
   gameState.playerTarget.copy(gameState.basePos);
 
-  if (!audioEngine.isPlaying) {
-    activeBarIdx = -1;
-    if (elLyricSection) elLyricSection.textContent = '';
-    if (elLyricLine) elLyricLine.textContent = '';
+  if (challengerBlender) {
+    challengerBlender.snapToPose(CHALLENGER_POSES.idle);
+    challengerBlender.setTargetHipsPosition(0, 1.0, 0);
   }
+
+  activeBarIdx = -1;
+  if (elLyricSection) elLyricSection.textContent = '';
+  if (elLyricLine) elLyricLine.textContent = '';
+
+  const shouldAutoPlay = Boolean(
+    (options && options.fromUserGesture) ||
+    audioEngine.isPlaying ||
+    _wasPlayingBeforePause
+  );
+  _wasPlayingBeforePause = false;
+  if (options && options.fromUserGesture) {
+    audioEngine.userGestureUnlocked = true;
+  }
+  audioEngine.restart(shouldAutoPlay).then((playing) => {
+    if (btnPlay) {
+      btnPlay.classList.toggle('playing', playing);
+      btnPlay.textContent = playing ? '❚❚ PAUSE' : '▶ PLAY';
+    }
+  });
 
   if (elStartOverlay) elStartOverlay.classList.add('hidden');
   if (elPauseOverlay) elPauseOverlay.classList.add('hidden');
@@ -3153,9 +3201,9 @@ const btnResultsRestart = document.getElementById('btn-results-restart');
 
 if (btnPause) btnPause.addEventListener('click', () => togglePause());
 if (btnResume) btnResume.addEventListener('click', () => togglePause(false));
-if (btnRestart) btnRestart.addEventListener('click', () => restartGame());
-if (btnPauseRestart) btnPauseRestart.addEventListener('click', () => restartGame());
-if (btnResultsRestart) btnResultsRestart.addEventListener('click', () => restartGame());
+if (btnRestart) btnRestart.addEventListener('click', () => restartGame({ fromUserGesture: true }));
+if (btnPauseRestart) btnPauseRestart.addEventListener('click', () => restartGame({ fromUserGesture: true }));
+if (btnResultsRestart) btnResultsRestart.addEventListener('click', () => restartGame({ fromUserGesture: true }));
 
 const btnReducedMotion = document.getElementById('btn-reduced-motion');
 function updateReducedMotionPill() {
@@ -3221,7 +3269,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (k === 'r') {
-    restartGame();
+    restartGame({ fromUserGesture: true });
     return;
   }
   if (k === 'c') {
@@ -4777,7 +4825,7 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261017c').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261017d').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
@@ -4813,8 +4861,15 @@ if (IS_DEBUG_MODE) {
       triggerGameEnd,
       getActiveBruiserCount,
       computeAccuracyRank,
-      evaluateBeatWindow: (t) => evaluateBeatWindow(t !== undefined ? t : audioEngine.getSongTime()),
-      evaluateBeatWindowAtTime: (t) => evaluateBeatWindow(t),
+      evaluateBeatWindow: (t, applyOutputLatency = audioEngine.isPlaying) => {
+        if (t === undefined) return evaluateBeatWindow(audioEngine.getSongTime());
+        const compT = (t !== null && applyOutputLatency) ? Math.max(0, t - audioEngine.getOutputLatencySec()) : t;
+        return evaluateBeatWindow(compT);
+      },
+      evaluateBeatWindowAtTime: (t, applyOutputLatency = audioEngine.isPlaying) => {
+        const compT = (t !== null && t !== undefined && applyOutputLatency) ? Math.max(0, t - audioEngine.getOutputLatencySec()) : t;
+        return evaluateBeatWindow(compT);
+      },
       quantizeWindupToBeat,
       estimateBpmFromAudioBuffer,
       buildCustomTrackChart,

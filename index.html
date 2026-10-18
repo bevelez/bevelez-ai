@@ -25,7 +25,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css?v=10" />
+  <link rel="stylesheet" href="./style.css?v=11" />
 
   <script type="importmap">
     {
@@ -60,8 +60,14 @@
           <span class="btn-icon" id="audio-icon">▶</span>
           <span id="audio-label">AUDIO</span>
         </button>
+        <div class="radio-dial" role="group" aria-label="Outrun radio station">
+          <span class="dial-label" aria-hidden="true">RADIO</span>
+          <button id="btn-station-prev" class="dial-btn" type="button" aria-label="Previous station">‹</button>
+          <button id="btn-station-name" class="dial-name" type="button" title="Tap for the next station">MIDNIGHT CRUISE</button>
+          <button id="btn-station-next" class="dial-btn" type="button" aria-label="Next station">›</button>
+        </div>
         <button id="btn-lyria-modal" class="cyber-btn cyber-btn-accent" type="button" title="Generate or configure Lyria 3.5 AI soundtrack">
-          <span>✦ LYRIA 3.5</span>
+          <span>✦<span class="lyria-text"> LYRIA 3.5</span></span>
         </button>
         <button id="btn-cinema" class="cyber-btn cyber-btn-ghost" type="button" title="Toggle HUD Card (Drive Mode)">
           <span id="cinema-label">HIDE HUD</span>
@@ -173,7 +179,7 @@
       </div>
 
       <p class="modal-desc">
-        Generate a custom 44.1 kHz stereo cyberpunk chill track using Google's <code>lyria-3.5</code> model via the Gemini Interactions API, or drop a pre-generated file at <code>assets/lyria-cyberpunk.mp3</code> and set <code>PREBAKED_TRACK</code> in <code>audio.js</code>. While generating or when no API key is set, the built-in Web Audio synthwave engine plays automatically.
+        Generate a custom 44.1 kHz stereo cyberpunk chill track using Google's <code>lyria-3.5</code> model via the Gemini Interactions API, or drop a pre-generated file in <code>assets/</code> and add it as a file station in <code>radio.js</code>. While generating or when no API key is set, the Outrun Radio's built-in Web Audio stations play.
       </p>
 
       <div class="form-group">
@@ -195,7 +201,7 @@
       </div>
 
       <div id="lyria-status" class="lyria-status">
-        Ready. Currently using the built-in Cyberpunk Chill Web Audio Synth (92 BPM).
+        Ready. Currently tuned to the Outrun Radio's built-in Web Audio stations.
       </div>
 
       <div class="modal-actions">
@@ -206,12 +212,12 @@
           <span>⬇ Save MP3 to Disk</span>
         </a>
         <button id="btn-use-synth" class="cyber-btn cyber-btn-ghost" type="button">
-          <span>Switch to WebAudio Synth</span>
+          <span>Back to Outrun Radio</span>
         </button>
       </div>
     </div>
   </div>
 
-  <script type="module" src="./main.js?v=22"></script>
+  <script type="module" src="./main.js?v=23"></script>
 </body>
 </html>

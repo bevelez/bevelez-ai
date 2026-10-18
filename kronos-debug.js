@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import {
   buildChallengerModel,
   buildKronosBossModel
-} from './kronos-models.js?v=20261017c';
+} from './kronos-models.js?v=20261017d';
 
 export function attachKronosDebugHarness(ctx) {
   const {
@@ -152,7 +152,8 @@ export function attachKronosDebugHarness(ctx) {
       spawnWave(w);
       return window.KronosTestAPI.getState();
     },
-    evaluateBeatWindow: (t) => evaluateBeatWindow(t),
+    evaluateBeatWindow: (t, applyOutputLatency) => evaluateBeatWindow(t, applyOutputLatency),
+    evaluateBeatWindowAtTime: (t, applyOutputLatency) => evaluateBeatWindow(t, applyOutputLatency),
 
     getState: () => {
       if (updateCameraJuiceState) updateCameraJuiceState();

@@ -4,7 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { CyberAudioEngine } from './audio.js?v=7';
+import { CyberAudioEngine } from './audio.js?v=8';
 
 // ============================================================================
 // 1. INITIALIZE SCENE, CAMERA, RENDERER & BLOOM POST-PROCESSING
@@ -816,6 +816,24 @@ btnAudioToggle.addEventListener('click', () => {
   audioEngine.toggle();
 });
 
+// Outrun Radio dial: ‹ › change station; the name starts the radio, or skips when already playing
+const btnStationPrev = document.getElementById('btn-station-prev');
+const btnStationNext = document.getElementById('btn-station-next');
+const btnStationName = document.getElementById('btn-station-name');
+function renderStation(station) {
+  if (btnStationName) btnStationName.textContent = station.name;
+}
+renderStation(audioEngine.station);
+audioEngine.onStationChange = renderStation;
+if (btnStationPrev) btnStationPrev.addEventListener('click', () => audioEngine.prevStation());
+if (btnStationNext) btnStationNext.addEventListener('click', () => audioEngine.nextStation());
+if (btnStationName) {
+  btnStationName.addEventListener('click', () => {
+    if (audioEngine.isPlaying) audioEngine.nextStation();
+    else audioEngine.toggle();
+  });
+}
+
 function toggleCardCollapse() {
   const collapsed = heroCard.classList.toggle('collapsed');
   collapseIcon.textContent = collapsed ? '+' : '−';
@@ -894,7 +912,7 @@ lyriaModal.addEventListener('click', (e) => {
 
 btnUseSynth.addEventListener('click', () => {
   audioEngine.startSynth();
-  lyriaStatus.innerHTML = 'Switched to built-in <strong>Cyberpunk Chill Web Audio Synthesizer (92 BPM)</strong>.';
+  lyriaStatus.innerHTML = `Back on the Outrun Radio: <strong>${audioEngine.station.name}</strong> (${audioEngine.station.bpm} BPM).`;
 });
 
 btnGenerateLyria.addEventListener('click', async () => {
@@ -918,7 +936,7 @@ btnGenerateLyria.addEventListener('click', async () => {
     btnDownloadLyria.classList.remove('hidden');
     lyriaStatus.innerHTML = `✦ <strong>Success!</strong> Streaming newly generated <code>${model}</code> cyberpunk soundtrack. Click <strong>Save MP3 to Disk</strong> to save it as <code>assets/lyria-cyberpunk.mp3</code>.`;
   } catch (err) {
-    lyriaStatus.innerHTML = `<span style="color:#ff6b9d">Error calling Lyria API: ${err.message}</span><br/>Falling back to built-in Cyberpunk Chill Synthwave engine.`;
+    lyriaStatus.innerHTML = `<span style="color:#ff6b9d">Error calling Lyria API: ${err.message}</span><br/>Falling back to the Outrun Radio.`;
     audioEngine.startSynth();
   } finally {
     btnGenerateLyria.disabled = false;
