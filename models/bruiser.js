@@ -7,7 +7,7 @@ import {
   drawOnBackSeam,
   optimizeArticulatedRigBones,
   createContactShadowDecal
-} from './shared.js?v=20261018r';
+} from './shared.js?v=20261018s';
 
 // ============================================================================
 // ENHANCED HYPE-CREW BRUISER PROCEDURAL 3D SCULPT & TEXTURE SYSTEM (MILESTONE 1)

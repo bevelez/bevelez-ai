@@ -9,7 +9,7 @@ import {
   drawOnBackSeam,
   optimizeArticulatedRigBones,
   createContactShadowDecal
-} from './shared.js?v=20261018r';
+} from './shared.js?v=20261018s';
 
 // ============================================================================
 // 2B. CHALLENGER 1024x1024 TURNAROUND UV TEXTURE GENERATORS

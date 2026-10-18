@@ -19,6 +19,8 @@ TARGET_FACES = int(opt('--faces', '24000'))
 TEX_SIZE = int(opt('--tex', '1024'))
 FRONT = opt('--front', 'auto')          # which Blender axis the generated mesh faces
 STRIP_ARMATURE = '--strip-armature' in argv  # dry-run mode: drop any skeleton that came with the GLB
+TRIM_BAND = opt('--trim-depth-band', None)  # 'z0,z1': in that height band, drop geometry deeper than the chest profile
+FRONT_MASK = opt('--front-mask', None)       # keyed front crop: geometry outside its silhouette is carved away
 
 # ---------------------------------------------------------------------------------------------
 # Joint spec in Three.js Y-up coordinates: name -> (parent, (x, y, z)). Identical to the clip GLBs.
@@ -106,7 +108,7 @@ total_ext = (co_all.max(0) - co_all.min(0)).max()
 for comp in comps:
     P = co_all[comp]; ext = np.sort(P.max(0) - P.min(0))
     planar = ext[0] < 0.04 * ext[2]
-    tiny = ext[2] < 0.02 * total_ext
+    tiny = ext[2] < 0.02 * total_ext or len(comp) < 0.01 * co_all.shape[0]
     if planar or tiny: drop.update(comp)
     else: kept.append(len(comp))
 if drop:
@@ -163,6 +165,81 @@ for v, c in zip(mesh.data.vertices, co):
     v.co = Vector(c)
 mesh.data.update()
 
+trim_report = None
+if TRIM_BAND:
+    z0, z1 = [float(v) for v in TRIM_BAND.split(',')]
+    chest = co_dense[(co_dense[:, 2] > 1.2) & (co_dense[:, 2] < 1.5)]
+    ymin_b, ymax_b = np.percentile(chest[:, 1], 1), np.percentile(chest[:, 1], 99)
+    def deep(P):
+        inband = (P[:, 2] >= z0) & (P[:, 2] <= z1)
+        return inband & ((P[:, 1] < ymin_b + 0.0) | (P[:, 1] > ymax_b - 0.0))
+    dm = deep(co)
+    if dm.any():
+        bm = bmesh.new(); bm.from_mesh(mesh.data); bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in np.nonzero(dm)[0]], context='VERTS')
+        bm.to_mesh(mesh.data); mesh.data.update(); bm.free()
+        co = np.array([v.co[:] for v in mesh.data.vertices], dtype=np.float64)
+    kd = ~deep(co_dense)
+    remap = -np.ones(co_dense.shape[0], dtype=np.int64); remap[kd] = np.arange(int(kd.sum()))
+    tri_ok = kd[tris_dense].all(axis=1); tris_dense = remap[tris_dense[tri_ok]]; co_dense = co_dense[kd]
+    trim_report = {'verts_dropped': int(dm.sum()), 'chest_y': [round(float(ymin_b), 3), round(float(ymax_b), 3)]}
+
+# Silhouette carve: the generator reconstructs one volume from the front view, so studio panels,
+# floor wedges and anything else outside the drawn figure can be removed by projecting every
+# vertex into the keyed front crop and dropping those that land on transparent pixels.
+carve_report = None
+if FRONT_MASK and os.path.exists(FRONT_MASK):
+    mimg = bpy.data.images.load(FRONT_MASK); mw, mh = mimg.size
+    malpha = np.array(mimg.pixels[:], dtype=np.float32).reshape(mh, mw, 4)[::-1][..., 3] > 0.5
+    # erode 2 px so the carve never nibbles the figure's own edge
+    er = malpha.copy()
+    for _ in range(3):
+        e = er.copy(); e[1:] &= er[:-1]; e[:-1] &= er[1:]; e[:, 1:] &= er[:, :-1]; e[:, :-1] &= er[:, 1:]; er = e
+    mys, mxs = np.nonzero(malpha); bx0, bx1, by0, by1 = mxs.min(), mxs.max() + 1, mys.min(), mys.max() + 1
+    # image width maps to the body's x extent measured above the hips (slabs live low); height to full z
+    xmin, xmax = co_dense[:, 0].min(), co_dense[:, 0].max()   # Hunyuan fits the mesh to the figure's image bbox
+    zmin, zmax = co_dense[:, 2].min(), co_dense[:, 2].max()
+    def outside(P):
+        # front camera looks along -facing; image u runs along the camera's right = (-facing) x up
+        u = (P[:, 0] - xmin) / max(1e-9, xmax - xmin)
+        if GAME_FACING_GLTF_Z[CHAR] < 0: u = 1.0 - u          # faces Blender +Y: camera at +Y, right = -X
+        v = (zmax - P[:, 2]) / max(1e-9, zmax - zmin)
+        ix = np.clip((bx0 + u * (bx1 - bx0)).astype(int), 0, mw - 1)
+        iy = np.clip((by0 + v * (by1 - by0)).astype(int), 0, mh - 1)
+        return ~er[iy, ix]
+    drop_mask = outside(co)
+    if drop_mask.any():
+        bm = bmesh.new(); bm.from_mesh(mesh.data); bm.verts.ensure_lookup_table()
+        bmesh.ops.delete(bm, geom=[bm.verts[i] for i in np.nonzero(drop_mask)[0]], context='VERTS')
+        bm.to_mesh(mesh.data); mesh.data.update(); bm.free()
+        co = np.array([v.co[:] for v in mesh.data.vertices], dtype=np.float64)
+    co_dense_all = co_dense.copy()
+    keep_dense = ~outside(co_dense)
+    remap = -np.ones(co_dense.shape[0], dtype=np.int64); remap[keep_dense] = np.arange(int(keep_dense.sum()))
+    tri_ok = keep_dense[tris_dense].all(axis=1)
+    tris_dense = remap[tris_dense[tri_ok]]; co_dense = co_dense[keep_dense]
+    # drop fragments the carve left floating (< 1.5 % of the vertices)
+    bm = bmesh.new(); bm.from_mesh(mesh.data); bm.verts.ensure_lookup_table()
+    seen = set(); frag = []
+    for v in bm.verts:
+        if v.index in seen: continue
+        stack = [v]; comp = []; seen.add(v.index)
+        while stack:
+            cur = stack.pop(); comp.append(cur)
+            for e in cur.link_edges:
+                ov = e.other_vert(cur)
+                if ov.index not in seen: seen.add(ov.index); stack.append(ov)
+        if len(comp) < 0.015 * len(bm.verts): frag.extend(comp)
+    if frag: bmesh.ops.delete(bm, geom=frag, context='VERTS')
+    bm.to_mesh(mesh.data); mesh.data.update(); bm.free()
+    co = np.array([v.co[:] for v in mesh.data.vertices], dtype=np.float64)
+    bands = {}
+    for z0 in np.arange(0.0, HEIGHTS[CHAR], 0.25):
+        sel = (co_dense_all[:, 2] >= z0) & (co_dense_all[:, 2] < z0 + 0.25)
+        bands[f'{z0:.2f}'] = round(float((~keep_dense)[sel].mean()), 2) if sel.any() else None
+    carve_report = {'verts_dropped': int(drop_mask.sum()), 'dense_dropped': int((~keep_dense).sum()), 'fragments_dropped': len(frag), 'dense_drop_frac_by_band': bands,
+                    'mask_bbox': [int(bx0), int(by0), int(bx1), int(by1)], 'x_extent': [round(float(xmin), 3), round(float(xmax), 3)]}
+
 # Fit the joint spec to this body by slicing an area-weighted surface sampling of the mesh.
 # Every design stands arms-down, so per height slice: two legs, then torso (+ two arms when they
 # separate from the body), then neck and head. The spec supplies parent links and the pivot offsets;
@@ -212,6 +289,9 @@ def slice_components(zc, band=0.008, min_n=60):
 DZ = 0.01
 zs = np.arange(0.03, H - 0.005, DZ)
 info = [(z, slice_components(z)) for z in zs]
+if '--dump-slices' in argv:
+    for z, comps in info[::4]:
+        print(f'SLICE z {z:.2f} ({len(comps)}): ' + ' | '.join(f"x{c['c'][0]:+.2f} y{c['c'][1]:+.2f} w{c['w']:.2f} n{c['n']}" for c in comps))
 def width_all(comps):
     return (max(c['max'][0] for c in comps) - min(c['min'][0] for c in comps)) if comps else 0.0
 def symmetric_pair(a, b):
@@ -230,10 +310,13 @@ if crotch is None: crotch = 0.42 * H
 def comps_at(zq): return min(info, key=lambda r: abs(r[0] - zq))[1]
 def leg_centres(zq):
     comps = comps_at(zq)
-    if len(comps) >= 2:
+    if len(leg_z) >= 10 and len(comps) >= 2:
         return comps[0]['c'], comps[-1]['c']
-    c = comps[0]['c'] if comps else np.array([0.0, 0.0])
-    return np.array([c[0] - 0.1, c[1]]), np.array([c[0] + 0.1, c[1]])
+    # fused legs (baggy trousers touching): split the lower-body block in two at its centre
+    if not comps: return np.array([-0.1, 0.0]), np.array([0.1, 0.0])
+    big = max(comps, key=lambda c: c['n'])
+    cx = 0.5 * (big['min'][0] + big['max'][0]); q = 0.25 * (big['max'][0] - big['min'][0])
+    return np.array([cx - q, big['c'][1]]), np.array([cx + q, big['c'][1]])
 # ankle: narrowest leg slice between 0.06H and 0.2H
 ankle_z, best = 0.12 * H, 1e9
 for z, comps in info:
@@ -483,6 +566,6 @@ report = {
   'char': CHAR, 'faces_before': faces_before, 'faces_after': faces_after, 'verts': int(co.shape[0]),
   'height_in': float(height), 'scale': float(scale), 'front_xy_detected': [float(x) for x in front_xy],
   'rotated_deg': float(math.degrees(ang)), 'arm_x': float(joints['leftArm'].x), 'autofit': autofit,
-  'glb_bytes': os.path.getsize(OUT_GLB), 'components': components_report, 'bridges': bridge_report, 'images': [(i.name, list(i.size)) for i in bpy.data.images]
+  'glb_bytes': os.path.getsize(OUT_GLB), 'components': components_report, 'bridges': bridge_report, 'carve': carve_report, 'trim': trim_report, 'images': [(i.name, list(i.size)) for i in bpy.data.images]
 }
 print('FIT_REPORT ' + json.dumps(report))

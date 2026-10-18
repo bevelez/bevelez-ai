@@ -5,8 +5,8 @@ import {
   createHiFiMesh,
   mergeStaticGroupMeshes,
   createContactShadowDecal
-} from './shared.js?v=20261018r';
-import { buildSpectatorModel } from './crowd.js?v=20261018r';
+} from './shared.js?v=20261018s';
+import { buildSpectatorModel } from './crowd.js?v=20261018s';
 import {
   createAmbulanceSideTexture,
   createApartmentBrickTexture,
@@ -28,7 +28,7 @@ import {
   createVanGrilleTexture,
   createWoodenCrate,
   createWoodenPallet
-} from './stage.js?v=20261018r';
+} from './stage.js?v=20261018s';
 
 // ============================================================================
 // 5. BLOCK-PARTY ARENA BACKDROP: BANNERS, BARRICADES, CABLES & STRING LIGHTS

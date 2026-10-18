@@ -4,8 +4,19 @@ import json, os, subprocess, sys, time, urllib.request
 
 SPACE = os.environ.get('HY3D_SPACE', 'https://tencent-hunyuan3d-2-1.hf.space')
 
+def _hf_token():
+    tok = os.environ.get('HF_TOKEN')
+    if tok: return tok.strip()
+    for cand in (os.path.expanduser('~/.cache/huggingface/token'), os.path.expanduser('~/.huggingface/token')):
+        if os.path.exists(cand):
+            return open(cand).read().strip()
+    return None
+HF_TOKEN = _hf_token()
+AUTH_HEADERS = {'Authorization': f'Bearer {HF_TOKEN}'} if HF_TOKEN else {}
+
 def upload(path):
-    out = subprocess.run(['curl', '-s', '-m', '120', '-F', f'files=@{path}', f'{SPACE}/upload'], capture_output=True, text=True)
+    auth = ['-H', f'Authorization: Bearer {HF_TOKEN}'] if HF_TOKEN else []
+    out = subprocess.run(['curl', '-s', '-m', '120', *auth, '-F', f'files=@{path}', f'{SPACE}/upload'], capture_output=True, text=True)
     paths = json.loads(out.stdout)
     return paths[0]
 
@@ -13,12 +24,12 @@ def filedata(server_path, local):
     return {"path": server_path, "orig_name": os.path.basename(local), "mime_type": "image/png", "meta": {"_type": "gradio.FileData"}}
 
 def call(fn, data, timeout=1500):
-    req = urllib.request.Request(f'{SPACE}/call/{fn}', data=json.dumps({"data": data}).encode(), headers={'Content-Type': 'application/json'})
+    req = urllib.request.Request(f'{SPACE}/call/{fn}', data=json.dumps({"data": data}).encode(), headers={'Content-Type': 'application/json', **AUTH_HEADERS})
     with urllib.request.urlopen(req, timeout=60) as r:
         event_id = json.loads(r.read())['event_id']
     print('event', event_id, flush=True)
     t0 = time.time()
-    req = urllib.request.Request(f'{SPACE}/call/{fn}/{event_id}')
+    req = urllib.request.Request(f'{SPACE}/call/{fn}/{event_id}', headers=AUTH_HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         event = None
         for raw in r:
@@ -36,10 +47,12 @@ def call(fn, data, timeout=1500):
 
 def download(fd, dest):
     url = f"{SPACE}/file={fd['path']}"
-    subprocess.run(['curl', '-s', '-L', '-m', '600', '-o', dest, url], check=True)
+    auth = ['-H', f'Authorization: Bearer {HF_TOKEN}'] if HF_TOKEN else []
+    subprocess.run(['curl', '-s', '-L', '-m', '600', *auth, '-o', dest, url], check=True)
     return os.path.getsize(dest)
 
 if __name__ == '__main__':
+    print('hf token:', 'present' if HF_TOKEN else 'none', flush=True)
     name = sys.argv[1]; indir = sys.argv[2]; outdir = sys.argv[3]
     views = {}
     for v in ('front', 'back', 'side'):

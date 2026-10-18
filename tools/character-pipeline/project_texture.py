@@ -138,20 +138,61 @@ col[have] /= wsum[have][:, None]
 tex = np.zeros((TEX, TEX, 3)); known = np.zeros((TEX, TEX), bool)
 tex[ys_t[have], xs_t[have]] = col[have]; known[ys_t[have], xs_t[have]] = True
 print(f'[{time.time()-t0:.0f}s] painted {int(have.sum())} / {len(Pf)} texels; inpainting the rest', flush=True)
-# inpaint: iterative neighbour averaging into unknown texels (also pads island borders)
-for it in range(48):
+# 3-D fill for texels no view reached (backs without a back view, undersides, occluded folds):
+# voxelise the painted texels' colours in world space, dilate the voxel colours through empty
+# cells, then give every unpainted texel its voxel's colour. Colours therefore flow around the
+# body (vest side -> vest back) instead of across unrelated UV islands.
+VOX = 0.012
+pmin = Pf.min(axis=0) - 2 * VOX; dims = np.ceil((Pf.max(axis=0) + 2 * VOX - pmin) / VOX).astype(int) + 2
+def vox_index(Q): return np.clip(((Q - pmin) / VOX).astype(int), 0, dims - 1)
+vall = vox_index(Pf)
+surface = np.zeros(dims, bool); surface[vall[:, 0], vall[:, 1], vall[:, 2]] = True
+# a 1-voxel shell around the surface so colour can hop across small gaps but not through the body
+shell = surface.copy()
+for ax in range(3):
+    for sh in (-1, 1): shell |= np.roll(surface, sh, axis=ax)
+vi = vall[have]
+acc = np.zeros((*dims, 3)); cnt = np.zeros(dims)
+np.add.at(acc, (vi[:, 0], vi[:, 1], vi[:, 2]), col[have]); np.add.at(cnt, (vi[:, 0], vi[:, 1], vi[:, 2]), 1.0)
+vcol = np.zeros_like(acc); vfill = cnt > 0; vcol[vfill] = acc[vfill] / cnt[vfill][..., None]
+need = vall[~have]
+for it in range(200):
+    if vfill[need[:, 0], need[:, 1], need[:, 2]].all(): break
+    a = np.zeros_like(vcol); c = np.zeros(dims)
+    for ax in range(3):
+        for sh in (-1, 1):
+            a += np.roll(vcol, sh, axis=ax) * np.roll(vfill, sh, axis=ax)[..., None]; c += np.roll(vfill, sh, axis=ax)
+    f = ~vfill & shell & (c > 0); vcol[f] = a[f] / c[f][..., None]; vfill |= f
+    if not f.any(): break
+# trilinear sample of the voxel colours (unfilled neighbours are skipped) for every unpainted texel
+Q = (Pf[~have] - pmin) / VOX - 0.5
+q0 = np.floor(Q).astype(int); fr = Q - q0
+samp = np.zeros((len(Q), 3)); wsum2 = np.zeros(len(Q))
+for dx in (0, 1):
+    for dy in (0, 1):
+        for dz in (0, 1):
+            ix = np.clip(q0[:, 0] + dx, 0, dims[0] - 1); iy = np.clip(q0[:, 1] + dy, 0, dims[1] - 1); iz = np.clip(q0[:, 2] + dz, 0, dims[2] - 1)
+            w8 = (fr[:, 0] if dx else 1 - fr[:, 0]) * (fr[:, 1] if dy else 1 - fr[:, 1]) * (fr[:, 2] if dz else 1 - fr[:, 2]) * vfill[ix, iy, iz]
+            samp += vcol[ix, iy, iz] * w8[:, None]; wsum2 += w8
+okf = wsum2 > 1e-6
+fillcol = np.zeros((len(Q), 3)); fillcol[okf] = samp[okf] / wsum2[okf][:, None]
+fillcol[~okf] = vcol[need[~okf, 0], need[~okf, 1], need[~okf, 2]]
+col[~have] = fillcol
+tex = np.zeros((TEX, TEX, 3)); known = np.zeros((TEX, TEX), bool)
+tex[ys_t, xs_t] = col; known[ys_t, xs_t] = True
+print(f'[{time.time()-t0:.0f}s] 3-D fill done ({int((~have).sum())} texels)', flush=True)
+# pad island borders by 6 px so bilinear/mip sampling never pulls in the void
+for it in range(6):
     todo = ~known
-    if not todo.any(): break
-    acc = np.zeros_like(tex); cnt = np.zeros((TEX, TEX))
+    acc2 = np.zeros_like(tex); cnt2 = np.zeros((TEX, TEX))
     for dy in (-1, 0, 1):
         for dx in (-1, 0, 1):
             if dx == 0 and dy == 0: continue
             sh = np.roll(np.roll(tex, dy, 0), dx, 1); shk = np.roll(np.roll(known, dy, 0), dx, 1)
-            acc += sh * shk[..., None]; cnt += shk
-    fillable = todo & (cnt > 0)
-    tex[fillable] = acc[fillable] / cnt[fillable][..., None]
+            acc2 += sh * shk[..., None]; cnt2 += shk
+    fillable = todo & (cnt2 > 0)
+    tex[fillable] = acc2[fillable] / cnt2[fillable][..., None]
     known |= fillable
-    if it >= 8 and not (todo & filled).any(): break
 # write texture (Blender pixels: bottom row first)
 out = bpy.data.images.new('basecolor', TEX, TEX, alpha=False)
 rgba = np.concatenate([tex, np.ones((TEX, TEX, 1))], axis=2).astype(np.float32)  # row 0 == v 0 == Blender bottom row
