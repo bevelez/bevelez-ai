@@ -17,7 +17,8 @@ const ORIGIN = { lat: 37.396, lon: -122.079 };
 const R_EARTH = 6378137;
 const isCoarse = matchMedia('(pointer: coarse)').matches;
 const isSmall = innerWidth < 760;
-const LOW = isCoarse || isSmall;
+const LOW = isCoarse;          // phones: no GTAO, fewer trees
+const DENSE = !(isCoarse || isSmall);
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const elMap = document.getElementById('map');
@@ -29,12 +30,12 @@ const elClock = document.getElementById('clock');
 const elChips = document.getElementById('chips');
 const elHome = document.getElementById('home');
 
-const renderer = new THREE.WebGLRenderer({ antialias: !LOW, powerPreference: 'high-performance' });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 2 : 1.75));
 renderer.setSize(innerWidth, innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMapping = THREE.NeutralToneMapping;
 renderer.toneMappingExposure = 1.0;
 elMap.appendChild(renderer.domElement);
 
@@ -63,16 +64,16 @@ function toLocal(lon, lat) {
 
 // ---------------------------------------------------------------- palettes
 const DAY = {
-  land: '#e8e4dc', park: '#c3dcae', wetland: '#cfd9c2', waterDeep: '#86b7e3', waterShallow: '#a9cff0',
+  land: '#ede8de', park: '#c6dfb0', wetland: '#d2dcc4', waterDeep: '#86b7e3', waterShallow: '#a9cff0',
   apron: '#d6d3cd', runway: '#c4c2bd', taxiway: '#cfccc6', rail: '#b4b0a7', stream: '#9ec6ea',
   road: {
-    re: ['#ffffff', '#d8d4cb'], te: ['#ffffff', '#d2cec4'], se: ['#ffffff', '#cbc6bb'], sel: ['#ffffff', '#cbc6bb'],
+    re: ['#ffffff', '#d2cdc2'], te: ['#ffffff', '#cdc8bc'], se: ['#ffffff', '#c7c1b5'], sel: ['#ffffff', '#c7c1b5'],
     pr: ['#fbf2d4', '#e0d3ad'], prl: ['#fbf2d4', '#e0d3ad'], tr: ['#f8dea4', '#e0bd70'], trl: ['#f8dea4', '#e0bd70'],
     mw: ['#f7d78f', '#dbb362'], mwl: ['#f8dea4', '#dbb362'], pe: ['#f2efe8', '#dedad0'], cy: ['#e4e0d6', '#e4e0d6'],
   },
   wall: '#f0ede7', roof: '#f9f8f4', googleRoof: '#f4f3ef', hangar1: '#d9dde3', hangar: '#cdbfa8', tent: '#fbfbfa', canopy: '#3b4556', glass: '#a7bccf',
-  skyTop: '#6fa8e6', skyHorizon: '#dde8f2', fog: '#dfe8f3', fogDensity: 0.000055,
-  hemiSky: '#d6e6ff', hemiGround: '#d0c8b9', hemi: 1.35, sun: '#fff3df', sunI: 2.3, exposure: 1.0,
+  skyTop: '#6fa8e6', skyHorizon: '#dde8f2', fog: '#dfe8f3', fogNear: 3200, fogFar: 17000,
+  hemiSky: '#e4efff', hemiGround: '#e2dacc', hemi: 1.7, sun: '#fff6e8', sunI: 1.9, exposure: 1.0,
   canopyA: '#6aa35a', canopyB: '#4f8f48', trunk: '#8a7256', lit: 0.0, bloom: 0.0, stars: 0.0, lamp: 0.0,
 };
 const NIGHT = {
@@ -84,7 +85,7 @@ const NIGHT = {
     mw: ['#6c6372', '#443d49'], mwl: ['#625c6a', '#443d49'], pe: ['#383d4c', '#2a2e3b'], cy: ['#343949', '#343949'],
   },
   wall: '#3b4252', roof: '#4a5162', googleRoof: '#4a5162', hangar1: '#4a515d', hangar: '#46403b', tent: '#dde1ea', canopy: '#353c4a', glass: '#44566c',
-  skyTop: '#0a0e1a', skyHorizon: '#2a3555', fog: '#161c2d', fogDensity: 0.00007,
+  skyTop: '#0a0e1a', skyHorizon: '#2a3555', fog: '#161c2d', fogNear: 2600, fogFar: 15000,
   hemiSky: '#3e4f7a', hemiGround: '#1e222c', hemi: 1.9, sun: '#aabbe6', sunI: 0.7, exposure: 1.05,
   canopyA: '#27412e', canopyB: '#1d3325', trunk: '#25262c', lit: 0.42, bloom: 0.5, stars: 1.0, lamp: 1.0,
 };
@@ -104,9 +105,10 @@ function applyPhase(t) {
 }
 
 // ---------------------------------------------------------------- lights, sky, fog
-scene.fog = new THREE.FogExp2(DAY.fog, DAY.fogDensity);
+scene.fog = new THREE.Fog(DAY.fog, DAY.fogNear, DAY.fogFar);
 trackColor(scene.fog.color, DAY.fog, NIGHT.fog);
-trackNumber(scene.fog, 'density', DAY.fogDensity, NIGHT.fogDensity);
+trackNumber(scene.fog, 'near', DAY.fogNear, NIGHT.fogNear);
+trackNumber(scene.fog, 'far', DAY.fogFar, NIGHT.fogFar);
 
 const hemi = new THREE.HemisphereLight(DAY.hemiSky, DAY.hemiGround, DAY.hemi);
 trackColor(hemi.color, DAY.hemiSky, NIGHT.hemiSky);
@@ -305,7 +307,7 @@ function buildingSurface(mat, { windows = true } = {}) {
         // day tint comes from the vertex colour; at night walls and roofs settle to the night palette
         diffuseColor.rgb = mix(diffuseColor.rgb, mix(uNightRoof, uNightWall, wall), uNightTint);
         // contact shading near the ground, a paper-light rim under the roof edge, faint floor lines for scale
-        float base = mix(0.82, 1.0, smoothstep(0.0, 6.0, vWPos.y));
+        float base = mix(0.86, 1.0, smoothstep(0.0, 6.0, vWPos.y));
         float rim = smoothstep(vBh - 1.1, vBh - 0.15, vWPos.y);
         float floors = 1.0 - 0.035 * step(0.86, fract(vWPos.y / 3.4)) * step(6.5, vBh);
         diffuseColor.rgb *= mix(1.0, base * (1.0 + 0.09 * rim) * floors, wall);`)
@@ -476,7 +478,7 @@ function buildBuildings() {
   const wall = buildingSurface(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.92, metalness: 0.0, vertexColors: true }));
   const roofDay = new THREE.Color(DAY.roof);
   // soft pastel wall tints, chosen per building so blocks read as separate buildings
-  const TINTS = ['#f2efe8', '#efe9df', '#ebe8e4', '#f1ebe6', '#e8ebee', '#f0ece2', '#ede7e9'].map(c => new THREE.Color(c));
+  const TINTS = ['#f6f3ec', '#f3eee5', '#f0eeea', '#f5f0eb', '#eef0f3', '#f4f0e7', '#f2ecee'].map(c => new THREE.Color(c));
   const rnd = mulberry32(7);
 
   for (const b of bundle.buildings) {
@@ -658,13 +660,13 @@ async function buildTrees() {
 
   const rnd = mulberry32(1337);
   const spots = []; // x, y(north), scale, hue
-  const MAX = LOW ? 9000 : 22000;
+  const MAX = DENSE ? 22000 : 9000;
   // parks: scattered on a jittered grid
   for (const park of bundle.parks) {
     const pts = []; for (let i = 0; i < park.p.length; i += 2) pts.push([park.p[i] / 10, park.p[i + 1] / 10]);
     const minX = Math.min(...pts.map(p => p[0])), maxX = Math.max(...pts.map(p => p[0]));
     const minY = Math.min(...pts.map(p => p[1])), maxY = Math.max(...pts.map(p => p[1]));
-    const step = LOW ? 24 : 17;
+    const step = DENSE ? 17 : 24;
     for (let y = minY; y < maxY; y += step) for (let x = minX; x < maxX; x += step) {
       const jx = x + (rnd() - 0.5) * step, jy = y + (rnd() - 0.5) * step;
       if (rnd() > 0.78 || !pointInPoly(jx, jy, pts) || !free(jx, jy)) continue;
@@ -681,7 +683,7 @@ async function buildTrees() {
       const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
       const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy); if (len < 1) continue;
       const nx = -dy / len, ny = dx / len;
-      for (let d = carry; d < len; d += LOW ? 26 : 19) {
+      for (let d = carry; d < len; d += DENSE ? 19 : 26) {
         const t = d / len, x = x0 + dx * t, y = y0 + dy * t;
         for (const sgn of [-1, 1]) {
           if (rnd() > 0.62) continue;
@@ -689,7 +691,7 @@ async function buildTrees() {
           if (free(tx, ty)) spots.push(tx, ty, 0.65 + rnd() * 0.55, rnd());
         }
       }
-      carry = (carry - len) % (LOW ? 26 : 19); if (carry < 0) carry += LOW ? 26 : 19;
+      carry = (carry - len) % (DENSE ? 19 : 26); if (carry < 0) carry += DENSE ? 19 : 26;
     }
     if (spots.length / 4 > MAX) break;
   }
@@ -890,9 +892,8 @@ function dirFromSky(azDeg, elDeg) {
 }
 const sunDirDay = new THREE.Vector3(), sunDirNight = dirFromSky(120, 42), sunDir = new THREE.Vector3();
 function updateSunDirDay() {
-  const s = sunPosition(new Date(), ORIGIN.lat, ORIGIN.lon);
-  if (s.elevation > 14) sunDirDay.copy(dirFromSky(s.azimuth, s.elevation));
-  else sunDirDay.copy(dirFromSky(222, 46)); // a pleasant afternoon when the real sun is low
+  // a fixed early-afternoon sun: short soft shadows, walls never fall into deep shade
+  sunDirDay.copy(dirFromSky(208, 58));
 }
 updateSunDirDay();
 
@@ -929,7 +930,7 @@ updateClock(); setInterval(updateClock, 30000);
 // ---------------------------------------------------------------- post-processing
 let composer = null, gtaoPass = null, bloomPass = null;
 function setupPost() {
-  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: LOW ? 0 : 4, type: THREE.HalfFloatType });
+  const rt = new THREE.WebGLRenderTarget(innerWidth, innerHeight, { samples: 4, type: THREE.HalfFloatType });
   composer = new EffectComposer(renderer, rt);
   composer.addPass(new RenderPass(scene, camera));
   if (!LOW) {
