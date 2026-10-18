@@ -355,7 +355,8 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
     explicitMarkerTime,
     leadBeats,
     counterSubdivision = 0.5,
-    damage
+    damage,
+    enemyArchetype
   }) => {
     const spec = ENEMY_CLIP_SPECS[pattern] || ENEMY_CLIP_SPECS.hook;
     const resolvedMarkerTime = explicitMarkerTime !== undefined
@@ -373,6 +374,7 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
       beatInBar,
       globalBeat,
       pattern: pattern || 'hook',
+      enemyArchetype: enemyArchetype || null,
       attackType: attackType || spec.attackType,
       comboStep: comboStep !== undefined ? comboStep : spec.comboStep,
       targetRole: targetRole || (wave === 3 ? 'any' : 'bruiser'),
@@ -394,6 +396,7 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
   const explicitMarkers = [];
   if (Array.isArray(chart.movesetSync) && chart.movesetSync.length > 0) {
     chart.movesetSync.forEach((m, idx) => {
+      if (!m || m.pattern === 'final_bar_finisher') return;
       const spec = ENEMY_CLIP_SPECS[m.pattern] || ENEMY_CLIP_SPECS.hook;
       const barIndex = m.barIndex !== undefined ? m.barIndex : Math.floor((m.beat !== undefined ? m.beat : idx) / 4);
       const beatInBar = m.beatInBar !== undefined ? m.beatInBar : ((m.beat !== undefined ? m.beat : idx) % 4);
@@ -418,6 +421,7 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
         comboStep,
         targetRole,
         explicitMarkerTime: m.markerTime,
+        enemyArchetype: m.enemyArchetype,
         leadBeats: m.leadBeats || m.windupBeats || spec.leadBeats || 1.0,
         counterSubdivision: m.counterSubdivision || m.subdivision || 0.5,
         damage: m.damage
@@ -448,6 +452,7 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
             comboStep,
             targetRole,
             explicitMarkerTime: m.markerTime,
+        enemyArchetype: m.enemyArchetype,
             leadBeats: m.leadBeats || m.windupBeats || spec.leadBeats || 1.0,
             counterSubdivision: m.counterSubdivision || m.subdivision || 0.5,
             damage: m.damage
@@ -628,7 +633,10 @@ export function selectEligibleAttacker(marker, enemies, playerState = {}, maxSim
     const cooldownScore = -cd * 1.25;
     const distScore = -Math.abs(dist - 1.45) * 0.65;
     const bossBonus = e.isBoss ? 1.5 : 0.0;
-    const score = facingDot * 2.2 + cooldownScore + distScore + bossBonus;
+    const archetypeBonus = marker.enemyArchetype
+      ? (e.archetype === marker.enemyArchetype ? 1.8 : (e.archetype ? -0.6 : 0.0))
+      : 0.0;
+    const score = facingDot * 2.2 + cooldownScore + distScore + bossBonus + archetypeBonus;
 
     if (score > bestScore) {
       bestScore = score;
@@ -1039,6 +1047,7 @@ export function createCombatDirector(options = {}) {
         ? (m.attackType === 'bass_drop' ? 'windup_shockwave' : 'windup_combo')
         : 'windup';
       attacker.attackType = m.attackType;
+      attacker.attackPattern = m.pattern;
       attacker.targetImpactSongTime = m.markerTime;
       attacker.stateTimer = remainingToMarker;
       attacker.windupTotalDur = remainingToMarker;
