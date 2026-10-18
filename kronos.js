@@ -10,18 +10,18 @@ import {
   KRONOS_TRACK_CHARTS,
   estimateBpmFromAudioBuffer,
   buildCustomTrackChart
-} from './kronos-tracks.js?v=20261018a';
-import { wrapCharacterRig, loadGLBAsset, loadClipsManifest } from './anim/rig-adapter.js?v=20261018a';
-import { prepareHandBuiltRigForClips, CHALLENGER_CLIP_PIVOTS } from './anim/handbuilt-rig.js?v=20261018a';
-import * as beatWarpModule from './anim/beatwarp.js?v=20261018a';
+} from './kronos-tracks.js?v=20261018c';
+import { wrapCharacterRig, loadGLBAsset, loadClipsManifest } from './anim/rig-adapter.js?v=20261018c';
+import { prepareHandBuiltRigForClips, CHALLENGER_CLIP_PIVOTS } from './anim/handbuilt-rig.js?v=20261018c';
+import * as beatWarpModule from './anim/beatwarp.js?v=20261018c';
 import {
   scheduleAction as scheduleBeatWarpAction,
   tickBeatWarp,
   cancelActorSchedules,
   clearActiveSchedules,
   setClipsManifest as setBeatWarpClipsManifest
-} from './anim/beatwarp.js?v=20261018a';
-import * as audioClockModule from './audio/clock.js?v=20261018a';
+} from './anim/beatwarp.js?v=20261018c';
+import * as audioClockModule from './audio/clock.js?v=20261018c';
 import {
   bindAudioEngine as clockBindAudioEngine,
   setActiveChart as clockSetActiveChart,
@@ -29,28 +29,43 @@ import {
   songTimeToContextTime as clockSongTimeToContextTime,
   nextSubdivision as clockNextSubdivision,
   nearestSubdivision as clockNearestSubdivision
-} from './audio/clock.js?v=20261018a';
+} from './audio/clock.js?v=20261018c';
 import {
   applyEnemyHitReaction,
   getDirectionalHitReactionProfile,
   updateEnemyReactionState
-} from './combat/reactions.js?v=20261018a';
-import { createContactShadowDecal } from './models/shared.js?v=20261018a';
+} from './combat/reactions.js?v=20261018c';
+import * as combatDirectorModule from './combat/director.js?v=20261018c';
+import {
+  tick as tickCombatDirector,
+  evaluateCounterInput as directorEvaluateCounterInput,
+  grantTakedownTokenProgress as directorGrantTokenProgress,
+  consumeTakedownToken as directorConsumeTakedownToken,
+  grantFeverProgress as directorGrantFeverProgress,
+  getDirectorTelemetry,
+  resetDirector
+} from './combat/director.js?v=20261018c';
+
+// Slice 2: enemies strike only on chart moveset markers through combat/director.js.
+const DIRECTOR_ENABLED = true;
+const FEVER_RUSH_BARS = 2;
+const FINISHER_INVULN_SEC = 1.2;
+import { createContactShadowDecal } from './models/shared.js?v=20261018c';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261018a';
-import { buildKronosBossModel } from './models/kronos.js?v=20261018a';
-import { buildBruiserModel } from './models/bruiser.js?v=20261018a';
+} from './models/challenger.js?v=20261018c';
+import { buildKronosBossModel } from './models/kronos.js?v=20261018c';
+import { buildBruiserModel } from './models/bruiser.js?v=20261018c';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261018a';
+} from './models/crowd.js?v=20261018c';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261018a';
+} from './models/stage.js?v=20261018c';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -60,15 +75,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261018a';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261018a';
+} from './models/arena.js?v=20261018c';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261018c';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261018a';
+} from './kronos-sfx.js?v=20261018c';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -88,6 +103,7 @@ export const TUNING = {
   INPUT_BUFFER_WINDOW_SEC: 0.50,
   PERFECT_WINDOW_SEC: 0.085,
   ON_BEAT_WINDOW_SEC: 0.165,
+  OFF_BEAT_DAMAGE_MULT: 0.6,
   AUTO_AIM_MAX_DIST: 1.85,
   ACTIVE_HIT_MAX_DIST: 1.98,
   ACTIVE_HIT_MIN_FACING_DOT: 0.22,
@@ -114,6 +130,7 @@ export const TUNING = {
     'punch-cross':    { startup: 0.075, active: 0.065, recovery: 0.170, baseDmg: 36 },
     'punch-uppercut': { startup: 0.085, active: 0.070, recovery: 0.190, baseDmg: 42 },
     'kick':           { startup: 0.095, active: 0.075, recovery: 0.210, baseDmg: 48 },
+    'finisher':       { startup: 0.085, active: 0.070, recovery: 0.190, baseDmg: 42 },
     'miss':           { startup: 0.040, active: 0.020, recovery: 0.220, baseDmg: 0 }
   },
   WAVES: {
@@ -1169,8 +1186,8 @@ const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
 // pivots (spine, neck, shoulders) are inserted so every clip track binds by name.
 const _clipPreloadPromise = (async () => {
   const [{ animations }, manifest] = await Promise.all([
-    loadGLBAsset('./assets/models/kronos-clips-challenger.glb?v=20261018a'),
-    loadClipsManifest('./assets/models/clips.json?v=20261018a')
+    loadGLBAsset('./assets/models/kronos-clips-challenger.glb?v=20261018c'),
+    loadClipsManifest('./assets/models/clips.json?v=20261018c')
   ]);
   const pivotReport = prepareHandBuiltRigForClips(challengerRig, CHALLENGER_CLIP_PIVOTS);
   wrapCharacterRig(challengerRig, {
@@ -1498,6 +1515,17 @@ const gameState = {
   impactBeatOffsetsMs: [],
   impactTargetOffsetsMs: [],
   wallSlamCount: 0,
+  takedownTokens: 0,
+  feverMeter: 0,
+  feverRushTimer: 0,
+  feverActivations: 0,
+  perfectCounters: 0,
+  imperfectCounters: 0,
+  counterAttempts: 0,
+  finishers: 0,
+  takedowns: 0,
+  lastCounterTime: -10,
+  directorScheduled: [],
   enemyStrikeEvents: [],
   playerHitStunTimer: 0,
   attackStartPose: null,
@@ -1525,6 +1553,7 @@ const btnPlay = document.getElementById('btn-play');
 const btnA = document.getElementById('btn-a');
 const btnS = document.getElementById('btn-s');
 const btnD = document.getElementById('btn-d');
+const btnF = document.getElementById('btn-f');
 
 function computeAccuracyRank() {
   const hasHistory = Array.isArray(gameState.hitHistory) && gameState.hitHistory.length > 0;
@@ -1677,8 +1706,20 @@ const MOVE_CLIP_NAMES = Object.freeze({
   'punch-jab': 'jab',
   'punch-cross': 'cross',
   'punch-uppercut': 'uppercut',
-  'kick': 'kick'
+  'kick': 'kick',
+  'finisher': 'uppercut'
 });
+
+/** Combat timers run on song time when the track is playing so cooldowns and strings follow the music. */
+function combatClockSec() {
+  const st = audioEngine.getSongTime();
+  return (st !== null && st !== undefined) ? st : performance.now() * 0.001;
+}
+
+/** True while a cooldown is still running; a clock that went backwards (loop, pause, restart) counts as expired. */
+function cooldownActive(lastT, nowT, cooldownSec) {
+  return Number.isFinite(lastT) && nowT >= lastT && (nowT - lastT) < cooldownSec;
+}
 
 function predictHitStopSec(action, punchStep, grade) {
   if (grade === 'MISS') return 0.024;
@@ -1816,8 +1857,16 @@ function updateHudNumbers() {
   }
   const elHypeFill = document.getElementById('hype-fill');
   const elHypeVal = document.getElementById('hype-val-text');
-  if (elHypeFill) elHypeFill.style.width = `${Math.max(0, Math.min(100, gameState.hype))}%`;
-  if (elHypeVal) elHypeVal.textContent = `${Math.round(gameState.hype)}%`;
+  const feverPct = Math.max(0, Math.min(100, gameState.feverMeter || 0));
+  if (elHypeFill) elHypeFill.style.width = `${gameState.feverRushTimer > 0 ? 100 : feverPct}%`;
+  if (elHypeVal) elHypeVal.textContent = gameState.feverRushTimer > 0 ? 'RUSH!' : `${Math.round(feverPct)}%`;
+  const elFeverBox = document.getElementById('hype-meter-container');
+  if (elFeverBox) elFeverBox.classList.toggle('fever-rush', gameState.feverRushTimer > 0);
+  for (let i = 0; i < 3; i++) {
+    const sk = document.getElementById(`token-${i}`);
+    if (sk) sk.classList.toggle('ready', (gameState.takedownTokens || 0) > i);
+  }
+  if (btnD) btnD.classList.toggle('token-ready', (gameState.takedownTokens || 0) >= 1);
 
   if (elPlayerHpFill) elPlayerHpFill.style.width = `${Math.max(0, Math.min(100, gameState.playerHp))}%`;
   if (elPlayerHpPips) {
@@ -2020,6 +2069,7 @@ function spawnWave(waveNum) {
 }
 
 function launchBruiserIntoStage(b) {
+  if (!b || b.state === 'flying' || (b.state === 'ko' && !b.active)) return;
   b.state = 'flying';
   b.teleMat.opacity = 0;
   b.badge.update(0, b.maxHp, 'ko', 'SPEAKERBOX K.O.!');
@@ -2266,6 +2316,8 @@ function triggerGameEnd(isVictory) {
     elSubtext.textContent = isVictory
       ? `DJ Kronos defeated! Confirmed Hits: ${trueConfirmedHits} (${truePerfectPct}% PERFECT) · Max Combo: ${gameState.maxCombo}.`
       : `Knocked out in Wave ${gameState.wave}/3. Confirmed Hits: ${trueConfirmedHits} (${truePerfectPct}% PERFECT).`;
+    const defenseLine = ` · Counters: ${gameState.perfectCounters} perfect / ${gameState.imperfectCounters} · Finishers: ${gameState.finishers} · Takedowns: ${gameState.takedowns}`;
+    elSubtext.textContent += defenseLine;
   }
   if (elResultsOverlay) {
     elResultsOverlay.classList.remove('hidden');
@@ -2296,6 +2348,21 @@ function restartGame(options = {}) {
   gameState.punchStep = 0;
   gameState.lastPunchTime = -10;
   gameState.wallSlamCount = 0;
+  gameState.totalKoz = 0;
+  gameState.takedownTokens = 0;
+  gameState.feverMeter = 0;
+  gameState.feverRushTimer = 0;
+  gameState.feverActivations = 0;
+  gameState.perfectCounters = 0;
+  gameState.imperfectCounters = 0;
+  gameState.counterAttempts = 0;
+  gameState.finishers = 0;
+  gameState.takedowns = 0;
+  gameState.lastCounterTime = -10;
+  gameState.directorScheduled = [];
+  resetDirector({ wave: 1 });
+  _directorKnownStrikes = new Set();
+  _directorLastSongTime = null;
   gameState.hitStopTimer = 0;
   gameState.lastBeatWarpSchedule = null;
   clearActiveSchedules();
@@ -2454,6 +2521,26 @@ function applyBruiserConfirmedHit(obj, action, punchStep, timing, totalHitDmg, i
   } else {
     obj.isGuarding = false;
     const wasWindup = obj.state === 'windup' || obj.state === 'striking';
+    const heavyHit = action === 'kick' || punchStep === 2 || isBeatDropFinisher;
+    if (DIRECTOR_ENABLED && wasWindup && !heavyHit) {
+      // A marker swing has armor against light hits: the damage lands but the swing continues,
+      // so the player must counter, dodge, or interrupt with a heavy (kick / uppercut).
+      obj.hp = Math.max(0, obj.hp - Math.round(totalHitDmg * 0.75));
+      obj.isMicroShaking = true;
+      obj.microShakeDuration = 0.05;
+      obj.microShakeTimer = 0.05;
+      obj.microShakeAmp = 0.05;
+      obj.microShakeVertAmp = 0.006;
+      obj.microShakeAxis = 'x';
+      obj.microShakeNormal = { x: 1, y: 0, z: 0 };
+      floorDial.updateBadge('ARMORED SWING! COUNTER [F]', '#ff9f1c');
+      obj.lastHitStrike = punchStep === 0 ? 'jab' : 'cross';
+      if (obj.hp <= 0) {
+        obj.hp = 0;
+        launchBruiserIntoStage(obj);
+      }
+      return;
+    }
     // Directional reaction with anticipation/overshoot curve, launch on uppercut, knockback that
     // can wall-slam against the barricades (combat/reactions.js). Damage is applied inside.
     const sideSign = (obj.rig.root.position.x - gameState.playerPos.x) >= 0 ? 1 : -1;
@@ -2474,7 +2561,7 @@ function applyBruiserConfirmedHit(obj, action, punchStep, timing, totalHitDmg, i
     obj.badge.update(obj.hp, obj.maxHp, obj.state === 'launch' ? 'hit' : obj.state);
     obj.lastHitStrike = action === 'kick' ? 'kick' : (punchStep === 0 ? 'jab' : (punchStep === 1 ? 'cross' : 'uppercut'));
 
-    if (obj.hp <= 0 || isBeatDropFinisher) {
+    if (obj.hp <= 0) {
       obj.hp = 0;
       launchBruiserIntoStage(obj);
     }
@@ -2599,6 +2686,55 @@ function resolveActivePhaseAttack(hitCtx) {
   const { type, obj } = validTarget;
   const isPerfect = timing.grade === 'PERFECT';
   const isOffBeat = timing.grade === 'MISS';
+
+  // Finisher on a dazed enemy (S) and token takedown (D) resolve as KOs on the warped impact frame.
+  if (type === 'bruiser' && (hitCtx.isFinisher || hitCtx.isTakedown)) {
+    const stillDazed = obj.state === 'dazed' || obj.isDazed || obj.state === 'stunned' || obj.state === 'wall_slam';
+    let resolvedAsKo = false;
+    if (hitCtx.isFinisher && stillDazed) {
+      obj.hp = 0;
+      obj.isDazed = false;
+      obj.vulnerableToFinisher = false;
+      launchBruiserIntoStage(obj);
+      gameState.finishers += 1;
+      gameState.dodgeInvulnTimer = Math.max(gameState.dodgeInvulnTimer, FINISHER_INVULN_SEC);
+      directorGrantTokenProgress(0.5, 'finisher');
+      directorGrantFeverProgress(15.0, 'finisher');
+      setStarburstText('FINISHER!', 1.32);
+      floorDial.updateBadge('FINISHER K.O.!', '#ffe042');
+      resolvedAsKo = true;
+    } else if (hitCtx.isTakedown && obj.state !== 'ko' && obj.state !== 'flying') {
+      const res = directorConsumeTakedownToken(obj, { gameState, launchBruiserIntoStage });
+      if (res.consumed) {
+        gameState.takedowns += 1;
+        gameState.takedownTokens = res.remainingTokens;
+        directorGrantFeverProgress(10.0, 'takedown');
+        setStarburstText('TAKEDOWN!', 1.32);
+        floorDial.updateBadge(`TAKEDOWN! ${res.remainingTokens} TOKEN${res.remainingTokens === 1 ? '' : 'S'} LEFT`, '#ff3fb4');
+        resolvedAsKo = true;
+      }
+    }
+    if (resolvedAsKo) {
+      gameState.combo += 1;
+      gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
+      gameState.comboDecayTimer = TUNING.COMBO_DECAY_SEC;
+      gameState.confirmedHits += 1;
+      if (!isOffBeat) { if (isPerfect) gameState.perfectHits += 1; else gameState.onBeatHits += 1; }
+      gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
+      const koPoint = calculateContactPoint(obj, limbPos, action, punchStep);
+      gameState.lastContactPoint = koPoint.clone();
+      gameState.activeImpactVFX.push(impactBurstPool.acquire(koPoint, 'comic-starburst-3d'));
+      audioEngine.playCombatSfx('stage-ko', 'PERFECT', validTarget.pos);
+      gameState.hitStopTimer = 0.12;
+      gameState.cameraKick = 0.42;
+      gameState.cameraDutch = 0.05;
+      cameraJuice.trauma = Math.min(1.0, cameraJuice.trauma + 0.35);
+      if (postProcessing && postProcessing.triggerImpact) postProcessing.triggerImpact('PERFECT', koPoint);
+      updateStyleRankAndHype(0);
+      updateHudNumbers();
+      return;
+    }
+  }
   const counterMult = (gameState.kronosRingState === 'counter_stun' || gameState.counterBonusTimer > 0) ? 2.0 : 1.0;
   if (counterMult > 1.0 && gameState.kronosRingState !== 'counter_stun') {
     gameState.counterBonusTimer = 0;
@@ -2667,12 +2803,16 @@ function resolveActivePhaseAttack(hitCtx) {
 
   gameState.hitStopTimer = predictHitStopSec(action, punchStep, timing.grade);
 
-  const styleMult = isOffBeat ? 1.0 : (gameState.styleDamageMultiplier || 1.0);
-  const timingMult = isOffBeat ? 1.0 : (timing.mult || 1.0);
+  const feverMult = gameState.feverRushTimer > 0 ? 1.5 : 1.0;
+  const styleMult = (isOffBeat ? 1.0 : (gameState.styleDamageMultiplier || 1.0)) * feverMult;
+  // Off-beat basics still land (never a whiff) but at reduced effect; on-beat is the reward.
+  const timingMult = isOffBeat ? TUNING.OFF_BEAT_DAMAGE_MULT : (timing.mult || 1.0);
   let totalHitDmg = Math.round(baseHitDmg * timingMult * counterMult * styleMult);
   hitEntry.damage = totalHitDmg;
 
   if (!isOffBeat) {
+    directorGrantFeverProgress(isPerfect ? 14.0 : 8.0, 'hit');
+    directorGrantTokenProgress(isPerfect ? 0.20 : 0.10, 'hit');
     gameState.hype = Math.min(100.0, (gameState.hype || 0) + (isPerfect ? 8.0 : 4.0) * styleMult);
     floorDial.updateBadge(timing.label || 'ON BEAT!', timing.color || '#42f56c');
     const burstWords = action === 'kick'
@@ -2680,7 +2820,8 @@ function resolveActivePhaseAttack(hitCtx) {
       : ['POW-SNAP!', 'KRA-KOOM!', 'ON-BEAT HIT!'];
     setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
   } else {
-    floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
+    directorGrantFeverProgress(-6.0, 'off-beat');
+    floorDial.updateBadge('OFF-BEAT ×0.6', '#ff385c');
   }
 
   const isSrank = !isOffBeat && (gameState.styleRank === 'S-RANK' || gameState.combo >= 10);
@@ -2690,10 +2831,9 @@ function resolveActivePhaseAttack(hitCtx) {
   if (isBeatDropFinisher) {
     totalHitDmg = Math.round(totalHitDmg * 1.5);
     hitEntry.damage = totalHitDmg;
-    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 20.0);
-    setStarburstText('SPEAKERBOX K.O.!', 1.30);
-    floorDial.updateBadge('SPEAKERBOX K.O.!', '#ff1e38');
-    audioEngine.playCombatSfx('stage-ko', timing.grade, validTarget.pos);
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + 12.0);
+    setStarburstText('BEAT DROP ×1.5!', 1.18);
+    floorDial.updateBadge('BEAT DROP ×1.5!', '#ff1e38');
     gameState.lastFinisher = { action, timing: timing.grade, timestamp: performance.now() };
   }
 
@@ -2715,7 +2855,7 @@ function resolveActivePhaseAttack(hitCtx) {
 }
 
 function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
-  if (!isBufferedDequeue && (nowSec - gameState.lastDodgeTime) < TUNING.DODGE_COOLDOWN_SEC) {
+  if (!isBufferedDequeue && cooldownActive(gameState.lastDodgeTime, nowSec, TUNING.DODGE_COOLDOWN_SEC)) {
     return;
   }
   gameState.lastDodgeTime = nowSec;
@@ -2759,6 +2899,7 @@ function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
 
   let counteredAttacker = false;
   bruisers.forEach((b) => {
+    if (DIRECTOR_ENABLED) return; // the director grades the dodge at the marker (evaded strike -> dazed enemy)
     if (!b.active) return;
     const d = gameState.playerPos.distanceTo(b.rig.root.position);
     if (d > TUNING.COUNTER_WEAVE_MAX_DIST) return;
@@ -2868,14 +3009,160 @@ function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
   updateHudNumbers();
 }
 
+let _directorKnownStrikes = new Set();
+let _directorLastSongTime = null;
+
+function findBruiserByDirectorId(id) {
+  for (let i = 0; i < bruisers.length; i++) {
+    const b = bruisers[i];
+    if (b.id === id || `bruiser_${b.idx}` === id) return b;
+  }
+  return null;
+}
+
+/**
+ * Runs the song-marker director for one frame: schedules enemy wind-ups so strikes land on
+ * chart markers, resolves strikes/evasions, and syncs tokens and Fever into gameState.
+ */
+function runCombatDirector(songTime, dt, chart, waveCfg) {
+  if (_directorLastSongTime !== null && songTime < _directorLastSongTime - 5.0) {
+    // Song looped: re-arm the markers but keep the player's tokens and Fever.
+    const tel = getDirectorTelemetry();
+    resetDirector({ wave: gameState.wave, initialTakedownTokens: tel.takedownTokens, initialFeverMeter: tel.feverMeter });
+    _directorKnownStrikes = new Set();
+  }
+  _directorLastSongTime = songTime;
+
+  const result = tickCombatDirector(songTime, dt, {
+    gameState,
+    chart,
+    wave: gameState.wave,
+    bruisers: bruisers.filter((b) => b.active && b.state !== 'ko' && b.state !== 'flying'),
+    challengerRig,
+    maxSimultaneousAttackers: waveCfg.maxSimultaneousAttackers,
+    onPlayerHit: (dmg, strike) => {
+      const light = strike.attackType === 'quick_hook' || strike.attackType === 'double_tap';
+      applyPlayerDamage(dmg, 'BAM! COUNTER [F] / DODGE [A]!', light ? 0.25 : 0.38, light ? -0.035 : 0.055);
+    }
+  });
+
+  const nowIds = new Set();
+  for (const s of result.scheduledStrikes) {
+    nowIds.add(s.markerId);
+    if (!_directorKnownStrikes.has(s.markerId)) {
+      const b = findBruiserByDirectorId(s.attackerId);
+      audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', b ? b.rig.root.position : gameState.playerPos);
+    }
+  }
+  _directorKnownStrikes = nowIds;
+  gameState.directorScheduled = result.scheduledStrikes;
+
+  for (const r of result.resolvedStrikes) {
+    if (r.evaded && !r.countered) {
+      floorDial.updateBadge('EVADED! FINISH [S]!', '#ffe042');
+    }
+  }
+
+  gameState.takedownTokens = result.takedownTokens;
+  gameState.feverMeter = result.feverMeter;
+
+  const barSec = (chart && chart.barSec) || KRONOS_BAR_SEC;
+  if (gameState.feverRushTimer > 0) {
+    gameState.feverRushTimer = Math.max(0, gameState.feverRushTimer - dt);
+    directorGrantFeverProgress(-100.0 * dt / (barSec * FEVER_RUSH_BARS), 'fever-drain');
+    if (gameState.feverRushTimer <= 0) {
+      floorDial.updateBadge('FEVER OVER', '#8899aa');
+    }
+  } else if (result.feverMeter >= 100.0) {
+    gameState.feverRushTimer = barSec * FEVER_RUSH_BARS;
+    gameState.feverActivations += 1;
+    setStarburstText('FEVER RUSH!', 1.34);
+    floorDial.updateBadge('FEVER RUSH! ×1.5 DAMAGE', '#ff3fb4');
+    audioEngine.triggerCrowdHype('fever-rush', { combo: gameState.combo });
+    if (!reducedMotionEnabled) cameraJuice.trauma = Math.min(1.0, cameraJuice.trauma + 0.3);
+  }
+}
+
+/**
+ * Counter (F). Perfect: instant KO riposte on the attacker. Imperfect: strike negated, attacker dazed.
+ * With no strike in its window the Challenger just guards for a beat.
+ */
+function executeCounterAction(nowSec, timing) {
+  if (cooldownActive(gameState.lastCounterTime, nowSec, 0.22)) return;
+  gameState.lastCounterTime = nowSec;
+  const songTime = audioEngine.getSongTime();
+  const chart = audioEngine.getActiveChart();
+
+  if (gameState.isAttacking) {
+    cancelActorSchedules(challengerRig);
+    gameState.isAttacking = false;
+    gameState.attackPhase = 'idle';
+    gameState.pendingHit = null;
+    gameState.inputBuffer = null;
+  }
+  gameState.counterAttempts += 1;
+
+  const res = (DIRECTOR_ENABLED && songTime !== null)
+    ? directorEvaluateCounterInput(songTime, 'counter', {
+      chart,
+      gameState,
+      challengerRig,
+      launchBruiserIntoStage,
+      scheduleAction: (rig, clipName, t) => scheduleBeatWarpAction(rig, 'counter-riposte', t, {
+        chart,
+        clock: beatWarpClock,
+        scheduleImpactSfx: false
+      })
+    })
+    : { countered: false, grade: 'NONE' };
+
+  if (res.countered) {
+    const perfect = res.grade === 'PERFECT_COUNTER';
+    if (perfect) gameState.perfectCounters += 1; else gameState.imperfectCounters += 1;
+    gameState.pose = 'counter';
+    gameState.poseTimer = perfect ? 0.76 : 0.45;
+    gameState.combo += 1;
+    gameState.maxCombo = Math.max(gameState.maxCombo, gameState.combo);
+    gameState.comboDecayTimer = TUNING.COMBO_DECAY_SEC;
+    gameState.counterBonusTimer = 1.5;
+    gameState.hype = Math.min(100.0, (gameState.hype || 0) + (perfect ? 25.0 : 12.0));
+    gameState.takedownTokens = res.takedownTokens !== undefined ? res.takedownTokens : gameState.takedownTokens;
+    if (!perfect && challengerRig.clipDriven && challengerRig.playClip) {
+      challengerRig.playClip('guard', { fadeInSec: 0.04, loop: false });
+    }
+    floorDial.updateBadge(perfect ? 'PERFECT COUNTER K.O.!' : 'COUNTER! FINISH [S]!', perfect ? '#ffe042' : '#00e5ff');
+    setStarburstText(perfect ? 'PERFECT COUNTER!' : 'COUNTER!', perfect ? 1.28 : 1.08);
+    audioEngine.playCombatSfx('counter-weave', perfect ? 'PERFECT' : 'GOOD', gameState.playerPos);
+    if (!reducedMotionEnabled) {
+      gameState.cameraKick = perfect ? 0.34 : 0.18;
+      gameState.cameraDutch = perfect ? -0.045 : -0.02;
+    }
+    triggerCameraJuice('dodge', perfect, 0);
+    if (perfect) {
+      gameState.hitStopTimer = 0.09;
+      if (postProcessing && postProcessing.triggerImpact) postProcessing.triggerImpact('COUNTER', challengerRig.root.position);
+    }
+    updateStyleRankAndHype(0);
+  } else {
+    gameState.pose = 'counter';
+    gameState.poseTimer = 0.30;
+    if (challengerRig.clipDriven && challengerRig.playClip) {
+      challengerRig.playClip('guard', { fadeInSec: 0.05, loop: false });
+    }
+    floorDial.updateBadge('NOTHING TO COUNTER', '#8899aa');
+    audioEngine.playCombatSfx('dodge', 'MISS', gameState.playerPos);
+  }
+  updateHudNumbers();
+}
+
 function triggerCombatAction(action, isBufferedDequeue = false) {
   if (gameState.isPaused || gameState.isGameOver) return;
 
-  const nowSec = performance.now() * 0.001;
+  const nowSec = combatClockSec();
   const songTime = audioEngine.getSongTime();
   const timing = evaluateBeatWindow(songTime);
 
-  const btnMap = { dodge: btnA, punch: btnS, kick: btnD };
+  const btnMap = { dodge: btnA, punch: btnS, kick: btnD, counter: btnF };
   if (btnMap[action]) {
     btnMap[action].classList.add('pressed');
     setTimeout(() => btnMap[action].classList.remove('pressed'), 100);
@@ -2886,6 +3173,17 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     executeDodgeAction(nowSec, timing, isBufferedDequeue);
     return;
   }
+  if (action === 'counter') {
+    executeCounterAction(nowSec, timing);
+    return;
+  }
+
+  // Finisher (S on a dazed enemy) and token takedown (D with a token on a standing enemy)
+  const fTarget = gameState.priorityTargetCache || findBestCombatTarget(TUNING.AUTO_AIM_MAX_DIST + 0.4);
+  const fObj = fTarget && fTarget.type === 'bruiser' ? fTarget.obj : null;
+  const wantsFinisher = Boolean(action === 'punch' && fObj && fObj.active && (fObj.state === 'dazed' || fObj.isDazed) && fTarget.dist <= TUNING.AUTO_AIM_MAX_DIST + 0.4);
+  const wantsTakedown = Boolean(action === 'kick' && fObj && fObj.active && gameState.takedownTokens >= 1 &&
+    fObj.state !== 'dazed' && fObj.state !== 'ko' && fObj.state !== 'flying' && fTarget.dist <= TUNING.AUTO_AIM_MAX_DIST + 0.4);
 
   // 2. ATTACK BUFFERING & RECOVERY CANCELING
   if (gameState.isAttacking) {
@@ -2908,7 +3206,7 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     gameState.combo = 0;
     gameState.comboDecayTimer = 0;
     updateStyleRankAndHype(0);
-    floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
+    floorDial.updateBadge('OFF-BEAT ×0.6', '#ff385c');
     updateHudNumbers();
   }
 
@@ -2919,8 +3217,15 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
 
   let currentPunchStep = 0;
   let moveKey = 'kick';
-  if (action === 'punch') {
-    if (nowSec - gameState.lastPunchTime > 0.85) {
+  if (wantsFinisher) {
+    moveKey = 'finisher';
+    currentPunchStep = 2;
+    gameState.pose = 'punch-uppercut';
+    gameState.attackType = 'finisher';
+    gameState.punchStep = 0;
+    gameState.lastPunchTime = nowSec;
+  } else if (action === 'punch') {
+    if (!cooldownActive(gameState.lastPunchTime, nowSec, 0.85)) {
       gameState.punchStep = 0;
     }
     currentPunchStep = gameState.punchStep || 0;
@@ -2985,13 +3290,14 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
   };
 
   // Step/lunge toward target within reduced 1.85m auto-aim radius during wind-up
+  const feverLunge = (gameState.feverRushTimer > 0 || wantsFinisher || wantsTakedown) ? 1.6 : 1.0;
   const targetInfo = findBestCombatTarget(
-    gameState.wave === 3 ? Math.max(TUNING.AUTO_AIM_MAX_DIST, 2.15) : TUNING.AUTO_AIM_MAX_DIST
+    (gameState.wave === 3 ? Math.max(TUNING.AUTO_AIM_MAX_DIST, 2.15) : TUNING.AUTO_AIM_MAX_DIST) * feverLunge
   );
   if (targetInfo && targetInfo.dist > 0.95) {
     const lungeDir = new THREE.Vector3().subVectors(targetInfo.pos, gameState.playerPos);
     lungeDir.y = 0;
-    const lungeDist = Math.min(TUNING.MAX_LUNGE_DIST, Math.max(0, targetInfo.dist - 0.92));
+    const lungeDist = Math.min(TUNING.MAX_LUNGE_DIST * feverLunge, Math.max(0, targetInfo.dist - 0.92));
     lungeDir.normalize().multiplyScalar(lungeDist);
     const nextTarget = gameState.playerPos.clone().add(lungeDir);
     nextTarget.y = 0;
@@ -3011,7 +3317,9 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     timing,
     pressSongTime: songTime,
     targetImpactSongTime,
-    beatWarp
+    beatWarp,
+    isFinisher: wantsFinisher,
+    isTakedown: wantsTakedown
   };
 
   gameState.activeSmears.push(smearArcPool.acquire(challengerRig.root.position, action === 'kick'));
@@ -3423,7 +3731,7 @@ function poseChallengerClipDriven(rig, pose, elapsed, beatPulse, dt, rawDt) {
     return;
   }
   kickSmear.smearGroup.visible = false;
-  if (pose === 'hurt' || gameState.playerHitStunTimer > 0 || pose === 'dodge') return;
+  if (pose === 'hurt' || gameState.playerHitStunTimer > 0 || pose === 'dodge' || pose === 'counter') return;
   ensureChallengerIdleClip(audioEngine.getSongTime());
 }
 
@@ -3522,7 +3830,7 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016, rawDt = dt) {
       targetJoints = CHALLENGER_POSES.hurt;
       targetHipsY = 0.93;
       kickSmear.smearGroup.visible = false;
-    } else if (pose === 'dodge') {
+    } else if (pose === 'dodge' || pose === 'counter') {
       targetJoints = CHALLENGER_POSES.dodge;
       targetHipsY = 0.88;
       kickSmear.smearGroup.visible = false;
@@ -3717,10 +4025,12 @@ window.addEventListener('keydown', (e) => {
   if (k === 'a') triggerCombatAction('dodge');
   else if (k === 's') triggerCombatAction('punch');
   else if (k === 'd') triggerCombatAction('kick');
+  else if (k === 'f') triggerCombatAction('counter');
 });
 
 [
   { el: btnA, act: 'dodge' },
+  { el: btnF, act: 'counter' },
   { el: btnS, act: 'punch' },
   { el: btnD, act: 'kick' }
 ].forEach(({ el, act }) => {
@@ -3983,8 +4293,8 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
       gameState.canCancel = true;
 
       if (gameState.inputBuffer) {
-        const nowSec = performance.now() * 0.001;
-        if (nowSec - gameState.inputBuffer.timestamp <= TUNING.INPUT_BUFFER_WINDOW_SEC) {
+        const nowSec = combatClockSec();
+        if (cooldownActive(gameState.inputBuffer.timestamp, nowSec, TUNING.INPUT_BUFFER_WINDOW_SEC) || gameState.inputBuffer.timestamp > nowSec) {
           const act = gameState.inputBuffer.action;
           gameState.inputBuffer = null;
           gameState.isAttacking = false;
@@ -4289,7 +4599,7 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
 }
 
 function updateBruiserWindupState(b, dt, elapsed, songTime) {
-  const strikeDur = b.attackType === 'quick_hook' ? 0.18 : 0.22;
+  const strikeDur = (b.attackType === 'quick_hook' || b.attackType === 'double_tap') ? 0.18 : 0.22;
   if (songTime !== null && songTime !== undefined && b.targetImpactSongTime) {
     b.stateTimer = (b.targetImpactSongTime - strikeDur) - songTime;
   } else {
@@ -4372,6 +4682,12 @@ function updateBruiserStrikingState(b, dt, contextState, songTime, chart) {
     }
   }
   b.teleMat.opacity = 0.95;
+
+  if (DIRECTOR_ENABLED) {
+    // The director resolves the strike on its marker (damage, evade -> dazed, counter).
+    if (b.stateTimer <= -0.25) { b.state = 'stalking'; b.teleMat.opacity = 0; b.badge.update(b.hp, b.maxHp, 'stalking'); }
+    return;
+  }
 
   if (b.stateTimer <= 0) {
     b.teleMat.opacity = 0;
@@ -4481,7 +4797,7 @@ function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime,
   }
 
   b.attackCooldown -= dt;
-  if (b.attackCooldown <= 0 && canAddAttacker) {
+  if (!DIRECTOR_ENABLED && b.attackCooldown <= 0 && canAddAttacker) {
     const nextType = (b.attackType === 'quick_hook') ? 'heavy_haymaker' : 'quick_hook';
     const strikeDur = nextType === 'quick_hook' ? 0.18 : 0.22;
     const beatsAhead = nextType === 'heavy_haymaker' ? 2.0 : 1.0;
@@ -5304,6 +5620,10 @@ function updateEnemies(dt, rawDt, elapsed, beatPulse, songTime, chart) {
     someoneWindingUp: activeAttackerCount >= waveCfg.maxSimultaneousAttackers
   };
 
+  if (DIRECTOR_ENABLED && gameState.gameStarted && !gameState.isPaused && !gameState.isGameOver && songTime !== null) {
+    runCombatDirector(songTime, dt, chart, waveCfg);
+  }
+
   for (let i = 0; i < bruisers.length; i++) {
     updateFighterFSM(bruisers[i], dt, rawDt, elapsed, beatPulse, songTime, chart, contextState);
   }
@@ -5395,7 +5715,7 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261018a').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261018c').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
@@ -5451,6 +5771,9 @@ if (IS_DEBUG_MODE) {
       KRONOS_BARS,
       beatwarp: beatWarpModule,
       clock: audioClockModule,
+      director: combatDirectorModule,
+      getDirectorTelemetry,
+      executeCounterAction,
       beatWarpClock,
       scheduleBeatWarpAction,
       tickBeatWarp,

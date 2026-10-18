@@ -746,7 +746,6 @@ export function createCombatDirector(options = {}) {
       } else {
         targetEnemy.hp = 0;
         targetEnemy.state = 'ko';
-        targetEnemy.active = false;
         targetEnemy.isDazed = false;
         if (typeof context.launchBruiserIntoStage === 'function') {
           context.launchBruiserIntoStage(targetEnemy);
@@ -843,7 +842,6 @@ export function createCombatDirector(options = {}) {
             // Perfect counter instantly KOs a mook (Dead as Disco Section 1.2)
             enemy.hp = 0;
             enemy.state = 'ko';
-            enemy.active = false;
             enemy.isDazed = false;
             if (typeof context.launchBruiserIntoStage === 'function') {
               context.launchBruiserIntoStage(enemy);
@@ -995,7 +993,7 @@ export function createCombatDirector(options = {}) {
       const s = state.scheduledStrikes[i];
       if (s.countered) continue;
       const e = s._enemyRef;
-      if (!e || !e.active || e.state === 'ko' || e.state === 'dazed' || e.state === 'stunned' || e.state === 'counter_stun' || e.state === 'wall_slam') {
+      if (!e || !e.active || e.state === 'ko' || e.state === 'flying' || e.state === 'dazed' || e.state === 'stunned' || e.state === 'counter_stun' || e.state === 'wall_slam' || e.state === 'hit' || e.state === 'launch' || e.state === 'guard_break') {
         if (e && e.teleMat) e.teleMat.opacity = 0;
         state.scheduledStrikes.splice(i, 1);
       }
@@ -1126,7 +1124,7 @@ export function createCombatDirector(options = {}) {
         if (enemy.badge && typeof enemy.badge.update === 'function') {
           const promptText = s.promptGreyedOut
             ? `… ${s.pattern.toUpperCase()} …`
-            : (s.inPerfectWindow ? '★ COUNTER NOW [A]! ★' : '! DODGE / COUNTER [A] !');
+            : (s.inPerfectWindow ? '★ COUNTER [F] NOW! ★' : '! COUNTER [F] / DODGE [A] !');
           enemy.badge.update(
             enemy.hp ?? 100,
             enemy.maxHp ?? 100,
@@ -1249,10 +1247,12 @@ export function createCombatDirector(options = {}) {
 
     // 4. Light up dodge button (`#btn-a`) in DOM during the perfect/counter window
     if (typeof document !== 'undefined') {
-      const btnA = document.getElementById('btn-a');
-      if (btnA && btnA.classList) {
-        btnA.classList.toggle('counter-window-active', anyInCounterWindow);
-        btnA.classList.toggle('perfect-counter-ready', anyInPerfectWindow);
+      for (const id of ['btn-f', 'btn-a']) {
+        const btn = document.getElementById(id);
+        if (btn && btn.classList) {
+          btn.classList.toggle('counter-window-active', anyInCounterWindow);
+          btn.classList.toggle('perfect-counter-ready', anyInPerfectWindow);
+        }
       }
     }
 

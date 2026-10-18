@@ -608,6 +608,43 @@
     .btn-dodge .key-box { background: var(--cyan); color: #000; }
     .btn-punch .key-box { background: var(--gold); color: #000; }
     .btn-kick .key-box { background: var(--crimson); color: #fff; }
+    .btn-counter .key-box { background: #ff3fb4; color: #fff; }
+    .asd-btn.counter-window-active { border-color: #00e5ff; box-shadow: 3px 3px 0 #000, 0 0 0 2px rgba(0, 229, 255, 0.55); }
+    .asd-btn.perfect-counter-ready { background: var(--gold); color: #000; box-shadow: 3px 3px 0 #000, 0 0 18px rgba(255, 224, 66, 0.9); }
+    .asd-btn.token-ready { box-shadow: 3px 3px 0 #000, 0 0 0 2px rgba(255, 63, 180, 0.75); }
+    .token-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      font-family: 'Chakra Petch', sans-serif;
+    }
+    .token-skull {
+      font-size: 1.05rem;
+      line-height: 1;
+      color: rgba(255, 255, 255, 0.22);
+      -webkit-text-stroke: 1px rgba(0, 0, 0, 0.6);
+      transition: color 0.12s ease, transform 0.12s ease, text-shadow 0.12s ease;
+    }
+    .token-skull.ready {
+      color: #ff3fb4;
+      transform: scale(1.18);
+      text-shadow: 0 0 10px rgba(255, 63, 180, 0.85);
+    }
+    .token-label {
+      margin-left: 4px;
+      font-size: 0.58rem;
+      letter-spacing: 0.06em;
+      color: rgba(255, 255, 255, 0.55);
+    }
+    .hype-meter-container.fever-rush .hype-bar-fill {
+      background: linear-gradient(90deg, #ff3fb4, #ffe042);
+      animation: feverPulse 0.33s ease-in-out infinite alternate;
+    }
+    @keyframes feverPulse {
+      from { filter: brightness(1.0); }
+      to { filter: brightness(1.45); }
+    }
 
     .key-box {
       font-family: 'Bangers', cursive;
@@ -934,8 +971,11 @@
         transform: none;
       }
       .asd-btn {
-        width: 31%;
-        height: 56px;
+        width: 23.5%;
+        height: 58px;
+      }
+      .key-desc {
+        font-size: 0.62rem;
       }
     }
 
@@ -993,7 +1033,7 @@
         transform: none;
       }
       .asd-btn {
-        width: 30%;
+        width: 23%;
         height: 62px;
       }
     }
@@ -1037,11 +1077,17 @@
     <div class="srank-word" id="rank-word">—</div>
     <div class="hype-meter-container" id="hype-meter-container">
       <div class="hype-label-row">
-        <span class="hype-label">HYPE</span>
+        <span class="hype-label">FEVER</span>
         <span class="hype-value" id="hype-val-text">0%</span>
       </div>
       <div class="hype-bar-outer">
         <div class="hype-bar-fill" id="hype-fill" style="width: 0%;"></div>
+      </div>
+      <div class="token-row" id="token-row" title="Takedown tokens: spend with KICK [D] on a standing enemy">
+        <span class="token-skull" id="token-0">☠</span>
+        <span class="token-skull" id="token-1">☠</span>
+        <span class="token-skull" id="token-2">☠</span>
+        <span class="token-label">TAKEDOWN [D]</span>
       </div>
     </div>
   </div>
@@ -1165,9 +1211,13 @@
       <span class="key-box">S</span>
       <span class="key-desc">PUNCH</span>
     </button>
-    <button class="asd-btn btn-kick" id="btn-d" type="button" title="Heavy Launch Kick (Key: D)">
+    <button class="asd-btn btn-kick" id="btn-d" type="button" title="Heavy Launch Kick · Takedown with a token (Key: D)">
       <span class="key-box">D</span>
       <span class="key-desc">KICK</span>
+    </button>
+    <button class="asd-btn btn-counter" id="btn-f" type="button" title="Counter an incoming strike (Key: F)">
+      <span class="key-box">F</span>
+      <span class="key-desc">COUNTER</span>
     </button>
   </div>
 
@@ -1177,7 +1227,7 @@
       <span class="shell-tag">TAPE NO. 05 · LYRIA 3.5 × THREE.JS RHYTHM BRAWLER</span>
       <h1 class="shell-title">DJ KRONOS: BOOMBOX BATTLE</h1>
       <p class="shell-subtitle">
-        Strike on the 92 BPM beat ([S] Punch, [D] Kick) when enemies are in range, and weave ([A] Dodge) in the final moments of an enemy wind-up to land a counter stun.
+        Strike on the 92 BPM beat ([S] Punch, [D] Kick). Enemies swing on the music: [F] Counter as their strike lands (perfect = instant K.O.), or [A] Dodge it. Dazed enemies fall to [S]; earned ☠ tokens turn [D] into a takedown.
       </p>
       <div class="boot-progress-wrap" id="boot-progress-wrap">
         <div class="boot-bar-outer">
@@ -1235,6 +1285,6 @@
     </div>
   </div>
 
-  <script type="module" src="./kronos.js?v=20261018a"></script>
+  <script type="module" src="./kronos.js?v=20261018c"></script>
 </body>
 </html>
