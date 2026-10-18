@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {
   KRONOS_BPM,
   KRONOS_BEAT_SEC,
+  KRONOS_BAR_SEC,
   KRONOS_FIRST_BEAT_OFFSET,
   KRONOS_LOOP_DURATION,
   KRONOS_BEAT_TIMES,
@@ -9,23 +10,47 @@ import {
   KRONOS_TRACK_CHARTS,
   estimateBpmFromAudioBuffer,
   buildCustomTrackChart
-} from './kronos-tracks.js?v=20261017d';
-import { createContactShadowDecal } from './models/shared.js?v=20261017d';
+} from './kronos-tracks.js?v=20261018a';
+import { wrapCharacterRig, loadGLBAsset, loadClipsManifest } from './anim/rig-adapter.js?v=20261018a';
+import { prepareHandBuiltRigForClips, CHALLENGER_CLIP_PIVOTS } from './anim/handbuilt-rig.js?v=20261018a';
+import * as beatWarpModule from './anim/beatwarp.js?v=20261018a';
+import {
+  scheduleAction as scheduleBeatWarpAction,
+  tickBeatWarp,
+  cancelActorSchedules,
+  clearActiveSchedules,
+  setClipsManifest as setBeatWarpClipsManifest
+} from './anim/beatwarp.js?v=20261018a';
+import * as audioClockModule from './audio/clock.js?v=20261018a';
+import {
+  bindAudioEngine as clockBindAudioEngine,
+  setActiveChart as clockSetActiveChart,
+  scheduleSfx as clockScheduleSfx,
+  songTimeToContextTime as clockSongTimeToContextTime,
+  nextSubdivision as clockNextSubdivision,
+  nearestSubdivision as clockNearestSubdivision
+} from './audio/clock.js?v=20261018a';
+import {
+  applyEnemyHitReaction,
+  getDirectionalHitReactionProfile,
+  updateEnemyReactionState
+} from './combat/reactions.js?v=20261018a';
+import { createContactShadowDecal } from './models/shared.js?v=20261018a';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261017d';
-import { buildKronosBossModel } from './models/kronos.js?v=20261017d';
-import { buildBruiserModel } from './models/bruiser.js?v=20261017d';
+} from './models/challenger.js?v=20261018a';
+import { buildKronosBossModel } from './models/kronos.js?v=20261018a';
+import { buildBruiserModel } from './models/bruiser.js?v=20261018a';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261017d';
+} from './models/crowd.js?v=20261018a';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261017d';
+} from './models/stage.js?v=20261018a';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -35,15 +60,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261017d';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261017d';
+} from './models/arena.js?v=20261018a';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261018a';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261017d';
+} from './kronos-sfx.js?v=20261018a';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -60,7 +85,7 @@ const IS_LOW_TIER = (
 export const TUNING = {
   ARENA_RADIUS: 4.5,
   PLAYER_MAX_RADIUS: 4.2,
-  INPUT_BUFFER_WINDOW_SEC: 0.163,
+  INPUT_BUFFER_WINDOW_SEC: 0.50,
   PERFECT_WINDOW_SEC: 0.085,
   ON_BEAT_WINDOW_SEC: 0.165,
   AUTO_AIM_MAX_DIST: 1.85,
@@ -882,6 +907,7 @@ class KronosAudioEngine {
 }
 
 const audioEngine = new KronosAudioEngine();
+clockBindAudioEngine(audioEngine);
 _bootTiming.afterAudio = performance.now();
 
 // ============================================================================
@@ -1137,6 +1163,30 @@ challengerRig.root.scale.setScalar(1.02);
 scene.add(challengerRig.root);
 
 const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
+
+// Authored fight clips (assets/models/kronos-clips-challenger.glb, animation-only) drive the
+// hand-built Challenger through an AnimationMixer. The hand-built rig keeps its meshes; only four
+// pivots (spine, neck, shoulders) are inserted so every clip track binds by name.
+const _clipPreloadPromise = (async () => {
+  const [{ animations }, manifest] = await Promise.all([
+    loadGLBAsset('./assets/models/kronos-clips-challenger.glb?v=20261018a'),
+    loadClipsManifest('./assets/models/clips.json?v=20261018a')
+  ]);
+  const pivotReport = prepareHandBuiltRigForClips(challengerRig, CHALLENGER_CLIP_PIVOTS);
+  wrapCharacterRig(challengerRig, {
+    animations,
+    clipMetadata: manifest && manifest.clips ? manifest.clips : undefined,
+    preserveDirectJointProps: true
+  });
+  if (manifest) setBeatWarpClipsManifest(manifest);
+  challengerRig.clipDriven = true;
+  challengerRig.clipPivotReport = pivotReport;
+  return animations.length;
+})().catch((err) => {
+  console.warn('[kronos] authored clips unavailable; Challenger falls back to the pose blender', err);
+  challengerRig.clipDriven = false;
+  return 0;
+});
 
 const kronosRig = buildKronosBossModel();
 kronosRig.root.position.set(0, 1.38, 1.25);
@@ -1446,6 +1496,8 @@ const gameState = {
   lastHit: null,
   hitHistory: [],
   impactBeatOffsetsMs: [],
+  impactTargetOffsetsMs: [],
+  wallSlamCount: 0,
   enemyStrikeEvents: [],
   playerHitStunTimer: 0,
   attackStartPose: null,
@@ -1564,6 +1616,78 @@ function findNearestChartBeat(songTime, chart) {
     absDelta: minAbsDelta,
     timeUntilBeat
   };
+}
+
+/**
+ * First grid line (chart beat or beat midpoint when div <= 0.5) at or after `minSongTime`.
+ * Uses the chart's transient-snapped beat times when present so warped impacts land on the
+ * audible beat, not on an idealised BPM grid.
+ */
+function findNextChartSubdivision(minSongTime, chart, div = 0.5) {
+  const activeChart = chart || audioEngine.getActiveChart();
+  const beatSec = (activeChart && activeChart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (activeChart && activeChart.firstBeatOffset !== undefined) ? activeChart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const subSec = Math.max(0.05, beatSec * div);
+
+  if (activeChart && !activeChart.moduloOnly && Array.isArray(activeChart.beatTimes) && activeChart.beatTimes.length > 0) {
+    const bts = activeChart.beatTimes;
+    for (let i = 0; i < bts.length; i++) {
+      const bt = bts[i];
+      if (bt >= minSongTime - 1e-4) return bt;
+      if (div <= 0.5 && i + 1 < bts.length) {
+        const mid = 0.5 * (bt + bts[i + 1]);
+        if (mid >= minSongTime - 1e-4) return mid;
+      }
+    }
+  }
+  const subFloat = (minSongTime - firstOffset) / subSec;
+  return firstOffset + Math.ceil(subFloat - 1e-4) * subSec;
+}
+
+function findNearestChartSubdivision(songTime, chart, div = 0.5) {
+  const activeChart = chart || audioEngine.getActiveChart();
+  const beatSec = (activeChart && activeChart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (activeChart && activeChart.firstBeatOffset !== undefined) ? activeChart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const subSec = Math.max(0.05, beatSec * div);
+  let best = firstOffset + Math.round((songTime - firstOffset) / subSec) * subSec;
+  let bestD = Math.abs(songTime - best);
+  if (activeChart && !activeChart.moduloOnly && Array.isArray(activeChart.beatTimes) && activeChart.beatTimes.length > 0) {
+    const bts = activeChart.beatTimes;
+    for (let i = 0; i < bts.length; i++) {
+      const cands = [bts[i]];
+      if (div <= 0.5 && i + 1 < bts.length) cands.push(0.5 * (bts[i] + bts[i + 1]));
+      for (const c of cands) {
+        const d = Math.abs(songTime - c);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+    }
+  }
+  return best;
+}
+
+// Clock facade handed to BeatWarp so its targets follow the chart's real beats.
+const beatWarpClock = {
+  now: () => audioEngine.getSongTime(),
+  nextSubdivision: (t, div = 0.5, chart = undefined) => findNextChartSubdivision(t, chart || audioEngine.getActiveChart(), div),
+  nearestSubdivision: (t, div = 0.5, chart = undefined) => findNearestChartSubdivision(t, chart || audioEngine.getActiveChart(), div),
+  scheduleSfx: (name, t, opts) => clockScheduleSfx(name, t, opts)
+};
+
+const MOVE_CLIP_NAMES = Object.freeze({
+  'punch-jab': 'jab',
+  'punch-cross': 'cross',
+  'punch-uppercut': 'uppercut',
+  'kick': 'kick'
+});
+
+function predictHitStopSec(action, punchStep, grade) {
+  if (grade === 'MISS') return 0.024;
+  const perfect = grade === 'PERFECT';
+  const H = TUNING.HIT_STOP;
+  if (action === 'kick') return perfect ? H.KICK_PERFECT : H.KICK_GOOD;
+  if (punchStep === 1) return perfect ? H.CROSS_PERFECT : H.CROSS_GOOD;
+  if (punchStep === 2) return perfect ? H.UPPERCUT_PERFECT : H.UPPERCUT_GOOD;
+  return perfect ? H.JAB_PERFECT : H.JAB_GOOD;
 }
 
 function evaluateBeatWindow(songTime) {
@@ -1929,7 +2053,7 @@ function findBestCombatTarget(maxAcquireDist = TUNING.AUTO_AIM_MAX_DIST) {
     const d = gameState.playerPos.distanceTo(b.rig.root.position);
     if (d > maxAcquireDist) return;
     const priorityBonus = (b.state === 'windup' || b.state === 'striking') ? -2.0
-      : ((b.state === 'stunned' || b.state === 'guard_break') ? -1.0 : (b.state === 'guard' ? -0.5 : 0));
+      : ((b.state === 'stunned' || b.state === 'guard_break' || b.state === 'dazed' || b.state === 'wall_slam' || b.state === 'launch') ? -1.0 : (b.state === 'guard' ? -0.5 : 0));
     const score = d + priorityBonus;
     if (score < bestScore) {
       bestScore = score;
@@ -2167,7 +2291,19 @@ function restartGame(options = {}) {
   gameState.missedPresses = 0;
   gameState.hitHistory = [];
   gameState.impactBeatOffsetsMs = [];
+  gameState.impactTargetOffsetsMs = [];
   gameState.enemyStrikeEvents = [];
+  gameState.punchStep = 0;
+  gameState.lastPunchTime = -10;
+  gameState.wallSlamCount = 0;
+  gameState.hitStopTimer = 0;
+  gameState.lastBeatWarpSchedule = null;
+  clearActiveSchedules();
+  if (challengerRig.clipDriven && challengerRig.mixer) {
+    challengerRig.mixer.stopAllAction();
+    challengerRig._activeAction = null;
+    challengerRig._activeClipName = null;
+  }
   gameState.playerHitStunTimer = 0;
   gameState.attackStartPose = null;
   gameState.styleRank = '—';
@@ -2318,36 +2454,25 @@ function applyBruiserConfirmedHit(obj, action, punchStep, timing, totalHitDmg, i
   } else {
     obj.isGuarding = false;
     const wasWindup = obj.state === 'windup' || obj.state === 'striking';
-    obj.hp = Math.max(0, obj.hp - totalHitDmg);
-
-    const pushDir = new THREE.Vector3().subVectors(obj.rig.root.position, gameState.playerPos);
-    pushDir.y = 0;
-    if (pushDir.lengthSq() < 0.001) pushDir.set(0, 0, -1);
-    pushDir.normalize();
-
-    obj.recoilType = recoilType;
-    obj.recoilVector = recoilVector.clone();
-    obj.targetTorsoRot = targetTorsoRot;
-    obj.targetHeadRot = targetHeadRot;
-    obj.velocity = pushDir.clone().multiplyScalar(pushSpeed);
-    obj.state = wasWindup ? 'stunned' : 'hit';
-    obj.stateTimer = wasWindup ? 1.25 : recoilDur;
-    obj.recoilTotalTimer = obj.stateTimer;
-    obj.teleMat.opacity = 0;
-    obj.badge.update(obj.hp, obj.maxHp, obj.state);
-
-    obj.isMicroShaking = true;
-    obj.microShakeDuration = microDur;
-    obj.microShakeTimer = microDur;
-    obj.microShakeAmp = microAmp;
-    obj.microShakeVertAmp = microAxis === 'y' ? 0.055 : 0.008;
-    obj.microShakeAxis = microAxis;
-    obj.microShakeNormal = new THREE.Vector3(-pushDir.z, 0, pushDir.x).normalize();
-    obj.lastHitStrike = action === 'kick' ? 'kick' : (punchStep === 0 ? 'jab' : (punchStep === 1 ? 'cross' : 'uppercut'));
-
-    if (action === 'punch' && punchStep === 2) {
-      obj.verticalVelocity = 2.2;
+    // Directional reaction with anticipation/overshoot curve, launch on uppercut, knockback that
+    // can wall-slam against the barricades (combat/reactions.js). Damage is applied inside.
+    const sideSign = (obj.rig.root.position.x - gameState.playerPos.x) >= 0 ? 1 : -1;
+    const reactProfile = getDirectionalHitReactionProfile(action, punchStep, { sideSign });
+    applyEnemyHitReaction(obj, {
+      action,
+      punchStep,
+      damage: totalHitDmg,
+      playerPos: gameState.playerPos,
+      isPerfect: timing.grade === 'PERFECT',
+      wasWindup,
+      profile: reactProfile
+    }, { gameState });
+    if (!obj.velocity || typeof obj.velocity.lengthSq !== 'function') {
+      const v = obj.velocity || { x: 0, y: 0, z: 0 };
+      obj.velocity = new THREE.Vector3(v.x || 0, v.y || 0, v.z || 0);
     }
+    obj.badge.update(obj.hp, obj.maxHp, obj.state === 'launch' ? 'hit' : obj.state);
+    obj.lastHitStrike = action === 'kick' ? 'kick' : (punchStep === 0 ? 'jab' : (punchStep === 1 ? 'cross' : 'uppercut'));
 
     if (obj.hp <= 0 || isBeatDropFinisher) {
       obj.hp = 0;
@@ -2417,7 +2542,16 @@ function resolveActivePhaseAttack(hitCtx) {
   if (stepSongTime !== null && stepSongTime !== undefined) {
     const chart = audioEngine.getActiveChart();
     const beatInfo = findNearestChartBeat(stepSongTime, chart);
-    impactBeatOffsetMs = Number((beatInfo.absDelta * 1000).toFixed(2));
+    let absDelta = beatInfo.absDelta;
+    if (hitCtx.beatWarp) {
+      // Warped impacts target the half-beat grid; measure against the nearest grid line and the target.
+      const gridT = findNearestChartSubdivision(stepSongTime, chart, 0.5);
+      absDelta = Math.min(absDelta, Math.abs(stepSongTime - gridT));
+      if (impactSongTime !== null) {
+        gameState.impactTargetOffsetsMs.push(Number((Math.abs(stepSongTime - impactSongTime) * 1000).toFixed(2)));
+      }
+    }
+    impactBeatOffsetMs = Number((absDelta * 1000).toFixed(2));
     gameState.impactBeatOffsetsMs.push(impactBeatOffsetMs);
   }
 
@@ -2526,21 +2660,12 @@ function resolveActivePhaseAttack(hitCtx) {
     audioEngine.triggerCrowdHype(`combo-${gameState.combo}`, { combo: gameState.combo });
   }
 
-  audioEngine.playCombatSfx(moveKey, timing.grade, validTarget.pos);
+  const impactCtxTime = (hitCtx.beatWarp && impactSongTime !== null && impactSongTime !== undefined)
+    ? clockSongTimeToContextTime(impactSongTime)
+    : null;
+  audioEngine.playCombatSfx(moveKey, timing.grade, validTarget.pos, impactCtxTime);
 
-  if (isOffBeat) {
-    gameState.hitStopTimer = 0.024;
-  } else if (isPerfect) {
-    gameState.hitStopTimer = action === 'kick' ? 0.100 :
-      (action === 'punch' && punchStep === 0) ? 0.048 :
-      (action === 'punch' && punchStep === 1) ? 0.070 :
-      (action === 'punch' && punchStep === 2) ? 0.110 : 0.048;
-  } else {
-    gameState.hitStopTimer = action === 'kick' ? 0.070 :
-      (action === 'punch' && punchStep === 0) ? 0.032 :
-      (action === 'punch' && punchStep === 1) ? 0.048 :
-      (action === 'punch' && punchStep === 2) ? 0.065 : 0.032;
-  }
+  gameState.hitStopTimer = predictHitStopSec(action, punchStep, timing.grade);
 
   const styleMult = isOffBeat ? 1.0 : (gameState.styleDamageMultiplier || 1.0);
   const timingMult = isOffBeat ? 1.0 : (timing.mult || 1.0);
@@ -2556,7 +2681,6 @@ function resolveActivePhaseAttack(hitCtx) {
     setStarburstText(burstWords[gameState.combo % burstWords.length], action === 'kick' ? 1.18 : 1.10);
   } else {
     floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
-    setStarburstText('HIT ×1.0', 1.04);
   }
 
   const isSrank = !isOffBeat && (gameState.styleRank === 'S-RANK' || gameState.combo >= 10);
@@ -2616,11 +2740,15 @@ function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
   gameState.pose = 'dodge';
   gameState.poseTimer = 0.34;
   gameState.dodgeInvulnTimer = TUNING.DODGE_IFRAME_SEC;
+  cancelActorSchedules(challengerRig);
   if (timing.onBeat || timing.grade === 'SILENT') {
     gameState.wave3BeatWeaveTimer = 0.52;
   }
 
   const side = Math.random() > 0.5 ? 1 : -1;
+  if (challengerRig.clipDriven && challengerRig.playClip) {
+    challengerRig.playClip(side > 0 ? 'dodge-R' : 'dodge-L', { fadeInSec: 0.05, loop: false });
+  }
   const newX = Math.max(-4.0, Math.min(4.0, gameState.playerPos.x + side * 0.62));
   gameState.playerTarget.set(newX, 0, gameState.playerPos.z);
   if (gameState.playerTarget.length() > TUNING.PLAYER_MAX_RADIUS) {
@@ -2721,6 +2849,10 @@ function executeDodgeAction(nowSec, timing, isBufferedDequeue = false) {
   }
 
   if (counteredAttacker) {
+    if (challengerRig.clipDriven && challengerRig.playClip) {
+      challengerRig.playClip('counter-riposte', { fadeInSec: 0.05, loop: false });
+      gameState.poseTimer = Math.max(gameState.poseTimer, 0.55);
+    }
     gameState.counterBonusTimer = (gameState.kronosRingState === 'counter_stun') ? 1.6 : Math.max(gameState.counterBonusTimer, 1.5);
     gameState.hype = Math.min(100.0, (gameState.hype || 0) + (gameState.kronosRingState === 'counter_stun' ? 25.0 : 15.0));
     floorDial.updateBadge('COUNTER WEAVE!', '#ffe042');
@@ -2777,7 +2909,6 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     gameState.comboDecayTimer = 0;
     updateStyleRankAndHype(0);
     floorDial.updateBadge('OFF-BEAT ×1.0', '#ff385c');
-    setStarburstText('OFF-BEAT ×1.0', 1.04);
     updateHudNumbers();
   }
 
@@ -2804,14 +2935,30 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     gameState.attackType = 'kick';
   }
 
-  // Real Beat-Warping: wind-up starts on input (attackTimer = 0) and warps startupDur so impact (at startupEnd) lands on the target beat;
-  // recoveryDur is quantized to the half-beat (beatSec * 0.5).
+  // BeatWarp (Dead as Disco): the clip starts on the press; its wind-up section is time-warped so the
+  // impact frame lands on the next half-beat of the chart, and the recovery section is stretched to
+  // end on the following grid line. Grading judges the press; the warp guarantees the hit lands in time.
   const chart = audioEngine.getActiveChart();
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
   const moveCfg = TUNING.MOVES[moveKey] || TUNING.MOVES['punch-jab'];
   let startupDur = moveCfg.startup;
+  let activeDur = moveCfg.active;
+  let recoveryDur = moveCfg.recovery;
   let targetImpactSongTime = null;
-  if (songTime !== null) {
+  let beatWarp = null;
+  if (songTime !== null && challengerRig.clipDriven) {
+    beatWarp = scheduleBeatWarpAction(challengerRig, MOVE_CLIP_NAMES[moveKey] || moveKey, songTime, {
+      chart,
+      clock: beatWarpClock,
+      fromCancel: Boolean(isBufferedDequeue),
+      hitStopSec: predictHitStopSec(action, currentPunchStep, timing.grade),
+      scheduleImpactSfx: false
+    });
+    targetImpactSongTime = beatWarp.impactTime;
+    startupDur = Math.max(0.008, targetImpactSongTime - songTime);
+    recoveryDur = Math.max(0.080, beatWarp.recoveryEndTime - targetImpactSongTime - activeDur);
+    gameState.lastBeatWarpSchedule = beatWarp;
+  } else if (songTime !== null) {
     if (timing.onBeat && timing.targetBeatTime !== undefined && timing.targetBeatTime !== null) {
       targetImpactSongTime = timing.targetBeatTime;
       const timeToTarget = targetImpactSongTime - songTime;
@@ -2820,12 +2967,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
       startupDur = THREE.MathUtils.clamp(timing.timeUntilBeat, 0.030, 0.165);
       targetImpactSongTime = songTime + startupDur;
     }
+    recoveryDur = Math.max(0.120, beatSec * 0.25);
   }
-  const activeDur = moveCfg.active;
-  const halfBeatSec = beatSec * 0.5;
-  const recoveryDur = songTime !== null
-    ? Math.max(0.120, halfBeatSec * 0.5)
-    : moveCfg.recovery;
   const totalDur = startupDur + activeDur + recoveryDur;
 
   gameState.attackPhase = 'startup';
@@ -2837,7 +2980,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     startup: startupDur,
     active: activeDur,
     recovery: recoveryDur,
-    total: totalDur
+    total: totalDur,
+    beatWarp
   };
 
   // Step/lunge toward target within reduced 1.85m auto-aim radius during wind-up
@@ -2866,7 +3010,8 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     moveKey,
     timing,
     pressSongTime: songTime,
-    targetImpactSongTime
+    targetImpactSongTime,
+    beatWarp
   };
 
   gameState.activeSmears.push(smearArcPool.acquire(challengerRig.root.position, action === 'kick'));
@@ -3059,6 +3204,20 @@ class ContinuousPoseBlender {
     this.applyToRig();
   }
 
+  updateYawOnly(dt) {
+    if (dt <= 0) return;
+    const clampedDt = Math.min(dt, 0.1);
+    const yawDiff = ContinuousPoseBlender.wrapAngle(this.targetRootYaw - this.currentRootYaw);
+    const maxYawStep = Math.min(0.25, 12.0 * clampedDt);
+    let yawStep = yawDiff * (1.0 - Math.exp(-14.0 * clampedDt));
+    if (Math.abs(yawStep) > maxYawStep) yawStep = Math.sign(yawStep) * maxYawStep;
+    if (Math.abs(yawStep) > Math.abs(yawDiff)) yawStep = yawDiff;
+    this.currentRootYaw += yawStep;
+    if (this.controlRootYaw && this.rig.root && this.rig.root.rotation) {
+      this.rig.root.rotation.set(0, this.currentRootYaw, 0);
+    }
+  }
+
   applyToRig() {
     for (let i = 0; i < this.allJoints.length; i++) {
       const j = this.allJoints[i];
@@ -3216,6 +3375,58 @@ function lerpPoseDict(pA, pB, t) {
   return result;
 }
 
+function ensureChallengerIdleClip(songTime) {
+  const rig = challengerRig;
+  if (!rig.clipDriven || !rig.playClip) return;
+  if (rig._activeClipName === 'idle-dance' && rig._activeAction && rig._activeAction.isRunning()) return;
+  const chart = audioEngine.getActiveChart();
+  const barSec = (chart && chart.barSec) || KRONOS_BAR_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const clip = rig.clips ? rig.clips.get('idle-dance') : null;
+  const clipDur = clip && clip.duration > 0 ? clip.duration : 2.6;
+  // Start the two-bar groove at the song's current bar phase (Hi-Fi Rush rule), scaled to the bar length.
+  const phase = (songTime !== null && barSec > 0)
+    ? ((((songTime - firstOffset) % barSec) + barSec) % barSec) / barSec
+    : 0;
+  rig.playClip('idle-dance', {
+    loop: true,
+    fadeInSec: 0.14,
+    startTime: phase * clipDur,
+    timeScale: clipDur / barSec
+  });
+}
+
+function poseChallengerClipDriven(rig, pose, elapsed, beatPulse, dt, rawDt) {
+  challengerBlender.updateYawOnly(dt);
+  if (gameState.debugFreezeClip) return; // debug: hold whatever clip frame was sampled
+  if (gameState.isAttacking && gameState.phaseDurations) {
+    const p = gameState.phaseDurations;
+    const t = gameState.attackTimer;
+    const startupEnd = p.startup || 0.065;
+    const activeEnd = startupEnd + (p.active || 0.060);
+    const total = p.total || (activeEnd + (p.recovery || 0.160));
+    const isKick = gameState.pose === 'kick' || gameState.pose === 'showcase-kick';
+    if (isKick && kickSmear.updateSweep) {
+      if (t < startupEnd) {
+        const tau = Math.min(1.0, Math.max(0.0, t / Math.max(0.001, startupEnd)));
+        if (tau > 0.40) kickSmear.updateSweep((tau - 0.40) / 0.60 * 0.85, false, beatPulse);
+        else kickSmear.smearGroup.visible = false;
+      } else if (t < activeEnd) {
+        kickSmear.updateSweep(1.0, false, beatPulse);
+      } else {
+        const tau = Math.min(1.0, Math.max(0.0, (t - activeEnd) / Math.max(0.001, total - activeEnd)));
+        kickSmear.updateSweep(1.0 - Math.pow(1.0 - tau, 2.0), true, beatPulse);
+      }
+    } else {
+      kickSmear.smearGroup.visible = false;
+    }
+    return;
+  }
+  kickSmear.smearGroup.visible = false;
+  if (pose === 'hurt' || gameState.playerHitStunTimer > 0 || pose === 'dodge') return;
+  ensureChallengerIdleClip(audioEngine.getSongTime());
+}
+
 function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016, rawDt = dt) {
   const kneeBounce = beatPulse * 0.045;
   const breath = Math.sin(elapsed * 2.8) * 0.03;
@@ -3229,6 +3440,11 @@ function poseChallenger(rig, pose, elapsed, beatPulse, dt = 0.016, rawDt = dt) {
     targetYaw = Math.max(-1.15, Math.min(1.15, targetYaw));
   }
   challengerBlender.setTargetRootYaw(targetYaw);
+
+  if (challengerRig.clipDriven) {
+    poseChallengerClipDriven(rig, pose, elapsed, beatPulse, dt, rawDt);
+    return;
+  }
 
   let targetJoints = null;
   let targetHipsY = 1.00;
@@ -3387,8 +3603,15 @@ async function enterCypherFromStartOverlay() {
 }
 
 if (elBtnStartCypher) {
-  elBtnStartCypher.disabled = false;
-  setBootProgress('Arena Ready · 92 BPM Cypher Loaded');
+  const _startBtnText = elBtnStartCypher.textContent;
+  elBtnStartCypher.disabled = true;
+  elBtnStartCypher.textContent = 'LOADING MOVES…';
+  setBootProgress('Loading authored fight clips…', 92);
+  _clipPreloadPromise.then((clipCount) => {
+    elBtnStartCypher.disabled = false;
+    elBtnStartCypher.textContent = _startBtnText;
+    setBootProgress(clipCount > 0 ? `Arena Ready · ${clipCount} fight clips · 92 BPM` : 'Arena Ready · 92 BPM Cypher Loaded', 100);
+  });
   elBtnStartCypher.addEventListener('click', () => {
     enterCypherFromStartOverlay();
   });
@@ -3705,7 +3928,9 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
   if (gameState.counterBonusTimer > 0) gameState.counterBonusTimer = Math.max(0, gameState.counterBonusTimer - dt);
   if (gameState.playerHitStunTimer > 0) gameState.playerHitStunTimer = Math.max(0, gameState.playerHitStunTimer - dt);
 
-  // Per-move startupDur / activeDur / recoveryDur lifecycle + Active-Phase Hit Resolution on the beat (startupEnd)
+  // Attack lifecycle. With a BeatWarp schedule the phases follow song time (impact on the warped
+  // impact frame, cancel window at the clip's cancelFrom, end on the quantized recovery end);
+  // without one they follow the per-move startup/active/recovery timers.
   if (gameState.isAttacking) {
     gameState.attackTimer += dt;
     const p = gameState.phaseDurations;
@@ -3715,28 +3940,45 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
     const impactApexTime = startupEnd;
     const total = p.total || (activeEnd + (p.recovery || 0.160));
     const curSongTime = audioEngine.getSongTime();
-    const reachedTargetBeat = (
+    const pending = gameState.pendingHit;
+    const hasSongTarget = Boolean(
       curSongTime !== null &&
-      gameState.pendingHit &&
-      !gameState.pendingHit.resolved &&
-      gameState.pendingHit.targetImpactSongTime !== null &&
-      gameState.pendingHit.targetImpactSongTime !== undefined &&
-      curSongTime >= gameState.pendingHit.targetImpactSongTime - 1e-6
+      pending &&
+      !pending.resolved &&
+      pending.targetImpactSongTime !== null &&
+      pending.targetImpactSongTime !== undefined &&
+      (pending.pressSongTime === null || pending.pressSongTime === undefined || Math.abs(curSongTime - pending.pressSongTime) > 1e-6)
     );
+    const reachedTargetBeat = hasSongTarget && (curSongTime >= pending.targetImpactSongTime - 1e-6);
+    const bw = p.beatWarp || null;
 
-    if (gameState.attackTimer < startupEnd && !reachedTargetBeat) {
+    let phase;
+    if (bw && curSongTime !== null) {
+      if (pending && !pending.resolved && !reachedTargetBeat) phase = 'startup';
+      else if (curSongTime < bw.cancelReadyTime - 1e-6) phase = 'active';
+      else if (curSongTime < bw.recoveryEndTime - 1e-6) phase = 'recovery';
+      else phase = 'done';
+    } else if ((hasSongTarget && !reachedTargetBeat) || (!hasSongTarget && gameState.attackTimer < startupEnd)) {
+      phase = 'startup';
+    } else if (gameState.attackTimer < activeEnd) {
+      phase = 'active';
+    } else if (gameState.attackTimer < total) {
+      phase = 'recovery';
+    } else {
+      phase = 'done';
+    }
+
+    if (phase !== 'startup' && pending && !pending.resolved && (bw || reachedTargetBeat || !hasSongTarget || gameState.attackTimer >= impactApexTime)) {
+      resolveActivePhaseAttack(pending);
+    }
+
+    if (phase === 'startup') {
       gameState.attackPhase = 'startup';
       gameState.canCancel = false;
-    } else if (gameState.attackTimer < activeEnd) {
+    } else if (phase === 'active') {
       gameState.attackPhase = 'active';
       gameState.canCancel = false;
-      if (gameState.pendingHit && !gameState.pendingHit.resolved && (gameState.attackTimer >= impactApexTime || reachedTargetBeat)) {
-        resolveActivePhaseAttack(gameState.pendingHit);
-      }
-    } else if (gameState.attackTimer < total) {
-      if (gameState.pendingHit && !gameState.pendingHit.resolved) {
-        resolveActivePhaseAttack(gameState.pendingHit);
-      }
+    } else if (phase === 'recovery') {
       gameState.attackPhase = 'recovery';
       gameState.canCancel = true;
 
@@ -3750,11 +3992,9 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
           triggerCombatAction(act, true);
         } else {
           gameState.inputBuffer = null;
-          gameState.playerTarget.copy(gameState.basePos);
         }
-      } else {
-        gameState.playerTarget.copy(gameState.basePos);
       }
+      // Hold position through recovery: no slide back to the base mark between hits.
     } else {
       if (gameState.pendingHit && !gameState.pendingHit.resolved) {
         resolveActivePhaseAttack(gameState.pendingHit);
@@ -3808,6 +4048,9 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
   }
 
   poseChallenger(challengerRig, gameState.pose, elapsed, beatPulse, dt, rawDt);
+  if (challengerRig.clipDriven && challengerRig.update && !gameState.debugFreezeClip) {
+    challengerRig.update(dt);
+  }
 }
 
 function quantizeWindupToBeat(songTime, chart, beatsAhead = 1.0, strikeDur = 0.0) {
@@ -3853,8 +4096,15 @@ function applyPlayerDamage(dmg, hitWord, kickAmt = 0.28, dutchAmt = 0.04) {
   gameState.isAttacking = false;
   gameState.attackPhase = 'idle';
   gameState.pendingHit = null;
+  gameState.inputBuffer = null;
   gameState.pose = 'hurt';
   gameState.poseTimer = 0.150;
+  // A hit-react drops the attack outright (Dead as Disco), it is never rescheduled.
+  cancelActorSchedules(challengerRig);
+  if (challengerRig.clipDriven && challengerRig.playClip) {
+    challengerRig.playClip(dmg >= 18 ? 'hurt-heavy' : 'hurt-light', { fadeInSec: 0.04, loop: false });
+    gameState.poseTimer = dmg >= 18 ? 0.30 : 0.20;
+  }
   if (!reducedMotionEnabled) {
     gameState.cameraKick = kickAmt;
     gameState.cameraDutch = dutchAmt;
@@ -4658,7 +4908,17 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
       return;
     }
 
-    if (b.state === 'hit' || b.state === 'stunned' || b.state === 'guard_break') {
+    if (b.state === 'hit' || b.state === 'launch' || b.state === 'wall_slam' || b.state === 'dazed') {
+      updateEnemyReactionState(b, dt, elapsed, {
+        arenaRadius: TUNING.ARENA_RADIUS,
+        wallSlamRadius: TUNING.ARENA_RADIUS - 0.20,
+        gameState,
+        cameraJuice,
+        floorDial,
+        setStarburstText,
+        audioEngine
+      });
+    } else if (b.state === 'stunned' || b.state === 'guard_break') {
       updateBruiserHitStunGuardBreakState(b, dt, elapsed);
     } else if (b.state === 'windup') {
       updateBruiserWindupState(b, dt, elapsed, songTime);
@@ -4978,6 +5238,12 @@ function updateCamera(dt, rawDt, elapsed) {
   camera.rotation.z += gameState.cameraDutch + cameraJuice.dutchRoll;
   camera.fov = 45.0 - cameraJuice.fovDip;
   camera.updateProjectionMatrix();
+  if (IS_DEBUG_MODE && gameState.debugCameraOverride) {
+    const o = gameState.debugCameraOverride;
+    if (o.position) camera.position.set(o.position[0], o.position[1], o.position[2]);
+    if (o.lookAt) camera.lookAt(o.lookAt[0], o.lookAt[1], o.lookAt[2]);
+    if (o.fov && camera.fov !== o.fov) { camera.fov = o.fov; camera.updateProjectionMatrix(); }
+  }
 }
 
 function updateEnemies(dt, rawDt, elapsed, beatPulse, songTime, chart) {
@@ -5062,6 +5328,7 @@ function updateHud(dt) {
 const clock = new THREE.Clock();
 let _debugHarnessRef = null;
 let _crowdDeferredScheduled = false;
+let _lastClockChart = null;
 
 function animate() {
   requestAnimationFrame(animate);
@@ -5086,6 +5353,13 @@ function animate() {
 
   const chart = audioEngine.getActiveChart();
   const songTime = audioEngine.getSongTime();
+  if (chart !== _lastClockChart) {
+    _lastClockChart = chart;
+    clockSetActiveChart(chart);
+  }
+  if (songTime !== null) {
+    tickBeatWarp(songTime, rawDt, Math.max(0, gameState.hitStopTimer || 0));
+  }
   const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
   const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
   const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;
@@ -5121,7 +5395,7 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261017d').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261018a').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
@@ -5175,9 +5449,23 @@ if (IS_DEBUG_MODE) {
       KRONOS_LOOP_DURATION,
       KRONOS_BEAT_TIMES,
       KRONOS_BARS,
+      beatwarp: beatWarpModule,
+      clock: audioClockModule,
+      beatWarpClock,
+      scheduleBeatWarpAction,
+      tickBeatWarp,
+      clearActiveSchedules,
+      cancelActorSchedules,
+      clockNextSubdivision,
+      clockNearestSubdivision,
+      findNextChartSubdivision,
+      findNearestChartSubdivision,
+      clipPreloadPromise: _clipPreloadPromise,
       stepSimulation: (dtSec = 0.016) => {
         const chart = audioEngine.getActiveChart();
         const songTime = audioEngine.getSongTime();
+        if (gameState.hitStopTimer > 0) gameState.hitStopTimer -= dtSec;
+        if (songTime !== null) tickBeatWarp(songTime, dtSec, Math.max(0, gameState.hitStopTimer || 0));
         const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
         const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
         const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;

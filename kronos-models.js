@@ -1,10 +1,10 @@
 // ============================================================================
 // KRONOS MODELS BARREL — Re-exports modular builders from ./models/*.js
 // ============================================================================
-export * from './models/shared.js?v=20261017d';
-export * from './models/challenger.js?v=20261017d';
-export * from './models/kronos.js?v=20261017d';
-export * from './models/bruiser.js?v=20261017d';
-export * from './models/crowd.js?v=20261017d';
-export * from './models/stage.js?v=20261017d';
-export * from './models/arena.js?v=20261017d';
+export * from './models/shared.js?v=20261018a';
+export * from './models/challenger.js?v=20261018a';
+export * from './models/kronos.js?v=20261018a';
+export * from './models/bruiser.js?v=20261018a';
+export * from './models/crowd.js?v=20261018a';
+export * from './models/stage.js?v=20261018a';
+export * from './models/arena.js?v=20261018a';
