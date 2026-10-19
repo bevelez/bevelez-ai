@@ -16,11 +16,11 @@ import {
   getSectionAtTime,
   getLightingCueAtTime,
   computeRunResultsSummary
-} from './kronos-tracks.js?v=20261018v';
-import { wrapCharacterRig, loadGLBAsset, loadClipsManifest, applyKronosToonSkinning } from './anim/rig-adapter.js?v=20261018v';
-import { bindSkinnedBodyToRig } from './anim/skinned-body.js?v=20261018v';
-import { conformRigToClipSkeleton, stripHipsTranslation } from './anim/handbuilt-rig.js?v=20261018v';
-import * as beatWarpModule from './anim/beatwarp.js?v=20261018v';
+} from './kronos-tracks.js?v=20261019g';
+import { wrapCharacterRig, loadGLBAsset, loadClipsManifest, applyKronosToonSkinning } from './anim/rig-adapter.js?v=20261019g';
+import { bindSkinnedBodyToRig } from './anim/skinned-body.js?v=20261019g';
+import { conformRigToClipSkeleton, stripHipsTranslation } from './anim/handbuilt-rig.js?v=20261019g';
+import * as beatWarpModule from './anim/beatwarp.js?v=20261019g';
 import {
   scheduleAction as scheduleBeatWarpAction,
   tickBeatWarp,
@@ -28,8 +28,8 @@ import {
   clearActiveSchedules,
   hasActiveScheduleFor,
   setClipsManifest as setBeatWarpClipsManifest
-} from './anim/beatwarp.js?v=20261018v';
-import * as audioClockModule from './audio/clock.js?v=20261018v';
+} from './anim/beatwarp.js?v=20261019g';
+import * as audioClockModule from './audio/clock.js?v=20261019g';
 import {
   bindAudioEngine as clockBindAudioEngine,
   setActiveChart as clockSetActiveChart,
@@ -37,13 +37,13 @@ import {
   songTimeToContextTime as clockSongTimeToContextTime,
   nextSubdivision as clockNextSubdivision,
   nearestSubdivision as clockNearestSubdivision
-} from './audio/clock.js?v=20261018v';
+} from './audio/clock.js?v=20261019g';
 import {
   applyEnemyHitReaction,
   getDirectionalHitReactionProfile,
   updateEnemyReactionState
-} from './combat/reactions.js?v=20261018v';
-import * as combatDirectorModule from './combat/director.js?v=20261018v';
+} from './combat/reactions.js?v=20261019g';
+import * as combatDirectorModule from './combat/director.js?v=20261019g';
 import {
   tick as tickCombatDirector,
   evaluateCounterInput as directorEvaluateCounterInput,
@@ -52,7 +52,7 @@ import {
   grantFeverProgress as directorGrantFeverProgress,
   getDirectorTelemetry,
   resetDirector
-} from './combat/director.js?v=20261018v';
+} from './combat/director.js?v=20261019g';
 
 // Slice 2: enemies strike only on chart moveset markers through combat/director.js.
 const DIRECTOR_ENABLED = true;
@@ -68,36 +68,36 @@ const ARCHETYPE_DEFS = Object.freeze({
   heavy_charger:      { label: 'HEAVY CHARGER', hp: 165, color: 0xff1e38 }
 });
 const SECTION_ROSTERS = Object.freeze({
-  intro:     { count: 1, budget: 2, archetypes: ['hook_brawler'] },
-  verse_1:   { count: 2, budget: 5, archetypes: ['hook_brawler', 'double_tap_striker'] },
-  hook_1:    { count: 2, budget: 6, archetypes: ['double_tap_striker', 'heavy_charger', 'hook_brawler'] },
-  breakdown: { count: 2, budget: 5, archetypes: ['heavy_charger', 'double_tap_striker'] },
-  verse_2:   { count: 1, budget: 3, archetypes: ['double_tap_striker', 'hook_brawler'], boss: true },
-  outro:     { count: 1, budget: 2, archetypes: ['heavy_charger'], boss: true },
+  intro:     { count: 2, budget: 3, archetypes: ['hook_brawler'] },
+  verse_1:   { count: 3, budget: 7, archetypes: ['hook_brawler', 'double_tap_striker'] },
+  hook_1:    { count: 4, budget: 9, archetypes: ['double_tap_striker', 'heavy_charger', 'hook_brawler'] },
+  breakdown: { count: 3, budget: 7, archetypes: ['heavy_charger', 'double_tap_striker'] },
+  verse_2:   { count: 2, budget: 4, archetypes: ['double_tap_striker', 'hook_brawler'], boss: true },
+  outro:     { count: 2, budget: 3, archetypes: ['heavy_charger'], boss: true },
   byPhase: {
-    stage:  { count: 2, budget: 4, archetypes: ['hook_brawler', 'double_tap_striker'] },
-    unfold: { count: 2, budget: 5, archetypes: ['double_tap_striker', 'heavy_charger'] },
+    stage:  { count: 3, budget: 6, archetypes: ['hook_brawler', 'double_tap_striker'] },
+    unfold: { count: 3, budget: 7, archetypes: ['double_tap_striker', 'heavy_charger'] },
     ring:   { count: 1, budget: 2, archetypes: ['hook_brawler'], boss: true }
   }
 });
 const FEVER_RUSH_BARS = 2;
 const FINISHER_INVULN_SEC = 1.2;
-import { createContactShadowDecal } from './models/shared.js?v=20261018v';
+import { createContactShadowDecal } from './models/shared.js?v=20261019g';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261018v';
-import { buildKronosBossModel } from './models/kronos.js?v=20261018v';
-import { buildBruiserModel } from './models/bruiser.js?v=20261018v';
+} from './models/challenger.js?v=20261019g';
+import { buildKronosBossModel } from './models/kronos.js?v=20261019g';
+import { buildBruiserModel } from './models/bruiser.js?v=20261019g';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261018v';
+} from './models/crowd.js?v=20261019g';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261018v';
+} from './models/stage.js?v=20261019g';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -107,15 +107,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261018v';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261018v';
+} from './models/arena.js?v=20261019g';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261019g';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261018v';
+} from './kronos-sfx.js?v=20261019g';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -136,10 +136,10 @@ export const TUNING = {
   PERFECT_WINDOW_SEC: 0.085,
   ON_BEAT_WINDOW_SEC: 0.165,
   OFF_BEAT_DAMAGE_MULT: 0.6,
-  AUTO_AIM_MAX_DIST: 1.85,
+  AUTO_AIM_MAX_DIST: 2.30,   // covers the stalking slots so every strike lunges onto its target
   ACTIVE_HIT_MAX_DIST: 1.98,
   ACTIVE_HIT_MIN_FACING_DOT: 0.22,
-  MAX_LUNGE_DIST: 1.35,
+  MAX_LUNGE_DIST: 1.60,
   DODGE_IFRAME_SEC: 0.22,
   DODGE_COOLDOWN_SEC: 0.38,
   COUNTER_WEAVE_LAST_WINDUP_SEC: 0.155,
@@ -147,14 +147,14 @@ export const TUNING = {
   ENEMY_MELEE_STRIKE_RADIUS: 1.55,
   COMBO_DECAY_SEC: 4.0,
   HIT_STOP: {
-    JAB_PERFECT: 0.048,
-    CROSS_PERFECT: 0.070,
-    UPPERCUT_PERFECT: 0.110,
-    KICK_PERFECT: 0.100,
-    JAB_GOOD: 0.032,
-    CROSS_GOOD: 0.048,
-    UPPERCUT_GOOD: 0.065,
-    KICK_GOOD: 0.070,
+    JAB_PERFECT: 0.090,
+    CROSS_PERFECT: 0.105,
+    UPPERCUT_PERFECT: 0.135,
+    KICK_PERFECT: 0.125,
+    JAB_GOOD: 0.070,
+    CROSS_GOOD: 0.082,
+    UPPERCUT_GOOD: 0.105,
+    KICK_GOOD: 0.100,
     DILATION: 0.08
   },
   MOVES: {
@@ -1214,6 +1214,76 @@ scene.add(challengerRig.root);
 
 const kickSmear = buildPersistentKickSmearRig(challengerRig.root);
 
+// Kick trail: a ribbon drawn through the foot's actual positions over the last frames, so the
+// smear follows the clip's path instead of a fixed crescent plane.
+function createFootTrail(sceneRef, maxPoints = 14, width = 0.13) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new Float32Array(maxPoints * 2 * 3);
+  const col = new Float32Array(maxPoints * 2 * 4);
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  const idx = [];
+  for (let i = 0; i < maxPoints - 1; i++) {
+    const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+    idx.push(a, b, c, b, d, c);
+  }
+  geo.setIndex(idx);
+  const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.frustumCulled = false;
+  mesh.visible = false;
+  mesh.userData.noOutline = true;
+  sceneRef.add(mesh);
+  const pts = [];
+  const up = new THREE.Vector3(0, 1, 0);
+  const side = new THREE.Vector3();
+  const dir = new THREE.Vector3();
+  let fade = 0;
+  function rebuild() {
+    const n = pts.length;
+    for (let i = 0; i < maxPoints; i++) {
+      const k = Math.min(i, n - 1);
+      const p = pts[k];
+      if (!p) continue;
+      const q = pts[Math.max(0, k - 1)];
+      dir.subVectors(p, q);
+      if (dir.lengthSq() < 1e-8) dir.set(0, 0, -1);
+      side.crossVectors(dir.normalize(), up).normalize();
+      const w = width * (k / Math.max(1, n - 1)) * fade;
+      const o = i * 6;
+      pos[o] = p.x - side.x * w; pos[o + 1] = p.y - side.y * w; pos[o + 2] = p.z - side.z * w;
+      pos[o + 3] = p.x + side.x * w; pos[o + 4] = p.y + side.y * w; pos[o + 5] = p.z + side.z * w;
+      const alpha = Math.pow(k / Math.max(1, n - 1), 1.5) * fade;
+      const c = i * 8;
+      col[c] = 1.0; col[c + 1] = 1.0; col[c + 2] = 1.0; col[c + 3] = alpha;
+      col[c + 4] = 0.55; col[c + 5] = 0.95; col[c + 6] = 1.0; col[c + 7] = alpha;
+    }
+    geo.attributes.position.needsUpdate = true;
+    geo.attributes.color.needsUpdate = true;
+  }
+  return {
+    mesh,
+    sample(worldPos, strength = 1.0) {
+      fade = Math.min(1, strength);
+      if (pts.length === 0 || pts[pts.length - 1].distanceToSquared(worldPos) > 1e-6) {
+        pts.push(worldPos.clone());
+        if (pts.length > maxPoints) pts.shift();
+      }
+      mesh.visible = pts.length > 1;
+      rebuild();
+    },
+    release(rawDt) {
+      if (!mesh.visible) return;
+      fade -= rawDt * 6.5;
+      if (fade <= 0 || pts.length < 2) { mesh.visible = false; pts.length = 0; fade = 0; return; }
+      rebuild();
+    },
+    hide() { mesh.visible = false; pts.length = 0; fade = 0; }
+  };
+}
+const footTrail = createFootTrail(scene);
+const _footWorld = new THREE.Vector3();
+
 // Authored fight clips (assets/models/kronos-clips-challenger.glb, animation-only) drive the
 // hand-built Challenger through an AnimationMixer. The hand-built rig keeps its meshes; only four
 // pivots (spine, neck, shoulders) are inserted so every clip track binds by name.
@@ -1242,7 +1312,7 @@ const _skinnedBodyMissing = new Set();
 async function attachSkinnedBody(rig, type) {
   if (!SKINNED_BODIES || !SKINNED_BODY_TYPES.has(type) || _skinnedBodyMissing.has(type)) return null;
   try {
-    const { scene: bodyScene } = await loadGLBAsset(`./assets/models/${type}-skinned.glb?v=20261018v`);
+    const { scene: bodyScene } = await loadGLBAsset(`./assets/models/${type}-skinned.glb?v=20261019g`);
     // Hi-Fi Rush read: the projected art already carries its own shading, so the generated bodies
     // get a flat two-band ramp (lit / 66 % shadow) instead of the deep 3-band ramp, a soft rim, and
     // a touch of self-light from the texture so the shadow side keeps its colour.
@@ -1266,10 +1336,129 @@ async function attachSkinnedBody(rig, type) {
   }
 }
 
+// Authored walk / run cycles (tools/character-pipeline/author_locomotion.py). Rotation-only so the
+// same clips drive every fighter; position and scale tracks are dropped on load.
+let _locomotionClipsPromise = null;
+// The cycles are authored for the Challenger, who faces glTF -Z. Enemies face +Z, so their copy is
+// the same motion turned 180 degrees about Y: every quaternion (x, y, z, w) becomes (-x, y, -z, w).
+function mirrorClipFacing(clip) {
+  const c = clip.clone();
+  for (const t of c.tracks) {
+    if (!/\.quaternion$/.test(t.name)) continue;
+    const v = t.values;
+    for (let i = 0; i < v.length; i += 4) { v[i] = -v[i]; v[i + 2] = -v[i + 2]; }
+  }
+  return c;
+}
+function loadLocomotionClips(mirrorForPlusZ = false) {
+  if (!_locomotionClipsPromise) {
+    _locomotionClipsPromise = loadGLBAsset(`./assets/models/kronos-clips-locomotion.glb?v=20261019g`).then(({ animations }) =>
+      animations.map((clip) => {
+        const c = clip.clone();
+        c.tracks = c.tracks.filter((t) => /\.quaternion$/.test(t.name));
+        return c;
+      })
+    ).catch((err) => {
+      console.warn('[kronos] locomotion clips unavailable', err);
+      return [];
+    });
+  }
+  return _locomotionClipsPromise.then((clips) => (mirrorForPlusZ ? clips.map(mirrorClipFacing) : clips.map((c) => c.clone())));
+}
+
+// How far in front of the root the striking limb is on each move's impact frame, measured from the
+// clips themselves so the lunge can put the fist on the body instead of next to it.
+function measureStrikeReach(rig) {
+  if (!rig || !rig.sampleClipAt || !rig.clips) return;
+  const probes = { 'punch-jab': ['jab', 'leftHand'], 'punch-cross': ['cross', 'rightHand'], 'punch-uppercut': ['uppercut', 'rightHand'], 'finisher': ['uppercut', 'rightHand'], 'kick': ['kick', 'rightAnkle'] };
+  const reach = {};
+  const world = new THREE.Vector3();
+  const local = new THREE.Vector3();
+  const savedQuat = rig.root.quaternion.clone();
+  rig.root.quaternion.identity();
+  for (const [moveKey, [clipName, limb]] of Object.entries(probes)) {
+    const meta = _clipManifest && _clipManifest.clips && _clipManifest.clips[clipName];
+    const impactFrame = meta && meta.impactFrame !== undefined ? meta.impactFrame : 0.25;
+    if (!rig.clips.get(clipName) || !rig[limb]) continue;
+    rig.sampleClipAt(clipName, impactFrame);
+    rig[limb].getWorldPosition(world);
+    rig.root.worldToLocal(local.copy(world));
+    reach[moveKey] = Math.max(0.3, -local.z);   // the Challenger faces -Z in root space
+  }
+  rig.root.quaternion.copy(savedQuat);
+  rig.mixer.stopAllAction();
+  rig.playClip(rig._defaultIdleClip || 'idle-dance', { loop: true, fadeInSec: 0 });
+  rig.strikeReach = reach;
+  return reach;
+}
+
+// Idle <-> walk <-> run by ground speed; cycles lock to the beat grid (walk = 2 beats, run = 1 beat)
+// so footfalls land on beats. Returns true when a locomotion clip owns the body this frame.
+function updateLocomotionClip(rig, speed, songTime) {
+  if (!rig || !rig.clipDriven || !rig.playClip || !rig.clips || !rig.clips.get('walk')) return false;
+  const prev = rig._locoSpeed !== undefined ? rig._locoSpeed : speed;
+  const sp = rig._locoSpeed = prev + (speed - prev) * 0.35;
+  const current = rig._activeClipName;
+  const moving = current === 'walk' || current === 'run';
+  if (sp < (moving ? 0.22 : 0.38)) return false;
+  const clipName = sp > (current === 'run' ? 1.45 : 1.75) ? 'run' : 'walk';
+  const chart = audioEngine.getActiveChart();
+  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const clip = rig.clips.get(clipName);
+  const cycleBeats = clipName === 'run' ? 1 : 2;
+  const timeScale = clip.duration / (beatSec * cycleBeats);
+  if (current !== clipName || !rig._activeAction || !rig._activeAction.isRunning()) {
+    const cycleSec = beatSec * cycleBeats;
+    const phase = (songTime !== null && songTime !== undefined)
+      ? ((((songTime - firstOffset) % cycleSec) + cycleSec) % cycleSec) / cycleSec
+      : 0;
+    rig.playClip(clipName, { loop: true, fadeInSec: 0.16, timeScale, startTime: phase * clip.duration });
+  } else if (rig._activeAction) {
+    rig._activeAction.setEffectiveTimeScale(timeScale);
+  }
+  return true;
+}
+
+function groundSpeedOf(entity, dt) {
+  const pos = entity.rig.root.position;
+  const prev = entity._prevGroundPos || (entity._prevGroundPos = pos.clone());
+  const sp = dt > 0 ? Math.hypot(pos.x - prev.x, pos.z - prev.z) / dt : 0;
+  prev.copy(pos);
+  return sp;
+}
+
+// Body flashes (hit confirms, telegraph windows) on the generated bodies' toon materials.
+function setBodyEmissive(rig, hex, intensity) {
+  const sm = rig && rig.skinnedBody;
+  if (!sm) return;
+  const mats = Array.isArray(sm.material) ? sm.material : [sm.material];
+  for (const m of mats) {
+    if (!m || !m.emissive) continue;
+    if (!m.userData.baseEmissive) m.userData.baseEmissive = m.emissive.clone();
+    m.emissive.copy(m.userData.baseEmissive);
+    if (intensity > 0) m.emissive.lerp(new THREE.Color(hex), Math.min(1, intensity));
+  }
+}
+const _bodyFlashes = [];
+function flashBody(rig, hex = 0xffffff, sec = 0.09, intensity = 1.0) {
+  if (!rig || !rig.skinnedBody) return;
+  _bodyFlashes.push({ rig, hex, t: sec, dur: sec, intensity });
+}
+function updateBodyFlashes(rawDt) {
+  for (let i = _bodyFlashes.length - 1; i >= 0; i--) {
+    const f = _bodyFlashes[i];
+    f.t -= rawDt;
+    if (f.t <= 0) { setBodyEmissive(f.rig, f.hex, 0); _bodyFlashes.splice(i, 1); continue; }
+    setBodyEmissive(f.rig, f.hex, f.intensity * (f.t / f.dur));
+  }
+}
+
 async function attachClipsToRig(rig, type, manifest) {
-  const { scene, animations } = await loadGLBAsset(`./assets/models/kronos-clips-${type}.glb?v=20261018v`);
+  const { scene, animations } = await loadGLBAsset(`./assets/models/kronos-clips-${type}.glb?v=20261019g`);
   const report = conformRigToClipSkeleton(rig, scene);
-  const clips = type === 'challenger' ? animations : stripHipsTranslation(animations);
+  const locomotion = await loadLocomotionClips(type !== 'challenger');
+  const clips = (type === 'challenger' ? animations : stripHipsTranslation(animations)).concat(locomotion);
   wrapCharacterRig(rig, {
     animations: clips,
     clipMetadata: manifest && manifest.clips ? manifest.clips : undefined,
@@ -1278,7 +1467,9 @@ async function attachClipsToRig(rig, type, manifest) {
   rig.clipDriven = true;
   rig.clipType = type;
   rig.clipPivotReport = report;
+  rig._defaultIdleClip = type === 'kronos' ? 'boss-idle' : 'idle-dance';
   await attachSkinnedBody(rig, type);
+  if (type === 'challenger') measureStrikeReach(rig);
   if (report.maxDeviationM > 0.005) {
     console.warn(`[kronos] ${type} rig moved ${report.maxDeviationM} m while conforming to its clip skeleton`, report);
   }
@@ -1286,7 +1477,7 @@ async function attachClipsToRig(rig, type, manifest) {
 }
 
 const _clipPreloadPromise = (async () => {
-  const manifest = await loadClipsManifest('./assets/models/clips.json?v=20261018v');
+  const manifest = await loadClipsManifest('./assets/models/clips.json?v=20261019g');
   if (manifest) setBeatWarpClipsManifest(manifest);
   _clipManifest = manifest;
   return attachClipsToRig(challengerRig, 'challenger', manifest);
@@ -1420,7 +1611,7 @@ function createEnemyOverheadBadge(title = 'BRUISER #1') {
   return { mesh, update };
 }
 
-const bruisers = [0, 1, 2].map((idx) => {
+const bruisers = [0, 1, 2, 3, 4].map((idx) => {
   const bObj = buildBruiserModel(idx % 2);
   const badge = createEnemyOverheadBadge(`HYPE BRUISER #${idx + 1}`);
   bObj.rig.root.add(badge.mesh);
@@ -1459,7 +1650,7 @@ const bruisers = [0, 1, 2].map((idx) => {
     targetStrikeBeat: -1,
     attackType: idx % 2 === 0 ? 'quick_hook' : 'heavy_haymaker',
     isGuarding: false,
-    slotIndex: idx === 0 ? 5 : (idx === 1 ? 1 : 0),
+    slotIndex: [5, 1, 0, 3, 2][idx] || 0,
     guardCooldown: 3.0 + idx * 1.5,
     attackCooldown: 1.4 + idx * 1.35,
     angle: idx === 0 ? -0.48 : (idx === 1 ? 0.58 : 0.05),
@@ -2068,7 +2259,7 @@ function spawnWave(waveNum) {
       { active: false, angle: 0.0,  radius: 3.50, hp: 0,                 cd: 99 }
     ];
     bruisers.forEach((b, idx) => {
-      const cfg = wave1Configs[idx];
+      const cfg = wave1Configs[idx] || { active: false, angle: 0.0, radius: 3.50, hp: 0, cd: 99 };   // pool is larger than the wave list
       b.active = cfg.active;
       b.hp = cfg.hp;
       b.maxHp = cfg.hp;
@@ -2107,7 +2298,7 @@ function spawnWave(waveNum) {
       { active: true, angle: 0.82,  radius: 2.00, hp: waveCfg.bruiserHp, cd: 2.7 }
     ];
     bruisers.forEach((b, idx) => {
-      const cfg = wave2Configs[idx];
+      const cfg = wave2Configs[idx] || { active: false, angle: 0.0, radius: 3.50, hp: 0, cd: 99 };   // pool is larger than the wave list
       b.active = true;
       b.hp = cfg.hp;
       b.maxHp = cfg.hp;
@@ -2845,10 +3036,19 @@ function resolveActivePhaseAttack(hitCtx) {
     gameState.impactBeatOffsetsMs.push(impactBeatOffsetMs);
   }
 
-  // Live Distance + Facing check AT THE ACTIVE PHASE MOMENT!
-  const targetInfo = findBestCombatTarget(
+  // Live Distance + Facing check AT THE ACTIVE PHASE MOMENT! The enemy the lunge aimed at is
+  // preferred while it is still a legal target, so the hit lands on the body we moved toward.
+  let targetInfo = findBestCombatTarget(
     gameState.wave === 3 ? Math.max(TUNING.ACTIVE_HIT_MAX_DIST, 2.15) : TUNING.ACTIVE_HIT_MAX_DIST
   );
+  const lungeTarget = gameState.lunge && gameState.lunge.target;
+  if (lungeTarget && lungeTarget.rig && lungeTarget.active !== false && lungeTarget.state !== 'ko' && lungeTarget.state !== 'flying' && (!targetInfo || targetInfo.obj !== lungeTarget)) {
+    const lp = lungeTarget.rig.root.position;
+    const ld = Math.hypot(lp.x - gameState.playerPos.x, lp.z - gameState.playerPos.z);
+    if (ld <= TUNING.ACTIVE_HIT_MAX_DIST) {
+      targetInfo = { type: lungeTarget.isBoss ? 'kronos' : 'bruiser', obj: lungeTarget, pos: lp.clone(), dist: ld };
+    }
+  }
 
   let validTarget = null;
   if (targetInfo && targetInfo.pos) {
@@ -2873,6 +3073,22 @@ function resolveActivePhaseAttack(hitCtx) {
   }
 
   const limbPos = getAttackingLimbWorldPos(action, punchStep);
+  if (validTarget && validTarget.obj && validTarget.obj.rig) {
+    const tp = new THREE.Vector3();
+    (validTarget.obj.rig.torso || validTarget.obj.rig.root).getWorldPosition(tp);
+    const bodyRadius = validTarget.type === 'kronos' ? 0.34 : 0.24;
+    const gap = Math.max(0, Math.hypot(limbPos.x - tp.x, limbPos.z - tp.z) - bodyRadius);
+    (gameState.contactDistances || (gameState.contactDistances = [])).push(Number(gap.toFixed(3)));
+    const lg = gameState.lunge;
+    (gameState.contactDebug || (gameState.contactDebug = [])).push({
+      move: moveKey, gap: Number(gap.toFixed(3)),
+      rootDist: Number(Math.hypot(gameState.playerPos.x - tp.x, gameState.playerPos.z - tp.z).toFixed(3)),
+      limbFromRoot: Number(Math.hypot(limbPos.x - gameState.playerPos.x, limbPos.z - gameState.playerPos.z).toFixed(3)),
+      lunge: lg ? Number(lg.from.distanceTo(lg.to).toFixed(3)) : null,
+      desired: lg ? Number(lg.desiredDist.toFixed(3)) : null,
+      phase: gameState.attackPhase, t: Number(gameState.attackTimer.toFixed(3))
+    });
+  }
 
   // Air Whiff ONLY if no enemy passes live distance + facing check inside ACTIVE window
   if (!validTarget) {
@@ -2964,6 +3180,7 @@ function resolveActivePhaseAttack(hitCtx) {
   gameState.lastContactPoint = contactPoint.clone();
 
   const impactVFX = impactBurstPool.acquire(contactPoint, vfxType);
+  if (obj && obj.rig) flashBody(obj.rig, 0xffffff, isPerfect ? 0.11 : 0.08, 0.9);
   gameState.activeImpactVFX.push(impactVFX);
 
   const hitEntry = {
@@ -3866,20 +4083,36 @@ function triggerCombatAction(action, isBufferedDequeue = false) {
     beatWarp
   };
 
-  // Step/lunge toward target within reduced 1.85m auto-aim radius during wind-up
+  // Lunge so the striking limb reaches the body on the impact frame: the distance comes from the
+  // clip's own reach (measured at boot) plus the target's body radius, and the slide is eased over
+  // the wind-up so the fighter arrives as the hit lands rather than gliding afterwards.
   const feverLunge = (gameState.feverRushTimer > 0 || wantsFinisher || wantsTakedown) ? 1.6 : 1.0;
   const targetInfo = findBestCombatTarget(
     (gameState.wave === 3 ? Math.max(TUNING.AUTO_AIM_MAX_DIST, 2.15) : TUNING.AUTO_AIM_MAX_DIST) * feverLunge
   );
-  if (targetInfo && targetInfo.dist > 0.95) {
+  const reach = (challengerRig.strikeReach && challengerRig.strikeReach[moveKey]) || (moveKey === 'kick' ? 0.95 : 0.62);
+  const targetRadius = targetInfo && targetInfo.type === 'kronos' ? 0.34 : 0.24;
+  const desiredDist = Math.max(0.45, reach + targetRadius - (moveKey === 'kick' ? 0.18 : 0.07));   // kicks step in deeper: the shin, not the toe, should meet the body
+  gameState.lunge = null;
+  if (targetInfo) {   // always track the target through the wind-up; travel may start at zero and grow as it is knocked back
     const lungeDir = new THREE.Vector3().subVectors(targetInfo.pos, gameState.playerPos);
     lungeDir.y = 0;
-    const lungeDist = Math.min(TUNING.MAX_LUNGE_DIST * feverLunge, Math.max(0, targetInfo.dist - 0.92));
+    const lungeDist = Math.min(TUNING.MAX_LUNGE_DIST * feverLunge, Math.max(0, targetInfo.dist - desiredDist));
     lungeDir.normalize().multiplyScalar(lungeDist);
     const nextTarget = gameState.playerPos.clone().add(lungeDir);
     nextTarget.y = 0;
     if (nextTarget.length() > TUNING.PLAYER_MAX_RADIUS) nextTarget.setLength(TUNING.PLAYER_MAX_RADIUS);
     gameState.playerTarget.copy(nextTarget);
+    gameState.lunge = {
+      from: gameState.playerPos.clone(),
+      to: nextTarget.clone(),
+      target: targetInfo.obj || null,
+      desiredDist,
+      startSong: songTime,
+      endSong: targetImpactSongTime,
+      startWall: nowSec,
+      dur: Math.max(0.05, startupDur)
+    };
   } else {
     gameState.playerTarget.copy(gameState.playerPos);
   }
@@ -4305,40 +4538,35 @@ function poseChallengerClipDriven(rig, pose, elapsed, beatPulse, dt, rawDt) {
     const activeEnd = startupEnd + (p.active || 0.060);
     const total = p.total || (activeEnd + (p.recovery || 0.160));
     const isKick = gameState.pose === 'kick' || gameState.pose === 'showcase-kick';
-    if (isKick && kickSmear.updateSweep) {
+    kickSmear.smearGroup.visible = false;
+    if (isKick && challengerRig.rightAnkle) {
       if (t < startupEnd) {
         const tau = Math.min(1.0, Math.max(0.0, t / Math.max(0.001, startupEnd)));
-        if (tau > 0.40) kickSmear.updateSweep((tau - 0.40) / 0.60 * 0.85, false, beatPulse);
-        else kickSmear.smearGroup.visible = false;
-      } else if (t < activeEnd) {
-        kickSmear.updateSweep(1.0, false, beatPulse);
+        if (tau > 0.35) {
+          challengerRig.rightAnkle.getWorldPosition(_footWorld);
+          footTrail.sample(_footWorld, (tau - 0.35) / 0.65);
+        }
+      } else if (t < activeEnd + 0.06) {
+        challengerRig.rightAnkle.getWorldPosition(_footWorld);
+        footTrail.sample(_footWorld, 1.0);
       } else {
-        const tau = Math.min(1.0, Math.max(0.0, (t - activeEnd) / Math.max(0.001, total - activeEnd)));
-        kickSmear.updateSweep(1.0 - Math.pow(1.0 - tau, 2.0), true, beatPulse);
+        footTrail.release(rawDt);
       }
     } else {
-      kickSmear.smearGroup.visible = false;
+      footTrail.release(rawDt);
     }
     return;
   }
   kickSmear.smearGroup.visible = false;
+  footTrail.release(rawDt);
   if (pose === 'hurt' || gameState.playerHitStunTimer > 0 || pose === 'dodge' || pose === 'counter') return;
   const songTime = audioEngine.getSongTime();
   // Beat-locked footwork: while the Challenger drifts, step clips plant on the half-beats.
   const prev = gameState._stepPrevPos || (gameState._stepPrevPos = gameState.playerPos.clone());
   const speed = dt > 0 ? prev.distanceTo(gameState.playerPos) / dt : 0;
   prev.copy(gameState.playerPos);
-  if (songTime !== null && speed > 0.30 && !hasActiveScheduleFor(challengerRig)) {
-    gameState._stepSide = !gameState._stepSide;
-    scheduleBeatWarpAction(challengerRig, gameState._stepSide ? 'step-L' : 'step-R', songTime, {
-      chart: audioEngine.getActiveChart(),
-      clock: beatWarpClock,
-      scheduleWhooshSfx: false,
-      scheduleImpactSfx: false
-    });
-    return;
-  }
   if (hasActiveScheduleFor(challengerRig)) return;
+  if (updateLocomotionClip(challengerRig, speed, songTime)) return;
   ensureChallengerIdleClip(songTime);
 }
 
@@ -4491,7 +4719,7 @@ function togglePause(forceState = null) {
     if (elPauseOverlay) elPauseOverlay.classList.remove('hidden');
   } else {
     if (elPauseOverlay) elPauseOverlay.classList.add('hidden');
-    clock.getDelta();
+    try { clock.getDelta(); } catch (e) { /* visibility change before the clock exists */ }
     if (_wasPlayingBeforePause) {
       audioEngine.play().then((playing) => {
         if (btnPlay) {
@@ -4833,14 +5061,32 @@ updateHudNumbers();
 // 8. MODULAR 60FPS UPDATE PIPELINE (updatePlayer / updateFighterFSM / updateVFX / updateCamera)
 // ============================================================================
 const RADIAL_SLOTS = [
-  { angle: 0, radius: 1.75 },
-  { angle: Math.PI / 3, radius: 1.85 },
-  { angle: (2 * Math.PI) / 3, radius: 1.95 },
-  { angle: Math.PI, radius: 1.88 },
-  { angle: (4 * Math.PI) / 3, radius: 1.95 },
-  { angle: (5 * Math.PI) / 3, radius: 1.85 }
+  { angle: 0, radius: 1.55 },
+  { angle: Math.PI / 3, radius: 1.65 },
+  { angle: (2 * Math.PI) / 3, radius: 1.75 },
+  { angle: Math.PI, radius: 1.68 },
+  { angle: (4 * Math.PI) / 3, radius: 1.75 },
+  { angle: (5 * Math.PI) / 3, radius: 1.65 }
 ];
 
+// The attack buttons blink on every beat so the input rhythm reads without looking at the floor dial.
+let _lastPulseBeat = -1;
+function pulseInputButtonsOnBeat(songTime) {
+  if (songTime === null || songTime === undefined) return;
+  const chart = audioEngine.getActiveChart();
+  const beatSec = (chart && chart.beatSec) || KRONOS_BEAT_SEC;
+  const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
+  const beatIdx = Math.floor((songTime - firstOffset) / beatSec);
+  if (beatIdx === _lastPulseBeat) return;
+  _lastPulseBeat = beatIdx;
+  for (const el of [btnS, btnD]) {
+    if (!el) continue;
+    el.classList.add('beat');
+    setTimeout(() => el.classList.remove('beat'), 110);
+  }
+}
+
+const _playerMoveTmp = new THREE.Vector3();
 function updatePlayer(dt, rawDt, elapsed, beatPulse) {
   if (gameState.dodgeInvulnTimer > 0) gameState.dodgeInvulnTimer = Math.max(0, gameState.dodgeInvulnTimer - dt);
   if (gameState.counterBonusTimer > 0) gameState.counterBonusTimer = Math.max(0, gameState.counterBonusTimer - dt);
@@ -4953,7 +5199,40 @@ function updatePlayer(dt, rawDt, elapsed, beatPulse) {
     }
   }
 
-  gameState.playerPos.lerp(gameState.playerTarget, Math.min(1.0, dt * 12));
+  const lunge = gameState.lunge;
+  if (lunge && gameState.isAttacking && gameState.attackPhase === 'startup') {
+    const st = audioEngine.getSongTime();
+    let u;
+    if (st !== null && lunge.startSong !== null && lunge.endSong !== null && lunge.endSong > lunge.startSong) {
+      u = (st - lunge.startSong) / (lunge.endSong - lunge.startSong);
+    } else {
+      u = gameState.attackTimer / lunge.dur;
+    }
+    u = THREE.MathUtils.clamp(u / 0.92, 0, 1);       // arrive just before the impact frame
+    const ease = u * u * (3 - 2 * u);
+    // re-aim at the target's current position: enemies keep moving during the wind-up
+    const tgt = lunge.target && lunge.target.rig && lunge.target.rig.root ? lunge.target.rig.root.position : null;
+    if (tgt) {
+      const dir = new THREE.Vector3(tgt.x - lunge.from.x, 0, tgt.z - lunge.from.z);
+      const len = dir.length();
+      if (len > 1e-4) {
+        dir.multiplyScalar(1 / len);
+        const travel = Math.max(0, Math.min(2.0, len - lunge.desiredDist));
+        lunge.to.set(lunge.from.x + dir.x * travel, 0, lunge.from.z + dir.z * travel);
+        if (lunge.to.length() > TUNING.PLAYER_MAX_RADIUS) lunge.to.setLength(TUNING.PLAYER_MAX_RADIUS);
+        gameState.playerTarget.copy(lunge.to);
+      }
+    }
+    gameState.playerPos.lerpVectors(lunge.from, lunge.to, ease);
+  } else {
+    if (lunge && (!gameState.isAttacking || gameState.attackPhase !== 'startup')) gameState.lunge = null;
+    // drift and return at a pace the walk / run cycles can carry (no more snapping back to the mark)
+    const before = _playerMoveTmp.copy(gameState.playerPos);
+    gameState.playerPos.lerp(gameState.playerTarget, Math.min(1.0, dt * 12));
+    const step = gameState.playerPos.distanceTo(before);
+    const maxStep = dt * (gameState.combatEngagementTimer > 0 ? 3.2 : 2.4);
+    if (step > maxStep && step > 1e-6) gameState.playerPos.lerpVectors(before, gameState.playerPos, maxStep / step);
+  }
   if (gameState.pose === 'idle' && gameState.playerPos.distanceTo(gameState.basePos) < 0.005) {
     gameState.playerPos.copy(gameState.basePos);
   }
@@ -5206,6 +5485,40 @@ function updateBruiserHitStunGuardBreakState(b, dt, elapsed) {
   }
 }
 
+// Telegraph read on the body itself: the enemy glows in its attack colour as the wind-up builds,
+// ticks on the half-way beat, and flashes white on the frame the perfect counter opens.
+function updateEnemyTelegraphFlash(b) {
+  const rig = b && b.rig;
+  if (!rig || !rig.skinnedBody) return;
+  const winding = b.state === 'windup' || b.state === 'striking' || b.state === 'windup_combo' || b.state === 'striking_combo';
+  if (!winding || !b.teleMat || b.teleMat.opacity <= 0.001) {
+    if (b._teleGlow) { b._teleGlow = false; b._teleStage = 0; if (!_bodyFlashes.some((f) => f.rig === rig)) setBodyEmissive(rig, 0xffffff, 0); }
+    return;
+  }
+  b._teleGlow = true;
+  const hex = b.teleMat.color.getHex();
+  const perfect = hex === 0xffe042;
+  const counterable = hex === 0x00e5ff || perfect;
+  const build = THREE.MathUtils.clamp((b.teleMat.opacity - 0.25) / 0.70, 0, 1);
+  if (perfect) {
+    setBodyEmissive(rig, 0xffffff, 1.0);
+    if (b._teleStage < 2) {
+      b._teleStage = 2;
+      audioEngine.playCombatSfx('enemy-telegraph', 'PERFECT', rig.root.position);
+      if (!gameState.counterHintShown) {
+        gameState.counterHintShown = true;
+        setStarburstText('F = COUNTER ON THE FLASH', 1.5);
+      }
+    }
+  } else {
+    setBodyEmissive(rig, counterable ? 0x00e5ff : hex, 0.12 + 0.55 * build * build);
+    if (build > 0.5 && b._teleStage < 1) {
+      b._teleStage = 1;
+      audioEngine.playCombatSfx('enemy-telegraph', 'GOOD', rig.root.position);
+    }
+  }
+}
+
 function updateBruiserWindupState(b, dt, elapsed, songTime) {
   const strikeDur = (b.attackType === 'quick_hook' || b.attackType === 'double_tap') ? 0.18 : 0.22;
   if (songTime !== null && songTime !== undefined && b.targetImpactSongTime) {
@@ -5222,7 +5535,7 @@ function updateBruiserWindupState(b, dt, elapsed, songTime) {
     toPlayer.normalize().multiplyScalar(dt * (isCharge ? 3.6 : 1.9));
     b.rig.root.position.add(toPlayer);
   }
-  b.rig.hips.position.y = isCharge ? 0.90 : 0.95;
+  b.rig.hips.position.y = THREE.MathUtils.lerp(b.rig.hips.position.y, isCharge ? 0.90 : 0.95, Math.min(1, dt * 9));
 
   if (isCharge) {
     if (b.blender) {
@@ -5416,11 +5729,19 @@ function updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime,
     }
   }
 
-  b.rig.root.position.x = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 3.4);
-  b.rig.root.position.z = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 3.4);
+  {
+    // approach at walking pace (the walk cycle is tuned to ~1.6 m/s), never glide
+    const nx = THREE.MathUtils.lerp(b.rig.root.position.x, desiredX, dt * 3.4);
+    const nz = THREE.MathUtils.lerp(b.rig.root.position.z, desiredZ, dt * 3.4);
+    const mdx = nx - b.rig.root.position.x, mdz = nz - b.rig.root.position.z;
+    const md = Math.hypot(mdx, mdz), maxStep = dt * 1.7;
+    const k = md > maxStep ? maxStep / md : 1.0;
+    b.rig.root.position.x += mdx * k;
+    b.rig.root.position.z += mdz * k;
+  }
 
   const stride = Math.sin(elapsed * 6.5 + idx * 1.7) * 0.28;
-  b.rig.hips.position.y = 1.00 + beatPulse * 0.08;
+  b.rig.hips.position.y = 1.00 + (b.rig.clipDriven ? 0.0 : beatPulse * 0.08);
   if (b.blender) {
     b.blender.setTarget({
       torso: [0.08, Math.sin(elapsed * 3.2 + idx) * 0.12, 0],
@@ -5891,7 +6212,8 @@ function updateEnemyAnimation(rig, blender, dt) {
 function ensureEnemyIdleClip(rig, clipName, songTime) {
   if (!rig || !rig.clipDriven || !rig.playClip) return;
   if (rig._activeClipName === clipName && rig._activeAction && rig._activeAction.isRunning()) return;
-  if (rig._activeAction && rig._activeAction.isRunning()) return; // another clip (hurt, strike) owns the body
+  const owner = rig._activeClipName;
+  if (rig._activeAction && rig._activeAction.isRunning() && owner !== 'walk' && owner !== 'run') return; // another clip (hurt, strike) owns the body
   const chart = audioEngine.getActiveChart();
   const barSec = (chart && chart.barSec) || KRONOS_BAR_SEC;
   const firstOffset = (chart && chart.firstBeatOffset !== undefined) ? chart.firstBeatOffset : KRONOS_FIRST_BEAT_OFFSET;
@@ -5940,7 +6262,11 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
       updateBruiserStalkingAndGuardState(b, dt, elapsed, beatPulse, songTime, chart, beatSec, contextState);
     }
 
-    if (b.state === 'stalking' || b.state === 'guard') ensureEnemyIdleClip(b.rig, 'idle-dance', songTime);
+    const groundSpeed = groundSpeedOf(b, dt);
+    if (b.state === 'stalking' || b.state === 'guard') {
+      if (!updateLocomotionClip(b.rig, groundSpeed, songTime)) ensureEnemyIdleClip(b.rig, 'idle-dance', songTime);
+    }
+    updateEnemyTelegraphFlash(b);
     updateEnemyAnimation(b.rig, b.blender, dt);
     if (b.state !== 'flying') {
       const rad = Math.hypot(b.rig.root.position.x, b.rig.root.position.z);
@@ -5955,7 +6281,7 @@ function updateFighterFSM(entity, dt, rawDt, elapsed, beatPulse, songTime, chart
   // BOSS DJ KRONOS FSM (Booth in Waves 1-2, Beat-Grid Ring Combat in Wave 3)
   if (!gameState.kronosInRing) {
     kronosTeleMat.opacity = 0;
-    kronosRig.hips.position.y = 1.04 + beatPulse * 0.08;
+    kronosRig.hips.position.y = 1.04 + (kronosRig.clipDriven ? 0.015 : 0.08) * beatPulse;
     if (kronosBlender) {
       kronosBlender.setTarget({
         torso: [0, Math.sin(elapsed * 2.4) * 0.18, 0],
@@ -6399,6 +6725,8 @@ function animate() {
   const beatFloat = songTime !== null ? Math.max(0, (songTime - firstOffset) / beatSec) : 0;
   const beatPhase = songTime !== null ? (beatFloat % 1) : 0;
   const beatPulse = songTime !== null ? Math.exp(-beatPhase * 4.5) : 0;
+  updateBodyFlashes(rawDt);
+  pulseInputButtonsOnBeat(songTime);
   const bass = audioEngine.getBassEnergy();
 
   updatePlayer(dt, rawDt, elapsed, beatPulse);
@@ -6429,11 +6757,13 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261018v').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261019g').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,
       scene,
+      bruisers,
+      footTrail,
       camera,
       cameraState,
       cameraJuice,

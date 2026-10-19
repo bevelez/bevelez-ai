@@ -686,6 +686,18 @@ export function wrapCharacterRig(rig, options = {}) {
     if (rig.mixer) {
       rig.mixer.update(safeDt);
     }
+    // Watchdog: a clip must always own the body. When every action has faded or finished
+    // (weight < 0.05) the default idle fades in, so the rest pose is never shown.
+    if (rig.clipDriven && rig._defaultIdleClip && rig.actions) {
+      let w = 0;
+      for (const a of rig.actions.values()) {
+        if (a.enabled && (a.isRunning() || a.clampWhenFinished)) w += a.getEffectiveWeight();
+      }
+      if (w < 0.05) {
+        rig._restPoseFrames = (rig._restPoseFrames || 0) + 1;
+        rig.playClip(rig._defaultIdleClip, { loop: true, fadeInSec: 0.12 });
+      }
+    }
     if (rig.ikSolver && typeof rig.ikSolver.update === 'function' && rig.ikEnabled) {
       rig.ikSolver.update();
     }

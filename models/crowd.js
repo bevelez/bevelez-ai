@@ -4,7 +4,7 @@ import {
   createHiFiMesh,
   createSculptedLoftGeometry,
   optimizeArticulatedRigBones
-} from './shared.js?v=20261018v';
+} from './shared.js?v=20261019g';
 
 // ============================================================================
 // ENHANCED CHEERING CROWD SPECTATOR PROCEDURAL 3D MODEL

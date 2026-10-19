@@ -362,7 +362,8 @@ export function buildChartMovesetMarkers(chart = {}, options = {}) {
     const resolvedMarkerTime = explicitMarkerTime !== undefined
       ? explicitMarkerTime
       : resolveChartBeatTime(chart, globalBeat, beatSec);
-    const effectiveLeadBeats = leadBeats || spec.leadBeats || 1.0;
+    // at least 1.25 beats of body anticipation so the wind-up can be read before the counter window
+    const effectiveLeadBeats = Math.max(leadBeats || spec.leadBeats || 1.0, options.minLeadBeats !== undefined ? options.minLeadBeats : 1.25);
     const desiredWindupDur = effectiveLeadBeats * beatSec;
     const playRate = clamp(spec.windupLen / desiredWindupDur, 1 / spec.stretch[1], 1 / spec.stretch[0]);
     const windupStart = resolvedMarkerTime - (spec.windupLen / playRate);

@@ -8,7 +8,7 @@ import {
   buildChallengerModel,
   buildKronosBossModel,
   buildBruiserModel
-} from './kronos-models.js?v=20261018v';
+} from './kronos-models.js?v=20261019g';
 
 function wrapAngleRad(diff) {
   return ((diff + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;

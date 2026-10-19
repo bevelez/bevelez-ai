@@ -4,15 +4,18 @@
   "clips": {
     "idle-dance": {
       "clip": "idle-dance",
-      "duration": 2.60,
+      "duration": 2.6,
       "impactFrame": 0.65,
       "loop": true,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.65,
-          "stretch": [0.70, 1.50],
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -20,31 +23,40 @@
           "name": "impact",
           "t0": 0.65,
           "t1": 0.75,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.75,
-          "t1": 2.60,
-          "stretch": [0.70, 1.50],
+          "t1": 2.6,
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.80
+          "cancelFrom": 0.8
         }
       ]
     },
     "step-L": {
       "clip": "step-L",
-      "duration": 0.50,
+      "duration": 0.5,
       "impactFrame": 0.22,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.22,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -52,14 +64,20 @@
           "name": "impact",
           "t0": 0.22,
           "t1": 0.28,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.28,
-          "t1": 0.50,
-          "stretch": [0.60, 1.80],
+          "t1": 0.5,
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.34
@@ -68,15 +86,18 @@
     },
     "step-R": {
       "clip": "step-R",
-      "duration": 0.50,
+      "duration": 0.5,
       "impactFrame": 0.22,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.22,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -84,14 +105,20 @@
           "name": "impact",
           "t0": 0.22,
           "t1": 0.28,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.28,
-          "t1": 0.50,
-          "stretch": [0.60, 1.80],
+          "t1": 0.5,
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.34
@@ -106,27 +133,36 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.22,
-          "stretch": [0.55, 2.20],
+          "stretch": [
+            0.3,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
         {
           "name": "impact",
           "t0": 0.22,
-          "t1": 0.30,
-          "stretch": [1.0, 1.0],
+          "t1": 0.3,
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
-          "t0": 0.30,
+          "t0": 0.3,
           "t1": 0.62,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
-          "cancelFrom": 0.40
+          "cancelFrom": 0.4
         }
       ]
     },
@@ -138,9 +174,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.24,
-          "stretch": [0.55, 2.20],
+          "stretch": [
+            0.3,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -148,14 +187,20 @@
           "name": "impact",
           "t0": 0.24,
           "t1": 0.32,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.32,
           "t1": 0.68,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.44
@@ -170,9 +215,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.26,
-          "stretch": [0.55, 2.20],
+          "stretch": [
+            0.3,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -180,14 +228,20 @@
           "name": "impact",
           "t0": 0.26,
           "t1": 0.35,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.35,
           "t1": 0.74,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.48
@@ -202,9 +256,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.28,
-          "stretch": [0.55, 2.20],
+          "stretch": [
+            0.3,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -212,14 +269,20 @@
           "name": "impact",
           "t0": 0.28,
           "t1": 0.38,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.38,
           "t1": 0.78,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.52
@@ -234,9 +297,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.14,
-          "stretch": [0.50, 2.00],
+          "stretch": [
+            0.5,
+            2.0
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -244,17 +310,23 @@
           "name": "impact",
           "t0": 0.14,
           "t1": 0.22,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.22,
           "t1": 0.48,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
-          "cancelFrom": 0.30
+          "cancelFrom": 0.3
         }
       ]
     },
@@ -266,9 +338,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.14,
-          "stretch": [0.50, 2.00],
+          "stretch": [
+            0.5,
+            2.0
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -276,17 +351,23 @@
           "name": "impact",
           "t0": 0.14,
           "t1": 0.22,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.22,
           "t1": 0.48,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
-          "cancelFrom": 0.30
+          "cancelFrom": 0.3
         }
       ]
     },
@@ -298,9 +379,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.08,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -308,14 +392,20 @@
           "name": "impact",
           "t0": 0.08,
           "t1": 0.16,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.16,
           "t1": 0.44,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.28
@@ -330,9 +420,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.12,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -340,14 +433,20 @@
           "name": "impact",
           "t0": 0.12,
           "t1": 0.22,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.22,
           "t1": 0.64,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.44
@@ -356,15 +455,18 @@
     },
     "launch": {
       "clip": "launch",
-      "duration": 0.80,
+      "duration": 0.8,
       "impactFrame": 0.16,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.16,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -372,63 +474,81 @@
           "name": "impact",
           "t0": 0.16,
           "t1": 0.28,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.28,
-          "t1": 0.80,
-          "stretch": [0.60, 1.60],
+          "t1": 0.8,
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.60
+          "cancelFrom": 0.6
         }
       ]
     },
     "land": {
       "clip": "land",
       "duration": 0.46,
-      "impactFrame": 0.10,
+      "impactFrame": 0.1,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
-          "t1": 0.10,
-          "stretch": [0.60, 1.80],
+          "t0": 0.0,
+          "t1": 0.1,
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
         {
           "name": "impact",
-          "t0": 0.10,
+          "t0": 0.1,
           "t1": 0.18,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.18,
           "t1": 0.46,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
-          "cancelFrom": 0.30
+          "cancelFrom": 0.3
         }
       ]
     },
     "guard": {
       "clip": "guard",
-      "duration": 0.60,
+      "duration": 0.6,
       "impactFrame": 0.14,
       "loop": true,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.14,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -436,14 +556,20 @@
           "name": "impact",
           "t0": 0.14,
           "t1": 0.24,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.24,
-          "t1": 0.60,
-          "stretch": [0.60, 1.60],
+          "t1": 0.6,
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.32
@@ -458,9 +584,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.16,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -468,14 +597,20 @@
           "name": "impact",
           "t0": 0.16,
           "t1": 0.26,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.26,
           "t1": 0.72,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.52
@@ -490,56 +625,74 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.18,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
         {
           "name": "impact",
           "t0": 0.18,
-          "t1": 0.30,
-          "stretch": [1.0, 1.0],
+          "t1": 0.3,
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
-          "t0": 0.30,
+          "t0": 0.3,
           "t1": 0.84,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
-          "cancelFrom": 0.60
+          "cancelFrom": 0.6
         }
       ]
     },
     "KO-fall": {
       "clip": "KO-fall",
-      "duration": 1.10,
+      "duration": 1.1,
       "impactFrame": 0.48,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.48,
-          "stretch": [0.70, 1.50],
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
         {
           "name": "impact",
           "t0": 0.48,
-          "t1": 0.60,
-          "stretch": [1.0, 1.0],
+          "t1": 0.6,
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
-          "t0": 0.60,
-          "t1": 1.10,
-          "stretch": [0.70, 1.50],
+          "t0": 0.6,
+          "t1": 1.1,
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
           "cancelFrom": 0.95
@@ -548,15 +701,18 @@
     },
     "get-up": {
       "clip": "get-up",
-      "duration": 0.90,
+      "duration": 0.9,
       "impactFrame": 0.42,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.42,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -564,14 +720,20 @@
           "name": "impact",
           "t0": 0.42,
           "t1": 0.52,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.52,
-          "t1": 0.90,
-          "stretch": [0.60, 1.60],
+          "t1": 0.9,
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
           "cancelFrom": 0.72
@@ -586,9 +748,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.26,
-          "stretch": [0.50, 2.40],
+          "stretch": [
+            0.5,
+            2.4
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -596,17 +761,23 @@
           "name": "impact",
           "t0": 0.26,
           "t1": 0.36,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.36,
           "t1": 0.76,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.50
+          "cancelFrom": 0.5
         }
       ]
     },
@@ -618,9 +789,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.34,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -628,14 +802,20 @@
           "name": "impact",
           "t0": 0.34,
           "t1": 0.46,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.46,
           "t1": 0.88,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
           "cancelFrom": 0.62
@@ -645,29 +825,38 @@
     "hook": {
       "clip": "hook",
       "duration": 0.72,
-      "impactFrame": 0.30,
+      "impactFrame": 0.3,
       "loop": false,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
-          "t1": 0.30,
-          "stretch": [0.50, 2.20],
+          "t0": 0.0,
+          "t1": 0.3,
+          "stretch": [
+            0.5,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
         {
           "name": "impact",
-          "t0": 0.30,
+          "t0": 0.3,
           "t1": 0.38,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.38,
           "t1": 0.72,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
           "cancelFrom": 0.52
@@ -682,9 +871,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.42,
-          "stretch": [0.50, 2.40],
+          "stretch": [
+            0.5,
+            2.4
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -692,17 +884,23 @@
           "name": "impact",
           "t0": 0.42,
           "t1": 0.52,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.52,
           "t1": 0.92,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.70
+          "cancelFrom": 0.7
         }
       ]
     },
@@ -714,9 +912,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.28,
-          "stretch": [0.50, 2.20],
+          "stretch": [
+            0.5,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -724,14 +925,20 @@
           "name": "impact",
           "t0": 0.28,
           "t1": 0.38,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.38,
           "t1": 0.76,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.54
@@ -746,9 +953,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.44,
-          "stretch": [0.50, 2.40],
+          "stretch": [
+            0.5,
+            2.4
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -756,14 +966,20 @@
           "name": "impact",
           "t0": 0.44,
           "t1": 0.56,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.56,
           "t1": 0.96,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
           "cancelFrom": 0.74
@@ -778,9 +994,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.26,
-          "stretch": [0.50, 2.20],
+          "stretch": [
+            0.5,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -788,14 +1007,20 @@
           "name": "impact",
           "t0": 0.26,
           "t1": 0.34,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.34,
           "t1": 0.66,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.48
@@ -810,9 +1035,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.26,
-          "stretch": [0.50, 2.20],
+          "stretch": [
+            0.5,
+            2.2
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5
         },
@@ -820,14 +1048,20 @@
           "name": "impact",
           "t0": 0.26,
           "t1": 0.34,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.34,
           "t1": 0.66,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 0.5,
           "cancelFrom": 0.48
@@ -842,9 +1076,12 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.34,
-          "stretch": [0.50, 2.40],
+          "stretch": [
+            0.5,
+            2.4
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -852,17 +1089,23 @@
           "name": "impact",
           "t0": 0.34,
           "t1": 0.44,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.44,
           "t1": 0.82,
-          "stretch": [0.60, 1.60],
+          "stretch": [
+            0.6,
+            1.6
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.60
+          "cancelFrom": 0.6
         }
       ]
     },
@@ -874,41 +1117,53 @@
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.48,
-          "stretch": [0.50, 2.50],
+          "stretch": [
+            0.5,
+            2.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
         {
           "name": "impact",
           "t0": 0.48,
-          "t1": 0.60,
-          "stretch": [1.0, 1.0],
+          "t1": 0.6,
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
-          "t0": 0.60,
+          "t0": 0.6,
           "t1": 1.04,
-          "stretch": [0.60, 1.80],
+          "stretch": [
+            0.6,
+            1.8
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.80
+          "cancelFrom": 0.8
         }
       ]
     },
     "boss-idle": {
       "clip": "boss-idle",
-      "duration": 2.60,
+      "duration": 2.6,
       "impactFrame": 0.65,
       "loop": true,
       "sections": [
         {
           "name": "windup",
-          "t0": 0.00,
+          "t0": 0.0,
           "t1": 0.65,
-          "stretch": [0.70, 1.50],
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0
         },
@@ -916,17 +1171,105 @@
           "name": "impact",
           "t0": 0.65,
           "t1": 0.75,
-          "stretch": [1.0, 1.0],
+          "stretch": [
+            1.0,
+            1.0
+          ],
           "event": "hit"
         },
         {
           "name": "recovery",
           "t0": 0.75,
-          "t1": 2.60,
-          "stretch": [0.70, 1.50],
+          "t1": 2.6,
+          "stretch": [
+            0.7,
+            1.5
+          ],
           "syncEnd": "nextSubdivision",
           "subdivision": 1.0,
-          "cancelFrom": 0.80
+          "cancelFrom": 0.8
+        }
+      ]
+    },
+    "walk": {
+      "clip": "walk",
+      "duration": 1.3,
+      "impactFrame": 0.325,
+      "loop": true,
+      "sections": [
+        {
+          "name": "windup",
+          "t0": 0.0,
+          "t1": 0.325,
+          "stretch": [
+            0.6,
+            1.6
+          ],
+          "syncEnd": "nextSubdivision",
+          "subdivision": 1.0
+        },
+        {
+          "name": "impact",
+          "t0": 0.325,
+          "t1": 0.35,
+          "stretch": [
+            1.0,
+            1.0
+          ],
+          "event": "hit"
+        },
+        {
+          "name": "recovery",
+          "t0": 0.35,
+          "t1": 1.3,
+          "stretch": [
+            0.6,
+            1.6
+          ],
+          "syncEnd": "nextSubdivision",
+          "subdivision": 1.0,
+          "cancelFrom": 0.4
+        }
+      ]
+    },
+    "run": {
+      "clip": "run",
+      "duration": 0.667,
+      "impactFrame": 0.167,
+      "loop": true,
+      "sections": [
+        {
+          "name": "windup",
+          "t0": 0.0,
+          "t1": 0.167,
+          "stretch": [
+            0.6,
+            1.6
+          ],
+          "syncEnd": "nextSubdivision",
+          "subdivision": 0.5
+        },
+        {
+          "name": "impact",
+          "t0": 0.167,
+          "t1": 0.19,
+          "stretch": [
+            1.0,
+            1.0
+          ],
+          "event": "hit"
+        },
+        {
+          "name": "recovery",
+          "t0": 0.19,
+          "t1": 0.667,
+          "stretch": [
+            0.6,
+            1.6
+          ],
+          "syncEnd": "nextSubdivision",
+          "subdivision": 0.5,
+          "cancelFrom": 0.25
         }
       ]
     }

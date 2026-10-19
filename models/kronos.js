@@ -8,7 +8,7 @@ import {
   drawOnBackSeam,
   optimizeArticulatedRigBones,
   createContactShadowDecal
-} from './shared.js?v=20261018v';
+} from './shared.js?v=20261019g';
 
 // ============================================================================
 // PROCEDURAL CANVAS TEXTURE GENERATORS FOR BOSS DJ KRONOS
