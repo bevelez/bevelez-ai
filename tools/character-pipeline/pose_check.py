@@ -6,7 +6,7 @@ bpy.ops.import_scene.gltf(filepath=IN)
 arm = next(o for o in bpy.context.scene.objects if o.type == 'ARMATURE')
 mesh = next(o for o in bpy.context.scene.objects if o.type == 'MESH')
 print('mesh modifiers', [(m.type, getattr(m, 'object', None) and m.object.name) for m in mesh.modifiers], 'parent', mesh.parent and mesh.parent.name, 'vgroups', len(mesh.vertex_groups))
-poses = {'leftArm': (0.903, 0.351, -0.068, -0.239), 'leftElbow': (0.773, 0.634, 0, 0), 'rightArm': (0.907, 0.361, -0.007, 0.217), 'rightElbow': (0.789, 0.615, 0, 0), 'torso': (0.993, 0.038, -0.11, -0.019)}
+poses = {'leftKnee': (0.88, 0.47, 0, 0), 'leftLeg': (0.97, -0.24, 0, 0), 'leftArm': (0.903, 0.351, -0.068, -0.239), 'leftElbow': (0.773, 0.634, 0, 0), 'rightArm': (0.907, 0.361, -0.007, 0.217), 'rightElbow': (0.789, 0.615, 0, 0), 'torso': (0.993, 0.038, -0.11, -0.019)}
 for name, q in poses.items():
     pb = arm.pose.bones.get(name)
     if pb is None: print('missing bone', name); continue

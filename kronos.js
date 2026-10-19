@@ -16,11 +16,11 @@ import {
   getSectionAtTime,
   getLightingCueAtTime,
   computeRunResultsSummary
-} from './kronos-tracks.js?v=20261018s';
-import { wrapCharacterRig, loadGLBAsset, loadClipsManifest, applyKronosToonSkinning } from './anim/rig-adapter.js?v=20261018s';
-import { bindSkinnedBodyToRig } from './anim/skinned-body.js?v=20261018s';
-import { conformRigToClipSkeleton, stripHipsTranslation } from './anim/handbuilt-rig.js?v=20261018s';
-import * as beatWarpModule from './anim/beatwarp.js?v=20261018s';
+} from './kronos-tracks.js?v=20261018t';
+import { wrapCharacterRig, loadGLBAsset, loadClipsManifest, applyKronosToonSkinning } from './anim/rig-adapter.js?v=20261018t';
+import { bindSkinnedBodyToRig } from './anim/skinned-body.js?v=20261018t';
+import { conformRigToClipSkeleton, stripHipsTranslation } from './anim/handbuilt-rig.js?v=20261018t';
+import * as beatWarpModule from './anim/beatwarp.js?v=20261018t';
 import {
   scheduleAction as scheduleBeatWarpAction,
   tickBeatWarp,
@@ -28,8 +28,8 @@ import {
   clearActiveSchedules,
   hasActiveScheduleFor,
   setClipsManifest as setBeatWarpClipsManifest
-} from './anim/beatwarp.js?v=20261018s';
-import * as audioClockModule from './audio/clock.js?v=20261018s';
+} from './anim/beatwarp.js?v=20261018t';
+import * as audioClockModule from './audio/clock.js?v=20261018t';
 import {
   bindAudioEngine as clockBindAudioEngine,
   setActiveChart as clockSetActiveChart,
@@ -37,13 +37,13 @@ import {
   songTimeToContextTime as clockSongTimeToContextTime,
   nextSubdivision as clockNextSubdivision,
   nearestSubdivision as clockNearestSubdivision
-} from './audio/clock.js?v=20261018s';
+} from './audio/clock.js?v=20261018t';
 import {
   applyEnemyHitReaction,
   getDirectionalHitReactionProfile,
   updateEnemyReactionState
-} from './combat/reactions.js?v=20261018s';
-import * as combatDirectorModule from './combat/director.js?v=20261018s';
+} from './combat/reactions.js?v=20261018t';
+import * as combatDirectorModule from './combat/director.js?v=20261018t';
 import {
   tick as tickCombatDirector,
   evaluateCounterInput as directorEvaluateCounterInput,
@@ -52,7 +52,7 @@ import {
   grantFeverProgress as directorGrantFeverProgress,
   getDirectorTelemetry,
   resetDirector
-} from './combat/director.js?v=20261018s';
+} from './combat/director.js?v=20261018t';
 
 // Slice 2: enemies strike only on chart moveset markers through combat/director.js.
 const DIRECTOR_ENABLED = true;
@@ -82,22 +82,22 @@ const SECTION_ROSTERS = Object.freeze({
 });
 const FEVER_RUSH_BARS = 2;
 const FINISHER_INVULN_SEC = 1.2;
-import { createContactShadowDecal } from './models/shared.js?v=20261018s';
+import { createContactShadowDecal } from './models/shared.js?v=20261018t';
 import {
   buildChallengerModel,
   buildPersistentKickSmearRig
-} from './models/challenger.js?v=20261018s';
-import { buildKronosBossModel } from './models/kronos.js?v=20261018s';
-import { buildBruiserModel } from './models/bruiser.js?v=20261018s';
+} from './models/challenger.js?v=20261018t';
+import { buildKronosBossModel } from './models/kronos.js?v=20261018t';
+import { buildBruiserModel } from './models/bruiser.js?v=20261018t';
 import {
   buildSpectatorModel,
   buildInstancedArenaCrowd
-} from './models/crowd.js?v=20261018s';
+} from './models/crowd.js?v=20261018t';
 import {
   buildBoomboxStage,
   createBakedArenaAOMapTexture,
   createBakedArenaLightMapTexture
-} from './models/stage.js?v=20261018s';
+} from './models/stage.js?v=20261018t';
 import {
   buildArenaEnvironment,
   buildFloorRhythmDial,
@@ -107,15 +107,15 @@ import {
   createWeatheredAsphaltArenaTexture,
   ImpactBurstPool,
   SmearArcPool
-} from './models/arena.js?v=20261018s';
-import { initPostProcessing } from './kronos-postprocessing.js?v=20261018s';
+} from './models/arena.js?v=20261018t';
+import { initPostProcessing } from './kronos-postprocessing.js?v=20261018t';
 import {
   SFX_SYNTH_TABLE,
   MAX_CATEGORY_VOICES,
   synthesizeCombatSfxVoice,
   synthesizeCrowdHypeSwell,
   scheduleBossTelegraphSfx
-} from './kronos-sfx.js?v=20261018s';
+} from './kronos-sfx.js?v=20261018t';
 
 const _bootTiming = { start: performance.now() };
 const _urlParams = new URLSearchParams(window.location.search);
@@ -1229,12 +1229,33 @@ const SKINNED_BODIES = !/[?&]skinned=0(&|$)/.test(window.location.search);
 // Fighters whose generated body has shipped (assets/models/<type>-skinned.glb). Kronos and the
 // Bruiser join once their meshes come out of the pipeline.
 const SKINNED_BODY_TYPES = new Set(['challenger', 'kronos', 'bruiser']);
+const SKINNED_BODY_SELF_LIGHT = 0.22;
+let _skinnedBodyGradientMap = null;
+function getSkinnedBodyGradientMap() {
+  if (_skinnedBodyGradientMap) return _skinnedBodyGradientMap;
+  const tex = new THREE.DataTexture(new Uint8Array([168, 255]), 2, 1, THREE.RedFormat);
+  tex.minFilter = THREE.NearestFilter; tex.magFilter = THREE.NearestFilter; tex.generateMipmaps = false; tex.needsUpdate = true;
+  _skinnedBodyGradientMap = tex;
+  return _skinnedBodyGradientMap;
+}
 const _skinnedBodyMissing = new Set();
 async function attachSkinnedBody(rig, type) {
   if (!SKINNED_BODIES || !SKINNED_BODY_TYPES.has(type) || _skinnedBodyMissing.has(type)) return null;
   try {
-    const { scene: bodyScene } = await loadGLBAsset(`./assets/models/${type}-skinned.glb?v=20261018s`);
-    applyKronosToonSkinning(bodyScene, { castShadow: true, receiveShadow: true });
+    const { scene: bodyScene } = await loadGLBAsset(`./assets/models/${type}-skinned.glb?v=20261018t`);
+    // Hi-Fi Rush read: the projected art already carries its own shading, so the generated bodies
+    // get a flat two-band ramp (lit / 66 % shadow) instead of the deep 3-band ramp, a soft rim, and
+    // a touch of self-light from the texture so the shadow side keeps its colour.
+    applyKronosToonSkinning(bodyScene, { castShadow: true, receiveShadow: true, gradientMap: getSkinnedBodyGradientMap(), rimIntensity: 0.22, creviceAO: 0.0 });
+    bodyScene.traverse((n) => {
+      if (!n.isMesh && !n.isSkinnedMesh) return;
+      const mats = Array.isArray(n.material) ? n.material : [n.material];
+      for (const m of mats) {
+        if (!m || !m.isMeshToonMaterial) continue;
+        if (m.map) { m.emissiveMap = m.map; m.emissive.setScalar(SKINNED_BODY_SELF_LIGHT); }
+        m.needsUpdate = true;
+      }
+    });
     const report = bindSkinnedBodyToRig(rig, bodyScene);
     rig.skinnedBodyReport = report;
     return report;
@@ -1246,7 +1267,7 @@ async function attachSkinnedBody(rig, type) {
 }
 
 async function attachClipsToRig(rig, type, manifest) {
-  const { scene, animations } = await loadGLBAsset(`./assets/models/kronos-clips-${type}.glb?v=20261018s`);
+  const { scene, animations } = await loadGLBAsset(`./assets/models/kronos-clips-${type}.glb?v=20261018t`);
   const report = conformRigToClipSkeleton(rig, scene);
   const clips = type === 'challenger' ? animations : stripHipsTranslation(animations);
   wrapCharacterRig(rig, {
@@ -1265,7 +1286,7 @@ async function attachClipsToRig(rig, type, manifest) {
 }
 
 const _clipPreloadPromise = (async () => {
-  const manifest = await loadClipsManifest('./assets/models/clips.json?v=20261018s');
+  const manifest = await loadClipsManifest('./assets/models/clips.json?v=20261018t');
   if (manifest) setBeatWarpClipsManifest(manifest);
   _clipManifest = manifest;
   return attachClipsToRig(challengerRig, 'challenger', manifest);
@@ -6408,7 +6429,7 @@ function animate() {
 
 // Dynamically load kronos-debug.js ONLY when ?debug=1 or ?turnaround= is present
 if (IS_DEBUG_MODE) {
-  import('./kronos-debug.js?v=20261018s').then(({ attachKronosDebugHarness }) => {
+  import('./kronos-debug.js?v=20261018t').then(({ attachKronosDebugHarness }) => {
     _debugHarnessRef = attachKronosDebugHarness({
       THREE,
       renderer,

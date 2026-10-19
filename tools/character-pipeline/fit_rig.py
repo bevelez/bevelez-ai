@@ -105,9 +105,10 @@ for v in bm.verts:
 co_all = np.array([v.co[:] for v in bm.verts])
 drop = set(); kept = []
 total_ext = (co_all.max(0) - co_all.min(0)).max()
+largest = max(len(c) for c in comps)
 for comp in comps:
     P = co_all[comp]; ext = np.sort(P.max(0) - P.min(0))
-    planar = ext[0] < 0.04 * ext[2]
+    planar = ext[0] < 0.04 * ext[2] or (len(comp) < largest and ext[0] < 0.16 * ext[2])   # backdrop sheets behind the figure
     tiny = ext[2] < 0.02 * total_ext or len(comp) < 0.01 * co_all.shape[0]
     if planar or tiny: drop.update(comp)
     else: kept.append(len(comp))
@@ -135,8 +136,36 @@ if faces_before > TARGET_FACES:
     bpy.ops.object.modifier_apply(modifier='dec')
 faces_after = len(mesh.data.polygons)
 
-# Normalize: feet on the floor, centred, scaled to the design height (computed on the dense mesh)
+# Up axis: generators sometimes return the figure lying along another axis. Take the longest
+# extent as the height axis and the narrower end (the head) as up, then rotate so height is +Z.
 co = np.array([v.co[:] for v in mesh.data.vertices], dtype=np.float64)
+ext0 = co_dense.max(axis=0) - co_dense.min(axis=0)
+up_axis = int(np.argmax(ext0))
+def _width_perp(P, axis, lo, hi):
+    sel = P[(P[:, axis] >= lo) & (P[:, axis] < hi)]
+    others = [a for a in range(3) if a != axis]
+    return float(np.mean([sel[:, a].max() - sel[:, a].min() for a in others])) if len(sel) else 0.0
+amin, amax = co_dense[:, up_axis].min(), co_dense[:, up_axis].max(); span = amax - amin
+w_hi = _width_perp(co_dense, up_axis, amax - 0.12 * span, amax)
+w_lo = _width_perp(co_dense, up_axis, amin, amin + 0.12 * span)
+flip_up = w_hi > w_lo        # wider end on top -> the feet are up -> flip
+R = np.eye(3)
+if up_axis != 2 or flip_up:
+    # build a rotation taking the detected up vector onto +Z
+    u = np.zeros(3); u[up_axis] = -1.0 if flip_up else 1.0
+    zaxis = np.array([0.0, 0.0, 1.0])
+    v = np.cross(u, zaxis); sn = np.linalg.norm(v); cs = float(u @ zaxis)
+    if sn < 1e-9:
+        R = np.diag([1.0, -1.0, -1.0]) if cs < 0 else np.eye(3)
+    else:
+        vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+        R = np.eye(3) + vx + vx @ vx * ((1 - cs) / (sn ** 2))
+    co = co @ R.T; co_dense = co_dense @ R.T
+    for v_, c in zip(mesh.data.vertices, co): v_.co = Vector(c)
+    mesh.data.update()
+orientation_report = {'up_axis': up_axis, 'flipped': bool(flip_up), 'w_hi': round(w_hi, 3), 'w_lo': round(w_lo, 3)}
+
+# Normalize: feet on the floor, centred, scaled to the design height (computed on the dense mesh)
 mn, mx = co_dense.min(axis=0), co_dense.max(axis=0)
 height = mx[2] - mn[2]
 scale = HEIGHTS[CHAR] / height
@@ -566,6 +595,6 @@ report = {
   'char': CHAR, 'faces_before': faces_before, 'faces_after': faces_after, 'verts': int(co.shape[0]),
   'height_in': float(height), 'scale': float(scale), 'front_xy_detected': [float(x) for x in front_xy],
   'rotated_deg': float(math.degrees(ang)), 'arm_x': float(joints['leftArm'].x), 'autofit': autofit,
-  'glb_bytes': os.path.getsize(OUT_GLB), 'components': components_report, 'bridges': bridge_report, 'carve': carve_report, 'trim': trim_report, 'images': [(i.name, list(i.size)) for i in bpy.data.images]
+  'glb_bytes': os.path.getsize(OUT_GLB), 'components': components_report, 'bridges': bridge_report, 'carve': carve_report, 'trim': trim_report, 'orientation': orientation_report, 'images': [(i.name, list(i.size)) for i in bpy.data.images]
 }
 print('FIT_REPORT ' + json.dumps(report))
