@@ -114,7 +114,7 @@ Pf = P[ys_t, xs_t]; Nf = Nrm[ys_t, xs_t]
 col = np.zeros((len(Pf), 3)); wsum = np.zeros(len(Pf))
 for v in views:
     d = v['d']; cosang = Nf @ d
-    cand = np.nonzero(cosang > 0.12)[0]
+    cand = np.nonzero(cosang > (0.55 if v['name'].startswith('side') else 0.08))[0]
     s = V @ v['right']; smin, smax = s.min(), s.max()
     img, (bx0, by0, bx1, by1) = v['img'], v['bbox']
     vis = np.zeros(len(cand), bool)
@@ -130,7 +130,13 @@ for v in views:
     iy = np.clip((by0 + vv * (by1 - by0)).astype(int), 0, img.shape[0] - 1)
     samp = img[iy, ix]
     ok = samp[:, 3] > 0.5
-    w = np.clip(cosang[idx], 0, 1) ** 2 * ok
+    # front/back carry the drawing; side views only where a surface really faces sideways, so the
+    # three never blend at grazing angles on the arms (that blend read as seams)
+    cz = np.clip(cosang[idx], 0, 1)
+    if v['name'].startswith('side'):
+        w = np.where(cz > 0.55, (cz - 0.55) / 0.45, 0.0) ** 2 * ok
+    else:
+        w = cz ** 4 * ok
     col[idx] += samp[:, :3] * w[:, None]; wsum[idx] += w
     print(f"[{time.time()-t0:.0f}s] view {v['name']}: candidates {len(cand)} visible {int(vis.sum())} painted {int(ok.sum())}", flush=True)
 have = wsum > 1e-6

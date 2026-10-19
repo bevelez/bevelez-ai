@@ -483,6 +483,11 @@ def compute_weights(P, k=2, restrict=False):
     # there anchors deltoid/neck vertices while the arm or head swings away (stretched sleeves).
     for pivot in ('spine', 'neck', 'leftShoulder', 'rightShoulder'):
         Db[:, bone_names.index(pivot)] = np.inf
+    # the torso's flanks are nearer to the hanging arm bones than to the spine; anything inside the
+    # shoulder joints' x and below the shoulder line is torso, not arm (jacket sides stay put)
+    inside = (np.abs(P[:, 0]) < 0.85 * abs(joints['leftArm'].x)) & (P[:, 2] < joints['leftArm'].z - 0.05) & (P[:, 2] > joints['hips'].z - 0.12)
+    for bn in ('leftArm', 'leftElbow', 'leftHand', 'rightArm', 'rightElbow', 'rightHand'):
+        Db[inside, bone_names.index(bn)] = np.inf
     idx = np.argsort(Db, axis=1)[:, :k]
     d = np.take_along_axis(Db, idx, axis=1)
     w = 1.0 / (d ** 2 + 1e-4)
@@ -497,7 +502,11 @@ def compute_weights(P, k=2, restrict=False):
         z = P[:, 2]
         both_arm_core = ((np.char.startswith(g0, 'arm') & (g1 == 'core')) | (np.char.startswith(g1, 'arm') & (g0 == 'core')))
         both_leg_core = ((np.char.startswith(g0, 'leg') & (g1 == 'core')) | (np.char.startswith(g1, 'leg') & (g0 == 'core')))
-        allowed = (g0 == g1) | (both_arm_core & (z >= sh_cut_z)) | (both_leg_core & (z >= crotch_cut_z - 0.03))
+        # arm<->core blending only in the deltoid zone: within 8 cm of the shoulder line and out
+        # past 55 % of the shoulder half-width, so the chest never follows a raised arm
+        xabs = np.abs(P[:, 0])
+        deltoid = (z >= joints['leftArm'].z - 0.06) & (xabs >= 0.85 * abs(joints['leftArm'].x))
+        allowed = (g0 == g1) | (both_arm_core & deltoid) | (both_leg_core & (z >= crotch_cut_z - 0.03))
         w[:, 1] *= allowed
     w /= w.sum(axis=1, keepdims=True)
     return idx, w
