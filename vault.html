@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archive — Brandon Edward Velez</title>
-  <meta name="description" content="Five interactive works by Brandon Edward Velez: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin and DJ Kronos." />
+  <meta name="description" content="Six interactive works by Brandon Edward Velez: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
   <link rel="canonical" href="https://bevelez.ai/vault.html" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="bevelez.ai" />
   <meta property="og:title" content="Archive — Brandon Edward Velez" />
-  <meta property="og:description" content="Five interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin and DJ Kronos." />
+  <meta property="og:description" content="Six interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
   <meta property="og:url" content="https://bevelez.ai/vault.html" />
   <meta property="og:image" content="https://bevelez.ai/assets/og-cover.jpg" />
   <meta property="og:image:width" content="1200" />
@@ -18,7 +18,7 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@bevelez" />
   <meta name="twitter:title" content="Archive — Brandon Edward Velez" />
-  <meta name="twitter:description" content="Five interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin and DJ Kronos." />
+  <meta name="twitter:description" content="Six interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
   <meta name="twitter:image" content="https://bevelez.ai/assets/og-cover.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -296,6 +296,35 @@
       cursor: default;
     }
 
+    .tape-action-row {
+      display: inline-flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .open-work-sub {
+      appearance: none;
+      border: 1px solid var(--ink-faint);
+      background: transparent;
+      color: var(--ink-muted);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .open-work-sub:hover {
+      color: var(--ink);
+      border-color: var(--ink);
+      transform: translateY(-1px);
+    }
+
     @media (max-width: 860px) {
       .page-shell {
         padding: 18px 20px 64px;
@@ -354,6 +383,6 @@
     <main class="tape-grid" id="tape-grid" aria-label="Cassette Archive"></main>
   </div>
 
-  <script type="module" src="./vault.js?v=14"></script>
+  <script type="module" src="./vault.js?v=16"></script>
 </body>
 </html>

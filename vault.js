@@ -74,6 +74,21 @@ const TAPES = [
     ribColor: 0x120c0a,
     hubColor: 0xffe042,
     artStyle: 'kronos'
+  },
+  {
+    id: '06',
+    indexMeta: 'No. 06 — Aetheric Nautical Rig, 1889 · 2D & 3D CAD',
+    title: 'The Flying Dutchman',
+    desc: 'An interactive isometric & 3D steampunk galleon anatomy figure: three square-rigged masts, a 15.5 bar Scotch marine aether-boiler, twin sidewheel levitation sponsons, six broadside brass cannons and a shrouded stern Kort propulsor. Switch between Light and Dark mode, click any assembly to explode the rig, or 3D orbit, pan and zoom around the ship.',
+    unlocked: true,
+    url: './flying-dutchman.html',
+    ctaLabel: 'Board the Dutchman',
+    shellColor: 0x102422,
+    shellAttenuation: 0x05100f,
+    ribColor: 0x0b1918,
+    hubColor: 0xe6c886,
+    artStyle: 'dutchman',
+    dualTheme3D: true
   }
 ];
 
@@ -814,6 +829,190 @@ function drawKronosArtwork(ctx) {
   ctx.stroke();
 }
 
+function drawFlyingDutchmanArtwork(ctx) {
+  // 1. Deep nocturnal sea-obsidian & verdigris bronze backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#060c0c');
+  bg.addColorStop(0.55, '#0b1817');
+  bg.addColorStop(1, '#122421');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Ectoplasmic turquoise furnace/sponson aura on right stage
+  const aetherGlow = ctx.createRadialGradient(885, 220, 8, 885, 220, 185);
+  aetherGlow.addColorStop(0, 'rgba(56, 217, 169, 0.34)');
+  aetherGlow.addColorStop(0.5, 'rgba(56, 217, 169, 0.10)');
+  aetherGlow.addColorStop(1, 'rgba(6, 12, 12, 0)');
+  ctx.fillStyle = aetherGlow;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Blueprint isometric drafting grid on right half
+  ctx.save();
+  ctx.strokeStyle = 'rgba(230, 200, 134, 0.08)';
+  ctx.lineWidth = 1;
+  for (let gx = 520; gx < 1000; gx += 28) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 32);
+    ctx.lineTo(gx, 392);
+    ctx.stroke();
+  }
+  for (let gy = 44; gy < 390; gy += 28) {
+    ctx.beginPath();
+    ctx.moveTo(520, gy);
+    ctx.lineTo(1000, gy);
+    ctx.stroke();
+  }
+
+  // 2. Right Stage (x = 815..985): 3-Masted Steampunk Galleon Blueprint Silhouette
+  // Ectoplasmic levitation ring on slipway floor
+  ctx.strokeStyle = '#38d9a9';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.ellipse(892, 326, 44, 14, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(56, 217, 169, 0.45)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.ellipse(892, 326, 62, 20, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 3-tier riveted galleon hull + high poop castle + forecastle + bowsprit
+  ctx.fillStyle = '#0d1918';
+  ctx.strokeStyle = '#e6c886';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(818, 252);
+  ctx.lineTo(848, 252);
+  ctx.lineTo(852, 272);
+  ctx.lineTo(932, 272);
+  ctx.lineTo(936, 260);
+  ctx.lineTo(966, 260);
+  ctx.lineTo(960, 298);
+  ctx.lineTo(826, 298);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // Bowsprit & hanging ghost-lantern
+  ctx.beginPath();
+  ctx.moveTo(966, 266);
+  ctx.lineTo(992, 252);
+  ctx.moveTo(988, 254);
+  ctx.lineTo(988, 268);
+  ctx.stroke();
+  ctx.fillStyle = '#38d9a9';
+  ctx.beginPath();
+  ctx.arc(988, 271, 3.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Three stepped masts (mizzen, mainmast, foremast) + fighting tops + square yards
+  const masts = [
+    { x: 836, y0: 252, y1: 148, yTop: 184, yards: [212, 170], span: 18 },
+    { x: 888, y0: 272, y1: 102, yTop: 152, yards: [196, 136], span: 28 },
+    { x: 948, y0: 260, y1: 132, yTop: 172, yards: [204, 158], span: 22 }
+  ];
+  masts.forEach((m) => {
+    ctx.strokeStyle = '#f2ede0';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(m.x, m.y0);
+    ctx.lineTo(m.x, m.y1);
+    ctx.stroke();
+
+    // Crow's nest fighting top
+    ctx.fillStyle = '#122421';
+    ctx.strokeStyle = '#e6c886';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.ellipse(m.x, m.yTop, 8, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Horizontal square yards
+    ctx.strokeStyle = '#e6c886';
+    ctx.lineWidth = 2.0;
+    m.yards.forEach((yy, idx) => {
+      const s = idx === 0 ? m.span : m.span * 0.78;
+      ctx.beginPath();
+      ctx.moveTo(m.x - s, yy - 5);
+      ctx.lineTo(m.x + s, yy + 5);
+      ctx.stroke();
+    });
+  });
+
+  // Midship compound smokestack funnel & glowing plume
+  ctx.fillStyle = '#152926';
+  ctx.strokeStyle = '#38d9a9';
+  ctx.lineWidth = 2.0;
+  ctx.fillRect(908, 214, 12, 58);
+  ctx.strokeRect(908, 214, 12, 58);
+
+  // Sidewheel paddle-sponson wheel
+  ctx.fillStyle = '#091211';
+  ctx.strokeStyle = '#e6c886';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.arc(892, 288, 16, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(892 - Math.cos(a) * 15, 288 - Math.sin(a) * 15);
+    ctx.lineTo(892 + Math.cos(a) * 15, 288 + Math.sin(a) * 15);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 3. Lower Frieze: Bourdon Gauge Pressure Scale
+  ctx.fillStyle = '#040808';
+  ctx.fillRect(16, 396, 992, 68);
+  ctx.strokeStyle = '#e6c886';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  for (let i = 0; i < 29; i++) {
+    const bx = 276 + i * 16;
+    const major = i % 4 === 0;
+    const bh = major ? 26 : 12;
+    ctx.fillStyle = major ? '#38d9a9' : 'rgba(230, 200, 134, 0.68)';
+    ctx.fillRect(bx, 442 - bh, 3, bh);
+  }
+
+  // 4. Editorial Typography & Archival Metadata
+  ctx.fillStyle = '#38d9a9';
+  ctx.font = '500 16px "JetBrains Mono", monospace';
+  ctx.fillText('AETHERIC NAUTICAL RIG, 1889  ·  3D ORBIT & BLUEPRINT', 56, 62);
+
+  ctx.fillStyle = '#f5f2ea';
+  ctx.font = 'italic 600 60px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillText('Flying Dutchman', 54, 128);
+
+  ctx.fillStyle = '#e6c886';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('AETHER GALLEON', 56, 242);
+  ctx.fillStyle = 'rgba(245, 242, 234, 0.76)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('15.5 BAR · 42 TF', 56, 268);
+  ctx.fillText('LIGHT & DARK MODE', 56, 292);
+  ctx.fillText('3D PAN & ZOOM', 56, 316);
+
+  ctx.fillStyle = '#e6c886';
+  ctx.font = '400 15px "JetBrains Mono", monospace';
+  ctx.fillText('NO. 06', 56, 436);
+  ctx.textAlign = 'right';
+  ctx.fillText('LIGHT / DARK · 3D ORBIT', 968, 436);
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = 'rgba(230, 200, 134, 0.62)';
+  ctx.lineWidth = 3;
+  roundedRectPath(ctx, 26, 24, 972, 432, 20);
+  ctx.stroke();
+}
+
 function createCassetteStickerTexture(tape) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -832,6 +1031,8 @@ function createCassetteStickerTexture(tape) {
     drawNightDriveArtwork(ctx);
   } else if (tape.artStyle === 'kronos') {
     drawKronosArtwork(ctx);
+  } else if (tape.artStyle === 'dutchman') {
+    drawFlyingDutchmanArtwork(ctx);
   } else {
     drawMountainViewArtwork(ctx);
   }
@@ -1243,16 +1444,27 @@ const tapeItems = TAPES.map((tape, idx) => {
     cardEl.tabIndex = 0;
   }
 
+  const subActionsHtml = tape.dualTheme3D
+    ? `
+      <button class="open-work-sub" type="button" data-launch-theme="light" title="Open in Light Mode">☀ Light</button>
+      <button class="open-work-sub" type="button" data-launch-theme="dark" title="Open in Dark Mode">☾ Dark</button>
+      <button class="open-work-sub" type="button" data-launch-mode="3d" title="Open directly in 3D Orbit, Pan & Zoom mode">3D Pan &amp; Zoom</button>
+    `
+    : '';
+
   cardEl.innerHTML = `
     <div class="tape-stage" id="tape-stage-${idx}"></div>
     <div class="tape-caption">
       <div class="work-index">${tape.indexMeta}</div>
       <h2 class="work-title">${tape.title}</h2>
       <p class="work-desc">${tape.desc}</p>
-      <button class="open-work-btn" type="button" ${tape.unlocked ? '' : 'disabled'}>
-        <span>${tape.ctaLabel}</span>
-        ${tape.unlocked ? '<span>→</span>' : ''}
-      </button>
+      <div class="tape-action-row">
+        <button class="open-work-btn" type="button" ${tape.unlocked ? '' : 'disabled'}>
+          <span>${tape.ctaLabel}</span>
+          ${tape.unlocked ? '<span>→</span>' : ''}
+        </button>
+        ${subActionsHtml}
+      </div>
     </div>
   `;
 
@@ -1284,10 +1496,31 @@ const tapeItems = TAPES.map((tape, idx) => {
   });
   ro.observe(stageEl);
 
-  function navigateToWork() {
+  function navigateToWork(opts = {}) {
     if (!tape.unlocked || !tape.url) return;
+    if (tape.dualTheme3D) {
+      const activeTheme = opts.theme || (document.body.classList.contains('theme-dark') ? 'dark' : 'light');
+      const query = new URLSearchParams({ theme: activeTheme });
+      if (opts.mode) query.set('mode', opts.mode);
+      window.location.href = `${tape.url}?${query.toString()}`;
+      return;
+    }
     window.location.href = tape.url;
   }
+
+  cardEl.querySelectorAll('[data-launch-theme]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigateToWork({ theme: btn.dataset.launchTheme });
+    });
+  });
+
+  cardEl.querySelectorAll('[data-launch-mode]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigateToWork({ mode: btn.dataset.launchMode });
+    });
+  });
 
   cardEl.addEventListener('pointerenter', () => {
     item.hovered = true;
