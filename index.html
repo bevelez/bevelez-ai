@@ -25,7 +25,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Orbitron:wght@500;700;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./style.css?v=11" />
+  <link rel="stylesheet" href="./style.css?v=13" />
 
   <script type="importmap">
     {
@@ -156,12 +156,25 @@
         </div>
       </div>
 
+      <div class="road-selector" id="road-selector" role="region" aria-label="Road World Selector">
+        <button class="road-nav-btn" id="btn-road-prev" type="button" aria-label="Previous road world (Key R or Left)" title="Previous road world (Key R or Left)">‹</button>
+        <div class="road-pills" id="road-pills" role="tablist">
+          <button class="road-pill active" data-road="0" role="tab" aria-selected="true" type="button" title="OUTRUN PALMS (Key 1)"><span class="road-num">1</span><span class="road-name">OUTRUN</span></button>
+          <button class="road-pill" data-road="1" role="tab" aria-selected="false" type="button" title="MAKO REACTOR 01 — SECTOR 1 CAUSEWAY (Key 2)"><span class="road-num">2</span><span class="road-name">REACTOR</span></button>
+          <button class="road-pill" data-road="2" role="tab" aria-selected="false" type="button" title="SHINRA HQ TOWER — MIDGAR EXPRESSWAY (Key 3)"><span class="road-num">3</span><span class="road-name">SHINRA</span></button>
+          <button class="road-pill" data-road="3" role="tab" aria-selected="false" type="button" title="THE DRIVE (Key 4)"><span class="road-num">4</span><span class="road-name">THE DRIVE</span></button>
+          <button class="road-pill" data-road="4" role="tab" aria-selected="false" type="button" title="WINDMILL SUNSET (Key 5)"><span class="road-num">5</span><span class="road-name">WINDMILL</span></button>
+          <button class="road-pill" data-road="5" role="tab" aria-selected="false" type="button" title="AMBIENT TUNNEL (Key 6)"><span class="road-num">6</span><span class="road-name">TUNNEL</span></button>
+        </div>
+        <button class="road-nav-btn" id="btn-road-next" type="button" aria-label="Next road world (Key R or Right)" title="Next road world (Key R or Right)">›</button>
+      </div>
+
       <div class="controls-group">
         <button id="btn-turbo" class="cyber-btn cyber-btn-small" type="button">
           <span>⚡ BOOST</span>
         </button>
         <button id="btn-camera" class="cyber-btn cyber-btn-small" type="button">
-          <span id="camera-label">CAM: HELI WIDE</span>
+          <span id="camera-label">CAM: CHASE</span>
         </button>
       </div>
     </footer>
@@ -218,6 +231,6 @@
     </div>
   </div>
 
-  <script type="module" src="./main.js?v=23"></script>
+  <script type="module" src="./main.js?v=29"></script>
 </body>
 </html>

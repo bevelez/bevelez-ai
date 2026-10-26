@@ -4,7 +4,7 @@
 //    timbres, lead phrase and a 16-bar arrangement (groove / breakdown / rise) so the music moves.
 // 2. Google Gemini API Lyria 3.5 (lyria-3.5 / lyria-3-clip-preview) MP3 playback & live generation.
 
-import { STATIONS, DEFAULT_STATION } from './radio.js?v=1';
+import { STATIONS, DEFAULT_STATION } from './radio.js?v=3';
 
 const STEPS_PER_BAR = 16;
 const SCHEDULER_INTERVAL_MS = 25;
@@ -55,6 +55,7 @@ export class CyberAudioEngine {
     this.nextStepTime = 0;
     this.lookahead = LOOKAHEAD_VISIBLE;
     this.lastLeadFreq = null;
+    this.lastLeadTime = -1;
     this.riserArmedAt = -1;
 
     this.stations = STATIONS;
@@ -97,11 +98,15 @@ export class CyberAudioEngine {
   }
 
   get stepDuration() {
-    return (60 / this.station.bpm) / 4;
+    return (60 / this.station.bpm) / (this.station.stepsPerBeat || 4);
+  }
+
+  get stepsPerBar() {
+    return this.station.stepsPerBar || STEPS_PER_BAR;
   }
 
   get loopSteps() {
-    return this.station.arrangement.length * STEPS_PER_BAR;
+    return this.station.arrangement.length * this.stepsPerBar;
   }
 
   setStation(index) {
@@ -267,6 +272,31 @@ export class CyberAudioEngine {
     for (let i = 0; i < noiseLength; i++) {
       noise[i] = Math.random() * 2 - 1;
     }
+
+    // Subtle Lo-Fi Vinyl Dust & Warm Tape Crackle Bed (active only on lofi stations when playing)
+    const crackleLen = ctx.sampleRate * 3;
+    const crackleBuf = ctx.createBuffer(1, crackleLen, ctx.sampleRate);
+    const crackleData = crackleBuf.getChannelData(0);
+    let warmPink = 0;
+    for (let i = 0; i < crackleLen; i++) {
+      const white = Math.random() * 2 - 1;
+      warmPink = 0.96 * warmPink + 0.04 * white;
+      const pop = Math.random() < 0.0018 ? (Math.random() * 2 - 1) * 0.85 : 0;
+      crackleData[i] = warmPink * 0.18 + pop;
+    }
+    const crackleSrc = ctx.createBufferSource();
+    crackleSrc.buffer = crackleBuf;
+    crackleSrc.loop = true;
+    const crackleBp = ctx.createBiquadFilter();
+    crackleBp.type = 'bandpass';
+    crackleBp.frequency.value = 1850;
+    crackleBp.Q.value = 0.7;
+    this.vinylGain = ctx.createGain();
+    this.vinylGain.gain.value = 0.0001;
+    crackleSrc.connect(crackleBp);
+    crackleBp.connect(this.vinylGain);
+    this.vinylGain.connect(this.masterGain);
+    crackleSrc.start();
   }
 
   createReverb(duration = 2.8, decay = 2.4) {
@@ -301,6 +331,10 @@ export class CyberAudioEngine {
     if (!this.ctx) return;
     this.bassDrive.curve = makeSoftClipCurve(this.station.bass?.drive || 1.7);
     this.delayNode.delayTime.setTargetAtTime((60 / this.station.bpm) * 0.75, this.ctx.currentTime, 0.05);
+    if (this.vinylGain) {
+      const targetVinyl = (this.isPlaying && this.station.lofi) ? 0.016 : 0.0001;
+      this.vinylGain.gain.setTargetAtTime(targetVinyl, this.ctx.currentTime, 0.08);
+    }
   }
 
   // ==========================================================================
@@ -399,6 +433,9 @@ export class CyberAudioEngine {
     if (this.masterGain) {
       this.fadeMaster(0.0001, 0.22);
     }
+    if (this.vinylGain && this.ctx) {
+      this.vinylGain.gain.setTargetAtTime(0.0001, this.ctx.currentTime, 0.05);
+    }
     this.audioEl.pause();
     this.notify('AUDIO: PAUSED');
   }
@@ -410,8 +447,9 @@ export class CyberAudioEngine {
     if (!this.isPlaying || !this.ctx) return;
     const st = this.station;
     const stepDur = this.stepDuration;
-    const bar = Math.floor(step / STEPS_PER_BAR);
-    const sib = step % STEPS_PER_BAR;
+    const stepsPerBar = this.stepsPerBar;
+    const bar = Math.floor(step / stepsPerBar);
+    const sib = step % stepsPerBar;
     const section = st.arrangement[bar] || 'A';
     const chord = st.chords[bar % st.chords.length];
     const barsInLoop = st.arrangement.length;
@@ -424,56 +462,125 @@ export class CyberAudioEngine {
     const breakdown = section === 'B';
     const rise = section === 'R';
 
-    // 1. Pad on the downbeat; opens up in the breakdown and the rise
-    if (sib === 0) {
+    // 1. Pad on the downbeat; opens up in the breakdown and the rise (skipped on Lo-Fi MIDI stations so st.keys drives harmony)
+    if (sib === 0 && !st.lofi) {
       const brightness = breakdown ? 1.35 : rise ? 1.5 : section === 'a' ? 1.1 : 1.0;
-      this.triggerPad(chord, t, stepDur * 15.6, brightness, st.pad);
+      this.triggerPad(chord, t, stepDur * (stepsPerBar - 0.4), brightness, st.pad);
     }
 
-    // 2. Bass
-    const root = st.bassRoots[bar % st.bassRoots.length];
-    if (breakdown) {
-      if (sib === 0 || sib === 8) {
-        this.triggerBass(midiToFreq(root), t, stepDur * 7.5, 0.7, st.bass, true);
+    // 2. Bass (supports MIDI-derived bassNotes, per-step bassOstinato, or root+pattern)
+    if (Array.isArray(st.bassNotes)) {
+      for (const [bBar, bStep, midi, len, vel] of st.bassNotes) {
+        if (bBar === bar && bStep === sib) {
+          if (st.lofi) {
+            this.triggerLofiBass(midiToFreq(midi), t, stepDur * len * 0.94, vel || 0.92);
+          } else {
+            this.triggerBass(midiToFreq(midi), t, stepDur * len * 0.92, vel || 0.88, st.bass, len >= 6);
+          }
+        }
+      }
+    } else if (Array.isArray(st.bassOstinato)) {
+      const barOst = st.bassOstinato[bar % st.bassOstinato.length];
+      const noteMidi = barOst ? barOst[sib] : null;
+      if (noteMidi !== null && noteMidi !== undefined) {
+        if (st.lofi) {
+          this.triggerLofiBass(midiToFreq(noteMidi), t, stepDur * 0.92, 0.9);
+        } else {
+          this.triggerBass(midiToFreq(noteMidi), t, stepDur * 1.75, 0.88, st.bass, false);
+        }
       }
     } else {
-      const vel = hitVelocity(st.bassPattern[sib]);
-      if (vel > 0) {
-        const hop = st.bassHop[sib] === 'x' ? 12 : 0;
-        this.triggerBass(midiToFreq(root + hop), t, stepDur * 0.88, vel * (hop ? 0.85 : 1), st.bass, false);
+      const root = st.bassRoots[bar % st.bassRoots.length];
+      if (breakdown) {
+        if (sib === 0 || sib === 8) {
+          this.triggerBass(midiToFreq(root), t, stepDur * 7.5, 0.7, st.bass, true);
+        }
+      } else {
+        const vel = hitVelocity(st.bassPattern[sib]);
+        if (vel > 0) {
+          const hop = st.bassHop[sib] === 'x' ? 12 : 0;
+          this.triggerBass(midiToFreq(root + hop), t, stepDur * 0.88, vel * (hop ? 0.85 : 1), st.bass, false);
+        }
       }
     }
 
-    // 3. Pluck arpeggio: pattern A in A bars, pattern B in a bars; quieter and wetter in the breakdown
-    const pattern = section === 'a' || rise ? st.arpB : st.arpA;
-    const noteIdx = pattern[sib];
-    if (noteIdx !== null && noteIdx !== undefined) {
-      const shimmer = st.arpOctaveShimmer && (section === 'a' || rise) && sib % 8 === 0 ? 24 : 12;
-      const accent = sib % 4 === 0 ? 1 : 0.78;
-      const level = breakdown ? 0.6 : 1;
-      const pan = ((sib >> 1) % 2 === 0 ? -1 : 1) * 0.38;
-      this.triggerPluck(midiToFreq(chord[noteIdx] + shimmer), t, stepDur * 1.5, accent * level, pan, st.pluck, breakdown);
+    // 3. Pluck arpeggio: pattern A in A bars, pattern B in a bars; quieter and wetter in the breakdown (skipped on Lo-Fi MIDI stations)
+    if (!st.lofi) {
+      const pattern = section === 'a' || rise ? st.arpB : st.arpA;
+      const noteIdx = pattern[sib];
+      if (noteIdx !== null && noteIdx !== undefined) {
+        const shimmer = st.arpOctaveShimmer && (section === 'a' || rise) && sib % 8 === 0 ? 24 : 12;
+        const accent = sib % 4 === 0 ? 1 : 0.78;
+        const level = breakdown ? 0.6 : 1;
+        const pan = ((sib >> 1) % 2 === 0 ? -1 : 1) * 0.38;
+        this.triggerPluck(midiToFreq(chord[noteIdx % chord.length] + shimmer), t, stepDur * 1.5, accent * level, pan, st.pluck, breakdown);
+      }
     }
 
-    // 4. Lead phrase (absolute bars in the loop)
-    for (const [leadBar, leadStep, midi, len] of st.lead) {
+    // 4. Lead phrase (absolute bars in the loop; uses warm tape-saturated Lo-Fi Lead when st.lofi is true)
+    for (const [leadBar, leadStep, midi, len, vel] of st.lead) {
       if (leadBar === bar && leadStep === sib) {
-        this.triggerLead(midiToFreq(midi), t, stepDur * len);
+        if (st.lofi) {
+          this.triggerLofiLead(midiToFreq(midi), t, stepDur * len, vel || 0.9);
+        } else {
+          this.triggerLead(midiToFreq(midi), t, stepDur * len);
+        }
+      }
+    }
+
+    // 4B. Orchestral / Lo-Fi Tape Brass & French Horns (Shinra Theme & Bombing Mission)
+    if (Array.isArray(st.brass)) {
+      for (const [bBar, bStep, midi, len, vel] of st.brass) {
+        if (bBar === bar && bStep === sib) {
+          this.triggerBrass(midiToFreq(midi), t, stepDur * len, vel || 0.88);
+        }
+      }
+    }
+
+    // 4C. Lo-Fi Fender Rhodes / Warm Choir Keys (Shinra Theme & Bombing Mission)
+    if (Array.isArray(st.keys)) {
+      for (const [kBar, kStep, midi, len, vel] of st.keys) {
+        if (kBar === bar && kStep === sib) {
+          this.triggerLofiKeys(midiToFreq(midi), t, stepDur * len, vel || 0.78);
+        }
+      }
+    }
+
+    // 4D. Lo-Fi 16th-Note Tape Delay Echo Pulse (Track 4 of Shinra Theme)
+    if (Array.isArray(st.echo)) {
+      for (const [eBar, eStep, midi, len, vel] of st.echo) {
+        if (eBar === bar && eStep === sib) {
+          const pan = ((eStep % 2 === 0) ? -1 : 1) * 0.35;
+          this.triggerLofiEcho(midiToFreq(midi), t, stepDur * len * 1.4, vel || 0.42, pan);
+        }
+      }
+    }
+
+    // 4E. Tubular Bells / Metallic Reactor Chime (Shinra Theme & Bombing Mission)
+    if (Array.isArray(st.bell)) {
+      for (const [bBar, bStep, midi, len, vel] of st.bell) {
+        if (bBar === bar && bStep === sib) {
+          this.triggerBell(midiToFreq(midi), t, stepDur * len, vel || 0.78);
+        }
       }
     }
 
     // 5. Drums
     if (groove) {
-      const kickVel = hitVelocity(st.kick[sib]);
+      const kickPat = (bar % 2 === 1 && st.kickOdd) ? st.kickOdd : st.kick;
+      const kickVel = hitVelocity(kickPat[sib]);
       if (kickVel > 0) {
-        this.triggerKick(t, kickVel);
-        this.duck(t);
+        this.triggerKick(t, st.lofi ? kickVel * 0.85 : kickVel);
+        this.duck(t, st.lofi ? 0.78 : 0.5);
       }
       const snareVel = hitVelocity(st.snare[sib]);
-      if (snareVel > 0) this.triggerSnare(t, snareVel);
-      this.triggerHatFromPattern(st, sib, t, 1);
-      if (lastBar && sib >= 13) {
-        this.triggerSnare(t, 0.5 + (sib - 13) * 0.2); // three-hit fill into the loop restart
+      if (snareVel > 0) {
+        if (st.lofi) this.triggerLofiSnare(t, snareVel);
+        else this.triggerSnare(t, snareVel);
+      }
+      this.triggerHatFromPattern(st, sib, t, st.lofi ? 0.82 : 1);
+      if (lastBar && !st.noFill && sib >= stepsPerBar - 3) {
+        this.triggerSnare(t, 0.5 + (sib - (stepsPerBar - 3)) * 0.2); // three-hit fill into the loop restart
       }
     } else if (breakdown) {
       if (sib % 4 === 2) this.triggerHat(t, 0.35 * (st.hatLevel || 0.8), false);
@@ -489,13 +596,13 @@ export class CyberAudioEngine {
       const isLastRise = riseIndex === riseLen - 1;
       const rollStep = isLastRise ? 1 : 2;
       if (sib % rollStep === 0) {
-        const progress = (riseIndex + sib / STEPS_PER_BAR) / riseLen;
+        const progress = (riseIndex + sib / stepsPerBar) / riseLen;
         this.triggerSnare(t, 0.35 + 0.65 * progress);
       }
       this.triggerHatFromPattern(st, sib, t, 0.8);
       if (riseIndex === 0 && sib === 0 && this.riserArmedAt !== bar) {
         this.riserArmedAt = bar;
-        this.triggerRiser(t, stepDur * STEPS_PER_BAR * riseLen);
+        this.triggerRiser(t, stepDur * stepsPerBar * riseLen);
       }
     }
   }
@@ -516,11 +623,11 @@ export class CyberAudioEngine {
     this.triggerHat(time + (Math.random() - 0.5) * 0.004, vel, open);
   }
 
-  duck(time) {
+  duck(time, depth = 0.5) {
     const g = this.duckBus.gain;
     g.cancelScheduledValues(time);
     g.setValueAtTime(1, time);
-    g.linearRampToValueAtTime(0.5, time + 0.014);
+    g.linearRampToValueAtTime(depth, time + 0.014);
     g.setTargetAtTime(1, time + 0.05, 0.11);
   }
 
@@ -675,8 +782,10 @@ export class CyberAudioEngine {
 
   triggerLead(freq, time, duration) {
     const ctx = this.ctx;
-    const glideFrom = this.lastLeadFreq || freq;
+    const isSimultaneous = Math.abs(time - this.lastLeadTime) < 0.005;
+    const glideFrom = (!isSimultaneous && this.lastLeadFreq) ? this.lastLeadFreq : freq;
     this.lastLeadFreq = freq;
+    this.lastLeadTime = time;
 
     const vibrato = ctx.createOscillator();
     vibrato.type = 'sine';
@@ -728,6 +837,384 @@ export class CyberAudioEngine {
       osc.start(time);
       osc.stop(stopAt);
     });
+  }
+
+  // Orchestral / Lo-Fi Tape Brass & French Horn voice for FF7 Shinra Theme & Bombing Mission
+  triggerBrass(freq, time, duration, vel = 0.88) {
+    const ctx = this.ctx;
+    const saw1 = ctx.createOscillator();
+    const saw2 = ctx.createOscillator();
+    const tri = ctx.createOscillator();
+    saw1.type = 'sawtooth';
+    saw2.type = 'sawtooth';
+    tri.type = 'triangle';
+    saw1.frequency.setValueAtTime(freq, time);
+    saw2.frequency.setValueAtTime(freq, time);
+    tri.frequency.setValueAtTime(freq, time);
+    saw1.detune.value = -6;
+    saw2.detune.value = 6;
+
+    // Gentle analog tape wow/flutter LFO
+    const flutter = ctx.createOscillator();
+    flutter.type = 'sine';
+    flutter.frequency.value = 4.3;
+    const flutterDepth = ctx.createGain();
+    flutterDepth.gain.value = 5.5;
+    flutter.connect(flutterDepth);
+    flutterDepth.connect(saw1.detune);
+    flutterDepth.connect(saw2.detune);
+
+    const triGain = ctx.createGain();
+    triGain.gain.value = 0.55;
+    tri.connect(triGain);
+
+    // Warm Lo-Fi brass filter envelope: rounded resonant swell on attack, mellow tape sustain
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = 1.45;
+    filter.frequency.setValueAtTime(380, time);
+    filter.frequency.exponentialRampToValueAtTime(1950 * vel, time + 0.032);
+    filter.frequency.exponentialRampToValueAtTime(1120, time + Math.max(0.08, duration * 0.7));
+
+    const gain = ctx.createGain();
+    const peak = 0.068 * vel;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peak, time + 0.018);
+    gain.gain.setValueAtTime(peak * 0.86, time + Math.max(0.04, duration - 0.03));
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.05);
+
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.48;
+    const delayAmt = ctx.createGain();
+    delayAmt.gain.value = 0.24;
+
+    saw1.connect(filter);
+    saw2.connect(filter);
+    triGain.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    gain.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+    gain.connect(delayAmt);
+    delayAmt.connect(this.delayNode);
+
+    const stopAt = time + duration + 0.07;
+    flutter.start(time);
+    saw1.start(time);
+    saw2.start(time);
+    tri.start(time);
+    flutter.stop(stopAt);
+    saw1.stop(stopAt);
+    saw2.stop(stopAt);
+    tri.stop(stopAt);
+  }
+
+  // Lo-Fi Warm Tape Strings & Synth Lead (front-and-center melody without portamento smearing)
+  triggerLofiLead(freq, time, duration, vel = 0.9) {
+    const ctx = this.ctx;
+    const tri = ctx.createOscillator();
+    const saw1 = ctx.createOscillator();
+    const saw2 = ctx.createOscillator();
+    tri.type = 'triangle';
+    saw1.type = 'sawtooth';
+    saw2.type = 'sawtooth';
+    tri.frequency.setValueAtTime(freq, time);
+    saw1.frequency.setValueAtTime(freq, time);
+    saw2.frequency.setValueAtTime(freq, time);
+    saw1.detune.value = -7;
+    saw2.detune.value = 7;
+
+    // Analog tape wow/flutter LFO
+    const wow = ctx.createOscillator();
+    wow.type = 'sine';
+    wow.frequency.value = 4.6;
+    const wowDepth = ctx.createGain();
+    wowDepth.gain.setValueAtTime(2.5, time);
+    wowDepth.gain.linearRampToValueAtTime(7.5, time + Math.min(0.35, duration));
+    wow.connect(wowDepth);
+    wowDepth.connect(tri.detune);
+    wowDepth.connect(saw1.detune);
+    wowDepth.connect(saw2.detune);
+
+    const sawMix = ctx.createGain();
+    sawMix.gain.value = 0.45;
+    saw1.connect(sawMix);
+    saw2.connect(sawMix);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = 1.2;
+    filter.frequency.setValueAtTime(2100 * vel, time);
+    filter.frequency.exponentialRampToValueAtTime(1250, time + Math.max(0.08, duration));
+
+    const gain = ctx.createGain();
+    const peak = 0.076 * vel;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peak, time + 0.016);
+    gain.gain.setValueAtTime(peak * 0.88, time + Math.max(0.04, duration - 0.04));
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.06);
+
+    const delayAmt = ctx.createGain();
+    delayAmt.gain.value = 0.34;
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.52;
+
+    tri.connect(filter);
+    sawMix.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    gain.connect(delayAmt);
+    delayAmt.connect(this.delayNode);
+    gain.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+
+    const stopAt = time + duration + 0.08;
+    wow.start(time);
+    tri.start(time);
+    saw1.start(time);
+    saw2.start(time);
+    wow.stop(stopAt);
+    tri.stop(stopAt);
+    saw1.stop(stopAt);
+    saw2.stop(stopAt);
+  }
+
+  // Lo-Fi Fender Rhodes / Warm Electric Piano & Choir Chords (Track 6 of Shinra / Track 10 & 17 of Bombing Mission)
+  triggerLofiKeys(freq, time, duration, vel = 0.78) {
+    const ctx = this.ctx;
+    const fund = ctx.createOscillator();
+    const tine = ctx.createOscillator();
+    const warm = ctx.createOscillator();
+    fund.type = 'sine';
+    tine.type = 'triangle';
+    warm.type = 'sawtooth';
+    fund.frequency.setValueAtTime(freq, time);
+    tine.frequency.setValueAtTime(freq * 2.0, time);
+    warm.frequency.setValueAtTime(freq, time);
+    warm.detune.value = 5;
+
+    const tineGain = ctx.createGain();
+    tineGain.gain.setValueAtTime(0.28 * vel, time);
+    tineGain.gain.exponentialRampToValueAtTime(0.01, time + Math.min(duration, 0.35));
+    tine.connect(tineGain);
+
+    const warmGain = ctx.createGain();
+    warmGain.gain.value = 0.25;
+    warm.connect(warmGain);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1350, time);
+    filter.frequency.exponentialRampToValueAtTime(680, time + duration);
+
+    const env = ctx.createGain();
+    const peak = 0.052 * vel;
+    env.gain.setValueAtTime(0.0001, time);
+    env.gain.linearRampToValueAtTime(peak, time + 0.015);
+    env.gain.setValueAtTime(peak * 0.82, time + Math.max(0.04, duration - 0.05));
+    env.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.08);
+
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.58;
+
+    fund.connect(filter);
+    tineGain.connect(filter);
+    warmGain.connect(filter);
+    filter.connect(env);
+    env.connect(this.padBus);
+    env.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+
+    const stopAt = time + duration + 0.1;
+    fund.start(time);
+    tine.start(time);
+    warm.start(time);
+    fund.stop(stopAt);
+    tine.stop(stopAt);
+    warm.stop(stopAt);
+  }
+
+  // Lo-Fi 16th-Note Rhodes / Glass Echo Pulse (Track 4 of Shinra Theme)
+  triggerLofiEcho(freq, time, duration, vel = 0.42, pan = 0) {
+    const ctx = this.ctx;
+    const osc = ctx.createOscillator();
+    const overtone = ctx.createOscillator();
+    osc.type = 'triangle';
+    overtone.type = 'sine';
+    osc.frequency.setValueAtTime(freq, time);
+    overtone.frequency.setValueAtTime(freq * 2.0, time);
+
+    const otGain = ctx.createGain();
+    otGain.gain.setValueAtTime(0.22, time);
+    otGain.gain.exponentialRampToValueAtTime(0.005, time + duration);
+    overtone.connect(otGain);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(1600, time);
+    filter.frequency.exponentialRampToValueAtTime(620, time + duration);
+
+    const gain = ctx.createGain();
+    const peak = 0.036 * vel;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peak, time + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + duration + 0.03);
+
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+
+    osc.connect(filter);
+    otGain.connect(filter);
+    filter.connect(gain);
+    gain.connect(panner);
+    panner.connect(this.duckBus);
+
+    const stopAt = time + duration + 0.04;
+    osc.start(time);
+    overtone.start(time);
+    osc.stop(stopAt);
+    overtone.stop(stopAt);
+  }
+
+  // Lo-Fi Low Grand Piano + Deep Sub-Bass (Track 19 LO PIANO + BASS1 of Bombing Mission & Track 1 Db2 of Shinra)
+  triggerLofiBass(freq, time, duration, vel = 0.9) {
+    const ctx = this.ctx;
+    const sub = ctx.createOscillator();
+    const body = ctx.createOscillator();
+    const hammer = ctx.createOscillator();
+    sub.type = 'sine';
+    body.type = 'sawtooth';
+    hammer.type = 'triangle';
+    sub.frequency.setValueAtTime(freq, time);
+    body.frequency.setValueAtTime(freq, time);
+    hammer.frequency.setValueAtTime(freq * 2.0, time);
+
+    const hammerGain = ctx.createGain();
+    hammerGain.gain.setValueAtTime(0.32 * vel, time);
+    hammerGain.gain.exponentialRampToValueAtTime(0.008, time + Math.min(0.14, duration));
+    hammer.connect(hammerGain);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.Q.value = 1.8;
+    filter.frequency.setValueAtTime(720 * vel, time);
+    filter.frequency.exponentialRampToValueAtTime(165, time + duration);
+
+    const subGain = ctx.createGain();
+    subGain.gain.value = 0.55;
+    sub.connect(subGain);
+
+    const gain = ctx.createGain();
+    const peak = 0.25 * vel;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.linearRampToValueAtTime(peak, time + 0.005);
+    if (duration > 0.35) {
+      gain.gain.setValueAtTime(peak * 0.78, time + duration * 0.65);
+    }
+    gain.gain.exponentialRampToValueAtTime(0.001, time + duration + 0.02);
+
+    body.connect(filter);
+    hammerGain.connect(filter);
+    subGain.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.bassDrive);
+
+    const stopAt = time + duration + 0.03;
+    sub.start(time);
+    body.start(time);
+    hammer.start(time);
+    sub.stop(stopAt);
+    body.stop(stopAt);
+    hammer.stop(stopAt);
+  }
+
+  // Dusty Lo-Fi Boom-Bap Snare / Rimshot
+  triggerLofiSnare(time, vel = 1) {
+    const ctx = this.ctx;
+    const noise = this.noiseSource(time, 0.16);
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.frequency.setValueAtTime(1250, time);
+    band.Q.value = 0.9;
+
+    const gate = ctx.createGain();
+    gate.gain.setValueAtTime(0.14 * vel, time);
+    gate.gain.exponentialRampToValueAtTime(0.001, time + 0.14);
+
+    noise.connect(band);
+    band.connect(gate);
+    gate.connect(this.masterGain);
+
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.32;
+    gate.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+
+    const body = ctx.createOscillator();
+    body.type = 'triangle';
+    body.frequency.setValueAtTime(220, time);
+    body.frequency.exponentialRampToValueAtTime(135, time + 0.065);
+    const bodyGain = ctx.createGain();
+    bodyGain.gain.setValueAtTime(0.18 * vel, time);
+    bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.085);
+    body.connect(bodyGain);
+    bodyGain.connect(this.masterGain);
+    body.start(time);
+    body.stop(time + 0.095);
+  }
+
+  // Tubular Bell / Metallic Reactor Chime voice for FF7 Shinra Theme & Bombing Mission
+  triggerBell(freq, time, duration, vel = 0.75) {
+    const ctx = this.ctx;
+    const fundamental = ctx.createOscillator();
+    const overtone1 = ctx.createOscillator();
+    const overtone2 = ctx.createOscillator();
+    fundamental.type = 'triangle';
+    overtone1.type = 'sine';
+    overtone2.type = 'sine';
+
+    fundamental.frequency.setValueAtTime(freq, time);
+    overtone1.frequency.setValueAtTime(freq * 2.0, time);
+    overtone2.frequency.setValueAtTime(freq * 2.756, time); // inharmonic tubular bell modal partial
+
+    const ot1Gain = ctx.createGain();
+    ot1Gain.gain.setValueAtTime(0.42, time);
+    ot1Gain.gain.exponentialRampToValueAtTime(0.01, time + Math.min(duration, 0.7));
+
+    const ot2Gain = ctx.createGain();
+    ot2Gain.gain.setValueAtTime(0.28, time);
+    ot2Gain.gain.exponentialRampToValueAtTime(0.005, time + Math.min(duration, 0.35));
+
+    const env = ctx.createGain();
+    const decayTime = Math.max(duration, 0.65);
+    env.gain.setValueAtTime(0.0001, time);
+    env.gain.linearRampToValueAtTime(0.042 * vel, time + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.0001, time + decayTime);
+
+    const reverbAmt = ctx.createGain();
+    reverbAmt.gain.value = 0.72;
+    const delayAmt = ctx.createGain();
+    delayAmt.gain.value = 0.35;
+
+    fundamental.connect(env);
+    overtone1.connect(ot1Gain);
+    ot1Gain.connect(env);
+    overtone2.connect(ot2Gain);
+    ot2Gain.connect(env);
+
+    env.connect(this.masterGain);
+    env.connect(reverbAmt);
+    reverbAmt.connect(this.reverbSend);
+    env.connect(delayAmt);
+    delayAmt.connect(this.delayNode);
+
+    const stopAt = time + decayTime + 0.05;
+    fundamental.start(time);
+    overtone1.start(time);
+    overtone2.start(time);
+    fundamental.stop(stopAt);
+    overtone1.stop(stopAt);
+    overtone2.stop(stopAt);
   }
 
   triggerKick(time, vel = 1) {
