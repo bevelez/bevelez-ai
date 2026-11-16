@@ -1,0 +1,1819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Aether Broadside · 1889 Admiralty Plate — Tape No. 08 · bevelez.ai</title>
+  <meta name="description" content="Tape No. 08: Aether Broadside — 3D 1889 steampunk airship naval combat aboard H.M.A.S. Flying Dutchman. Balance the 15.5-bar Scotch marine aether-boiler, tack the storm winds, unleash 6-gun brass broadsides, and toggle live into Isometric X-Ray CAD Damage Control." />
+  <meta name="theme-color" content="#0b0b0b" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230b0b0b' stroke='%23dba33c' stroke-width='2.5'/%3E%3Cpath d='M12 40 L20 48 L44 48 L52 38 L12 40 Z' fill='%23522818' stroke='%23f4c867' stroke-width='2'/%3E%3Cline x1='32' y1='13' x2='32' y2='40' stroke='%23e6e6e6' stroke-width='2.5'/%3E%3Cpath d='M22 18 Q32 21 42 18 L40 31 Q32 34 24 31 Z' fill='%23f0e6d1'/%3E%3Ccircle cx='32' cy='43' r='4' fill='%2338d9a9'/%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    /* ==========================================================================
+       1889 ADMIRALTY TECHNICAL PLATE TOKENS (Continuity with flying-dutchman.html)
+       ========================================================================== */
+    .iso {
+      --anatomy-page: #0b0b0b;
+      --anatomy-card: #131313;
+      --anatomy-card-glass: rgba(16, 17, 20, 0.86);
+      --anatomy-card-solid: #151619;
+      --anatomy-text: #a8abb2;
+      --anatomy-strong: #eceae4;
+      --anatomy-muted: #72757d;
+      --anatomy-paper: #131313;
+      --anatomy-face: #1c1d21;
+      --anatomy-face-hover: #26282e;
+      --anatomy-top: #22242a;
+      --anatomy-hi: #d8d6cf;
+      --anatomy-mid: #6a6d75;
+      --anatomy-lo: #3a3c42;
+      --anatomy-faint: #27292e;
+      --anatomy-lit: #ffffff;
+      --anatomy-red: #ff6b6b;
+      --anatomy-green: #38d9a9;
+      --anatomy-blue: #6b9bff;
+      --anatomy-brass: #dba33c;
+      --anatomy-brass-hi: #f4c867;
+      --anatomy-brass-dim: rgba(219, 163, 60, 0.28);
+      --anatomy-aether-glow: rgba(56, 217, 169, 0.34);
+      --anatomy-ring: rgba(255, 255, 255, 0.11);
+      --anatomy-plate-border: rgba(216, 214, 207, 0.24);
+      --anatomy-shadow: 0 12px 32px rgba(0, 0, 0, 0.52), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      --anatomy-ease: cubic-bezier(0.32, 0.72, 0, 1);
+      --anatomy-serif: 'Cormorant Garamond', Georgia, serif;
+      --anatomy-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --anatomy-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    }
+
+    .iso[data-theme="light"][data-view="cad"] {
+      --anatomy-page: #f2f2ef;
+      --anatomy-card: #fbfbfa;
+      --anatomy-card-glass: rgba(251, 251, 249, 0.90);
+      --anatomy-card-solid: #f7f6f2;
+      --anatomy-text: #4e4e54;
+      --anatomy-strong: #161619;
+      --anatomy-muted: #7c7c84;
+      --anatomy-paper: #fbfbfa;
+      --anatomy-face: #ecebe6;
+      --anatomy-face-hover: #e1e0da;
+      --anatomy-top: #ffffff;
+      --anatomy-hi: #242429;
+      --anatomy-mid: #82828a;
+      --anatomy-lo: #b6b6be;
+      --anatomy-faint: #d6d6dc;
+      --anatomy-lit: #000000;
+      --anatomy-red: #dc3545;
+      --anatomy-green: #0ca678;
+      --anatomy-blue: #365bdb;
+      --anatomy-brass: #9c6b16;
+      --anatomy-brass-hi: #7d520b;
+      --anatomy-brass-dim: rgba(156, 107, 22, 0.26);
+      --anatomy-aether-glow: rgba(12, 166, 120, 0.24);
+      --anatomy-ring: rgba(20, 20, 24, 0.14);
+      --anatomy-plate-border: rgba(36, 36, 41, 0.28);
+      --anatomy-shadow: 0 10px 26px rgba(20, 20, 24, 0.10), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--anatomy-page);
+      color: var(--anatomy-text);
+      font-family: var(--anatomy-sans);
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    /* Fullscreen WebGL Stage */
+    #three-stage {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+      cursor: grab;
+    }
+
+    #three-stage:active {
+      cursor: grabbing;
+    }
+
+    #three-stage canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Screen Flash Vignette (Impacts, Broadsides & Steam Vent) */
+    #screen-flash {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 140ms ease-out;
+      background: radial-gradient(circle at 50% 50%, transparent 45%, rgba(255, 107, 107, 0.42) 100%);
+    }
+
+    #screen-flash[data-tone="vent"] {
+      background: radial-gradient(circle at 50% 50%, rgba(56, 217, 169, 0.12) 20%, rgba(56, 217, 169, 0.36) 100%);
+    }
+
+    #screen-flash[data-tone="broadside"] {
+      background: radial-gradient(circle at 50% 50%, transparent 55%, rgba(244, 200, 103, 0.25) 100%);
+    }
+
+    /* ==========================================================================
+       SHARED ADMIRALTY PLATE PRIMITIVES
+       ========================================================================== */
+    .plate-card {
+      background: var(--anatomy-card-glass);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--anatomy-plate-border);
+      box-shadow: var(--anatomy-shadow);
+      color: var(--anatomy-text);
+      transition: background 220ms var(--anatomy-ease), border-color 220ms var(--anatomy-ease), color 220ms var(--anatomy-ease);
+    }
+
+    .mono-tag {
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .adm-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 1px solid var(--anatomy-ring);
+      background: var(--anatomy-face);
+      color: var(--anatomy-strong);
+      font-family: var(--anatomy-mono);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 0 10px;
+      height: 28px;
+      border-radius: 4px;
+      cursor: pointer;
+      text-decoration: none;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+      transition: background 150ms var(--anatomy-ease), border-color 150ms var(--anatomy-ease), color 150ms var(--anatomy-ease), transform 90ms ease;
+    }
+
+    .adm-btn:hover:not(:disabled) {
+      background: var(--anatomy-face-hover);
+      border-color: var(--anatomy-mid);
+    }
+
+    .adm-btn:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .adm-btn:disabled {
+      opacity: 0.48;
+      cursor: not-allowed;
+    }
+
+    .adm-btn[data-active="true"] {
+      border-color: var(--anatomy-green);
+      box-shadow: inset 0 0 0 1px var(--anatomy-aether-glow);
+      color: var(--anatomy-strong);
+    }
+
+    .lamp-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--anatomy-muted);
+      flex: none;
+      transition: background 160ms ease, box-shadow 160ms ease;
+    }
+
+    .lamp-dot[data-on="true"] {
+      background: var(--anatomy-green);
+      box-shadow: 0 0 8px var(--anatomy-green);
+    }
+
+    .kbd-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      line-height: 1.2;
+      color: var(--anatomy-brass-hi);
+      background: rgba(219, 163, 60, 0.13);
+      border: 1px solid var(--anatomy-brass-dim);
+    }
+
+    /* ==========================================================================
+       1. TOP ADMIRALTY BAR
+       ========================================================================== */
+    .top-admiralty-bar {
+      position: fixed;
+      top: 12px;
+      left: 14px;
+      right: 14px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 7px 12px;
+      border-radius: 6px;
+      pointer-events: auto;
+    }
+
+    .top-brand-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .plate-title-badge {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    .plate-fig-code {
+      font-family: var(--anatomy-mono);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      color: var(--anatomy-brass-hi);
+    }
+
+    .plate-vessel-title {
+      font-family: var(--anatomy-serif);
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      color: var(--anatomy-strong);
+    }
+
+    .top-telemetry-cluster {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 3px 12px;
+      border-left: 1px solid var(--anatomy-ring);
+      border-right: 1px solid var(--anatomy-ring);
+    }
+
+    .telemetry-stat {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .telemetry-stat .lbl {
+      font-family: var(--anatomy-mono);
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      color: var(--anatomy-muted);
+      text-transform: uppercase;
+    }
+
+    .telemetry-stat .val {
+      font-family: var(--anatomy-mono);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--anatomy-strong);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .telemetry-stat .val.gold {
+      color: var(--anatomy-brass-hi);
+    }
+
+    .top-controls-cluster {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    #btn-view-mode {
+      border-color: var(--anatomy-brass-dim);
+      padding: 0 12px;
+      font-weight: 600;
+    }
+
+    #btn-view-mode[data-mode="cad"] {
+      border-color: var(--anatomy-green);
+      background: rgba(56, 217, 169, 0.13);
+    }
+
+    .tactical-time-pill {
+      display: none;
+      align-items: center;
+      gap: 5px;
+      height: 26px;
+      padding: 0 9px;
+      border-radius: 4px;
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--anatomy-green);
+      background: rgba(56, 217, 169, 0.12);
+      border: 1px solid var(--anatomy-green);
+    }
+
+    body[data-view="cad"] .tactical-time-pill {
+      display: inline-flex;
+    }
+
+    /* ==========================================================================
+       UPPER-CENTER ADMIRALTY TELEGRAPH TOAST
+       ========================================================================== */
+    #admiralty-toast {
+      position: fixed;
+      top: 66px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-8px);
+      z-index: 22;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 14px;
+      border-radius: 5px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 200ms var(--anatomy-ease), transform 200ms var(--anatomy-ease);
+      max-width: min(560px, 90vw);
+    }
+
+    #admiralty-toast[data-visible="true"] {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    #admiralty-toast[data-tone="alert"] {
+      border-color: var(--anatomy-red);
+    }
+
+    #admiralty-toast-tag {
+      color: var(--anatomy-brass-hi);
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    #admiralty-toast[data-tone="alert"] #admiralty-toast-tag {
+      color: var(--anatomy-red);
+    }
+
+    #admiralty-toast-text {
+      font-family: var(--anatomy-mono);
+      font-size: 11px;
+      color: var(--anatomy-strong);
+      letter-spacing: 0.04em;
+    }
+
+    /* ==========================================================================
+       2. LEFT ENGINEERING PANEL — 15.5-BAR SCOTCH MARINE AETHER-BOILER
+       ========================================================================== */
+    #boiler-panel {
+      position: fixed;
+      top: 68px;
+      left: 14px;
+      width: 268px;
+      z-index: 18;
+      padding: 11px 12px;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      pointer-events: auto;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--anatomy-ring);
+    }
+
+    .panel-title {
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--anatomy-strong);
+      text-transform: uppercase;
+    }
+
+    .boiler-gauge-box {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .boiler-gauge-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      font-family: var(--anatomy-mono);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #boiler-pressure-value {
+      font-weight: 700;
+      color: var(--anatomy-green);
+    }
+
+    #boiler-pressure-value[data-overcharged="true"] {
+      color: var(--anatomy-brass-hi);
+    }
+
+    .gauge-track {
+      position: relative;
+      height: 7px;
+      border-radius: 3px;
+      background: var(--anatomy-faint);
+      overflow: hidden;
+      border: 1px solid var(--anatomy-ring);
+    }
+
+    .gauge-fill {
+      height: 100%;
+      width: 80%;
+      background: linear-gradient(90deg, #1ea87e, var(--anatomy-green));
+      transition: width 120ms ease-out, background 180ms ease;
+    }
+
+    .gauge-fill[data-overcharged="true"] {
+      background: linear-gradient(90deg, var(--anatomy-green), var(--anatomy-brass-hi));
+    }
+
+    #btn-overpressure {
+      width: 100%;
+      height: 30px;
+      justify-content: space-between;
+      padding: 0 9px;
+      border-color: var(--anatomy-brass-dim);
+    }
+
+    #btn-overpressure[data-overcharged="true"] {
+      border-color: var(--anatomy-brass-hi);
+      background: rgba(219, 163, 60, 0.18);
+      color: var(--anatomy-brass-hi);
+    }
+
+    /* Boiler Pip Allocators */
+    .alloc-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .alloc-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 5px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+
+    .alloc-row[data-focused="true"] {
+      border-color: var(--anatomy-brass-dim);
+      background: rgba(219, 163, 60, 0.05);
+    }
+
+    .alloc-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+    }
+
+    .alloc-name {
+      color: var(--anatomy-strong);
+      font-weight: 600;
+      letter-spacing: 0.06em;
+    }
+
+    .alloc-sub {
+      color: var(--anatomy-muted);
+      font-size: 9.5px;
+    }
+
+    .alloc-val {
+      color: var(--anatomy-green);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .alloc-controls {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .pip-step-btn {
+      width: 22px;
+      height: 20px;
+      border: 1px solid var(--anatomy-ring);
+      border-radius: 3px;
+      background: var(--anatomy-face);
+      color: var(--anatomy-strong);
+      font-family: var(--anatomy-mono);
+      font-size: 12px;
+      line-height: 1;
+      cursor: pointer;
+      flex: none;
+    }
+
+    .pip-step-btn:hover {
+      background: var(--anatomy-face-hover);
+      border-color: var(--anatomy-mid);
+    }
+
+    .pip-track {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 2px;
+      height: 14px;
+      align-items: stretch;
+    }
+
+    .pip-cell {
+      border-radius: 2px;
+      background: var(--anatomy-faint);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      cursor: pointer;
+      transition: background 100ms ease;
+    }
+
+    .pip-cell[data-lit="full"] {
+      background: var(--anatomy-green);
+      border-color: var(--anatomy-green);
+    }
+
+    .pip-cell[data-lit="half"] {
+      background: linear-gradient(90deg, var(--anatomy-green) 50%, var(--anatomy-faint) 50%);
+      border-color: rgba(56, 217, 169, 0.55);
+    }
+
+    .pip-cell[data-lit="over"] {
+      background: var(--anatomy-brass-hi);
+      border-color: var(--anatomy-brass-hi);
+    }
+
+    /* Altitude Stratum Selector */
+    .stratum-section {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      padding-top: 6px;
+      border-top: 1px solid var(--anatomy-ring);
+    }
+
+    .stratum-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+    }
+
+    .stratum-btns {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 5px;
+    }
+
+    .stratum-btn {
+      height: 26px;
+      font-size: 10px;
+      padding: 0 4px;
+    }
+
+    .evasion-hint {
+      font-family: var(--anatomy-mono);
+      font-size: 9px;
+      letter-spacing: 0.04em;
+      color: var(--anatomy-muted);
+    }
+
+    .evasion-hint[data-evading="true"] {
+      color: var(--anatomy-green);
+    }
+
+    /* Emergency Relief Valve */
+    #btn-vent-steam {
+      width: 100%;
+      height: 32px;
+      justify-content: space-between;
+      padding: 0 9px;
+      border-color: var(--anatomy-ring);
+    }
+
+    #btn-vent-steam[data-urgent="true"] {
+      border-color: var(--anatomy-red);
+      background: rgba(255, 107, 107, 0.16);
+      color: #ffd8d8;
+      animation: urgent-pulse 1.1s ease-in-out infinite;
+    }
+
+    @keyframes urgent-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.0); }
+      50% { box-shadow: 0 0 12px 1px rgba(255, 107, 107, 0.45); }
+    }
+
+    /* ==========================================================================
+       TOP-RIGHT SQUADRON LEDGER & 3D COMPACT DAMAGE-CONTROL STRIP
+       ========================================================================== */
+    .right-tactical-stack {
+      position: fixed;
+      top: 68px;
+      right: 14px;
+      width: 264px;
+      z-index: 18;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      pointer-events: auto;
+    }
+
+    .squadron-card,
+    .compact-dc-card {
+      padding: 10px 11px;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    body[data-view="cad"] #subsystem-strip-3d {
+      border-color: var(--anatomy-green);
+    }
+
+    #enemy-ledger-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .enemy-row {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 5px 7px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.025);
+      border: 1px solid var(--anatomy-ring);
+    }
+
+    .enemy-row[data-boss="true"] {
+      border-color: var(--anatomy-brass-dim);
+      background: rgba(219, 163, 60, 0.07);
+    }
+
+    .enemy-row-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+    }
+
+    .enemy-name {
+      color: var(--anatomy-strong);
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .enemy-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--anatomy-mono);
+      font-size: 9px;
+      color: var(--anatomy-muted);
+    }
+
+    .enemy-hp-track {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--anatomy-faint);
+      overflow: hidden;
+    }
+
+    .enemy-hp-fill {
+      height: 100%;
+      background: var(--anatomy-red);
+      transition: width 100ms linear;
+    }
+
+    /* Compact 3D Subsystem Pills */
+    .sub-pill-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .sub-pill-btn {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      width: 100%;
+      height: 25px;
+      padding: 0 8px;
+      border-radius: 4px;
+      border: 1px solid var(--anatomy-ring);
+      background: var(--anatomy-face);
+      color: var(--anatomy-strong);
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+      letter-spacing: 0.05em;
+      cursor: pointer;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+
+    .sub-pill-btn:hover {
+      background: var(--anatomy-face-hover);
+    }
+
+    .sub-pill-btn[data-state="warn"] {
+      border-color: #ffb347;
+      color: #ffd089;
+    }
+
+    .sub-pill-btn[data-state="crit"] {
+      border-color: var(--anatomy-red);
+      background: rgba(255, 107, 107, 0.14);
+      color: #ffd6d6;
+    }
+
+    .sub-pill-btn[data-crew="true"] {
+      box-shadow: inset 0 0 0 1px var(--anatomy-blue);
+    }
+
+    .sub-pill-right {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ==========================================================================
+       3. BOTTOM GUNNERY & HELM DECK
+       ========================================================================== */
+    .bottom-helm-deck {
+      position: fixed;
+      bottom: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: min(980px, calc(100vw - 28px));
+      z-index: 20;
+      display: grid;
+      grid-template-columns: 208px 1fr 208px;
+      gap: 10px;
+      align-items: stretch;
+      pointer-events: auto;
+    }
+
+    .battery-card {
+      padding: 9px 11px;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .battery-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .arc-badge {
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-family: var(--anatomy-mono);
+      font-size: 8.5px;
+      font-weight: 700;
+      letter-spacing: 0.07em;
+      color: var(--anatomy-muted);
+      border: 1px solid var(--anatomy-ring);
+    }
+
+    .arc-badge[data-locked="true"] {
+      color: var(--anatomy-green);
+      border-color: var(--anatomy-green);
+      background: rgba(56, 217, 169, 0.14);
+    }
+
+    .fire-broadside-btn {
+      width: 100%;
+      height: 38px;
+      font-size: 11px;
+      font-weight: 700;
+      border-color: var(--anatomy-brass-dim);
+      background: linear-gradient(180deg, rgba(219, 163, 60, 0.18), rgba(219, 163, 60, 0.06));
+    }
+
+    .fire-broadside-btn:hover:not(:disabled) {
+      border-color: var(--anatomy-brass-hi);
+      background: linear-gradient(180deg, rgba(219, 163, 60, 0.28), rgba(219, 163, 60, 0.12));
+    }
+
+    .reload-track {
+      height: 5px;
+      border-radius: 3px;
+      background: var(--anatomy-faint);
+      overflow: hidden;
+    }
+
+    .reload-fill {
+      height: 100%;
+      width: 100%;
+      background: var(--anatomy-brass-hi);
+      transition: width 80ms linear;
+    }
+
+    .reload-fill[data-ready="true"] {
+      background: var(--anatomy-green);
+    }
+
+    .helm-center-card {
+      padding: 9px 13px;
+      border-radius: 6px;
+      display: grid;
+      grid-template-columns: 94px 1fr;
+      gap: 12px;
+      align-items: center;
+    }
+
+    /* Wind Rose Compass */
+    .wind-rose-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .wind-rose-svg {
+      width: 74px;
+      height: 74px;
+      display: block;
+      overflow: visible;
+    }
+
+    .wind-rose-readout {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-family: var(--anatomy-mono);
+      font-size: 9px;
+      line-height: 1.25;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #wind-knots-value {
+      color: var(--anatomy-strong);
+      font-weight: 600;
+    }
+
+    #sail-trim-value {
+      color: var(--anatomy-green);
+      font-size: 8.5px;
+    }
+
+    .helm-bars-and-ammo {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      min-width: 0;
+    }
+
+    .hull-throttle-grid {
+      display: grid;
+      grid-template-columns: 1.15fr 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .stat-block {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .stat-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hull-track {
+      height: 7px;
+      border-radius: 3px;
+      background: var(--anatomy-faint);
+      overflow: hidden;
+      border: 1px solid var(--anatomy-ring);
+    }
+
+    #hull-bar-fill {
+      height: 100%;
+      width: 100%;
+      background: var(--anatomy-green);
+      transition: width 120ms ease-out, background 180ms ease;
+    }
+
+    #hull-bar-fill[data-level="warn"] {
+      background: #ffb347;
+    }
+
+    #hull-bar-fill[data-level="crit"] {
+      background: var(--anatomy-red);
+    }
+
+    .helm-mini-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 5px;
+    }
+
+    .mini-helm-btn {
+      height: 20px;
+      padding: 0 6px;
+      font-size: 9px;
+    }
+
+    .ammo-selector-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .ammo-btn {
+      height: 27px;
+      padding: 0 6px;
+      font-size: 9.5px;
+      justify-content: flex-start;
+      gap: 5px;
+    }
+
+    .ammo-btn[data-active="true"] {
+      border-color: var(--anatomy-brass-hi);
+      background: rgba(219, 163, 60, 0.16);
+      box-shadow: none;
+    }
+
+    /* ==========================================================================
+       4. INTERACTIVE CAD X-RAY DAMAGE-CONTROL OVERLAY ('cad' mode)
+       ========================================================================== */
+    #cad-overlay {
+      position: fixed;
+      inset: 58px 286px 124px 290px;
+      z-index: 15;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      border: 1px solid var(--anatomy-plate-border);
+      transition: opacity 200ms var(--anatomy-ease), visibility 200ms var(--anatomy-ease);
+    }
+
+    body[data-view="cad"] #cad-overlay {
+      opacity: 1;
+      visibility: visible;
+    }
+
+    .cad-corner {
+      position: absolute;
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--anatomy-muted);
+      padding: 3px 6px;
+      background: var(--anatomy-card-glass);
+      border: 1px solid var(--anatomy-ring);
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    .cad-corner[data-pos="tl"] { top: 10px; left: 12px; color: var(--anatomy-strong); }
+    .cad-corner[data-pos="tr"] { top: 10px; right: 12px; color: var(--anatomy-green); }
+    .cad-corner[data-pos="bl"] { bottom: 10px; left: 12px; }
+    .cad-corner[data-pos="br"] { bottom: 10px; right: 12px; font-variant-numeric: tabular-nums; }
+
+    #cad-leader-svg {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    .cad-leader-line {
+      fill: none;
+      stroke: var(--anatomy-mid);
+      stroke-width: 1.15;
+      stroke-dasharray: 3 2.5;
+    }
+
+    .cad-leader-line[data-state="crit"] {
+      stroke: var(--anatomy-red);
+      stroke-dasharray: none;
+    }
+
+    .cad-leader-line[data-state="crew"] {
+      stroke: var(--anatomy-blue);
+    }
+
+    .cad-anchor-dot {
+      fill: var(--anatomy-paper);
+      stroke: var(--anatomy-green);
+      stroke-width: 2;
+    }
+
+    .cad-anchor-dot[data-state="crit"] {
+      stroke: var(--anatomy-red);
+      fill: var(--anatomy-red);
+    }
+
+    .cad-pins-container {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .cad-pin {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 178px;
+      padding: 7px 9px;
+      border-radius: 5px;
+      background: var(--anatomy-card-glass);
+      border: 1px solid var(--anatomy-plate-border);
+      box-shadow: var(--anatomy-shadow);
+      color: var(--anatomy-strong);
+      font-family: var(--anatomy-mono);
+      text-align: left;
+      cursor: pointer;
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: border-color 140ms ease, background 140ms ease;
+    }
+
+    .cad-pin:hover {
+      border-color: var(--anatomy-green);
+      background: var(--anatomy-card-solid);
+    }
+
+    .cad-pin[data-state="warn"] {
+      border-color: #ffb347;
+    }
+
+    .cad-pin[data-state="crit"] {
+      border-color: var(--anatomy-red);
+    }
+
+    .cad-pin[data-crew="true"] {
+      box-shadow: 0 0 0 1px var(--anatomy-blue), var(--anatomy-shadow);
+    }
+
+    .cad-pin-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+    }
+
+    .cad-pin-hp-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--anatomy-faint);
+      overflow: hidden;
+    }
+
+    .cad-pin-hp-fill {
+      height: 100%;
+      width: 100%;
+      background: var(--anatomy-green);
+    }
+
+    .cad-pin[data-state="warn"] .cad-pin-hp-fill {
+      background: #ffb347;
+    }
+
+    .cad-pin[data-state="crit"] .cad-pin-hp-fill {
+      background: var(--anatomy-red);
+    }
+
+    .cad-pin-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 9px;
+      color: var(--anatomy-muted);
+    }
+
+    .cad-pin-tag {
+      color: var(--anatomy-blue);
+      font-weight: 600;
+    }
+
+    .cad-pin[data-state="crit"] .cad-pin-tag {
+      color: var(--anatomy-red);
+    }
+
+    /* ==========================================================================
+       5. TITLE COMMISSION OVERLAY & VICTORY / SCUTTLED DISPATCH MODAL
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(8, 9, 12, 0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      transition: opacity 240ms var(--anatomy-ease), visibility 240ms var(--anatomy-ease);
+    }
+
+    .modal-backdrop[data-hidden="true"] {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .admiralty-plate-modal {
+      position: relative;
+      width: min(650px, 100%);
+      padding: 36px 34px 30px;
+      background: #121316;
+      border: 1px solid rgba(219, 163, 60, 0.42);
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+      color: #d8d6cf;
+    }
+
+    .modal-corner-stamp {
+      position: absolute;
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+      letter-spacing: 0.1em;
+      color: #7c7f88;
+      text-transform: uppercase;
+    }
+
+    .modal-corner-stamp.tl { top: 13px; left: 16px; color: #dba33c; }
+    .modal-corner-stamp.tr { top: 13px; right: 16px; }
+
+    .commission-kicker {
+      font-family: var(--anatomy-mono);
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: #38d9a9;
+      margin-bottom: 6px;
+    }
+
+    .commission-heading {
+      font-family: var(--anatomy-serif);
+      font-size: clamp(30px, 4.5vw, 42px);
+      font-weight: 600;
+      line-height: 1.08;
+      color: #f4f1ea;
+      margin-bottom: 8px;
+    }
+
+    .commission-lead {
+      font-size: 13.5px;
+      line-height: 1.55;
+      color: #a8abb2;
+      margin-bottom: 18px;
+    }
+
+    .briefing-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+
+    .briefing-cell {
+      padding: 10px 12px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .briefing-cell h4 {
+      font-family: var(--anatomy-mono);
+      font-size: 10px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #f4c867;
+      margin-bottom: 4px;
+    }
+
+    .briefing-cell p {
+      font-size: 12px;
+      line-height: 1.45;
+      color: #b4b7be;
+    }
+
+    .modal-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .cta-primary-btn {
+      height: 42px;
+      padding: 0 24px;
+      border-radius: 4px;
+      border: 1px solid #f4c867;
+      background: linear-gradient(180deg, #dba33c, #a8761c);
+      color: #0e0e10;
+      font-family: var(--anatomy-mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: filter 150ms ease, transform 90ms ease;
+    }
+
+    .cta-primary-btn:hover {
+      filter: brightness(1.08);
+    }
+
+    .cta-primary-btn:active {
+      transform: translateY(1px);
+    }
+
+    /* Dispatch Summary Metrics */
+    .dispatch-metrics {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 9px;
+      margin: 16px 0 22px;
+    }
+
+    .metric-box {
+      padding: 10px 12px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .metric-box .m-lbl {
+      font-family: var(--anatomy-mono);
+      font-size: 9.5px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #8a8d96;
+    }
+
+    .metric-box .m-val {
+      font-family: var(--anatomy-mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: #f4f1ea;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-box .m-val.accent {
+      color: #38d9a9;
+    }
+
+    .metric-box .m-val.gold {
+      color: #f4c867;
+    }
+
+    /* Responsive layout adjustments */
+    @media (max-width: 1120px) {
+      #boiler-panel { width: 236px; }
+      .right-tactical-stack { width: 226px; }
+      #cad-overlay { inset: 58px 248px 124px 258px; }
+      .bottom-helm-deck { grid-template-columns: 176px 1fr 176px; }
+    }
+
+    @media (max-width: 860px) {
+      .plate-vessel-title { display: none; }
+      .right-tactical-stack { display: none; }
+      #cad-overlay { inset: 58px 14px 136px 254px; }
+      .bottom-helm-deck { grid-template-columns: 1fr; gap: 6px; }
+      .briefing-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body class="iso" data-theme="dark" data-view="3d">
+  <!-- Fullscreen Three.js Viewport -->
+  <div id="three-stage" aria-label="Aether Broadside 3D & Isometric X-Ray Viewport"></div>
+  <div id="screen-flash"></div>
+
+  <!-- 1. TOP ADMIRALTY BAR -->
+  <header class="top-admiralty-bar plate-card">
+    <div class="top-brand-cluster">
+      <a id="link-archive" class="adm-btn" href="./vault.html" aria-label="Back to Archive">← Archive</a>
+      <div class="plate-title-badge">
+        <span class="plate-fig-code">FIG. 08 · AETHER BROADSIDE // 1889</span>
+        <span class="plate-vessel-title">H.M.A.S. Flying Dutchman</span>
+      </div>
+    </div>
+
+    <div class="top-telemetry-cluster">
+      <div class="telemetry-stat">
+        <span class="lbl">ENGAGEMENT</span>
+        <span id="wave-readout" class="val">WAVE 1 / 4</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="lbl">SQUADRON</span>
+        <span id="wave-name-readout" class="val">CORSAIR PICKET</span>
+      </div>
+      <div class="telemetry-stat">
+        <span class="lbl">PRIZE SCORE</span>
+        <span id="score-readout" class="val gold">0</span>
+      </div>
+    </div>
+
+    <div class="top-controls-cluster">
+      <div id="tactical-time-badge" class="tactical-time-pill" title="Tactical time dilation active during CAD X-Ray Schematic inspection">
+        <span>TACTICAL TIME 0.5x</span>
+      </div>
+      <button id="btn-view-mode" class="adm-btn" type="button" data-mode="3d" title="Toggle 3D Gunnery Helm and Isometric CAD X-Ray Schematic (Tab)">
+        <span id="view-mode-dot" class="lamp-dot" data-on="true"></span>
+        <span class="kbd-chip">TAB</span>
+        <span id="view-mode-label">3D GUNNERY HELM</span>
+      </button>
+      <button id="btn-cad-theme" class="adm-btn" type="button" title="Toggle CAD Technical Drafting Plate Theme (Dark / Light)">
+        <span id="cad-theme-label">DARK PLATE</span>
+      </button>
+      <button id="btn-audio-toggle" class="adm-btn" type="button" aria-pressed="true" title="Toggle 1889 Naval Score & Gunnery Audio (M)">
+        <span id="audio-lamp-dot" class="lamp-dot" data-on="true"></span>
+        <span id="audio-toggle-label">AUDIO ON</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- UPPER-CENTER TELEGRAPH TOAST -->
+  <div id="admiralty-toast" class="plate-card" role="status" aria-live="polite">
+    <span id="admiralty-toast-tag" class="mono-tag">ADMIRALTY //</span>
+    <span id="admiralty-toast-text">All hands to quarters.</span>
+  </div>
+
+  <!-- 2. LEFT ENGINEERING PANEL — 15.5-BAR SCOTCH MARINE AETHER-BOILER -->
+  <aside id="boiler-panel" class="plate-card" aria-label="15.5-Bar Scotch Marine Aether-Boiler Engineering">
+    <div class="panel-header">
+      <span class="panel-title">SCOTCH AETHER-BOILER</span>
+      <button id="btn-boiler-balance" class="adm-btn mini-helm-btn" type="button" title="Reset balanced 5.5 / 5.0 / 5.0 bar allocation">BALANCE</button>
+    </div>
+
+    <div class="boiler-gauge-box">
+      <div class="boiler-gauge-row">
+        <span id="boiler-pressure-value">15.5 / 15.5 BAR</span>
+        <span id="boiler-unallocated-value" class="mono-tag">0.0 FREE</span>
+      </div>
+      <div class="gauge-track">
+        <div id="boiler-pressure-fill" class="gauge-fill"></div>
+      </div>
+      <button id="btn-overpressure" class="adm-btn" type="button" title="Engage 19.5-Bar Boiler Overpressure Surge (Key O)">
+        <span><span class="kbd-chip">O</span> OVERPRESSURE 19.5 BAR</span>
+        <span id="overpressure-status" class="mono-tag">READY</span>
+      </button>
+    </div>
+
+    <div class="alloc-list">
+      <!-- Propulsion -->
+      <div id="row-alloc-propulsion" class="alloc-row" data-focused="true">
+        <div class="alloc-top">
+          <span class="alloc-name">PROPULSION</span>
+          <span class="alloc-sub">THRUST &amp; RUDDER</span>
+          <span id="alloc-propulsion-val" class="alloc-val">5.5 BAR</span>
+        </div>
+        <div class="alloc-controls">
+          <button id="btn-propulsion-dec" class="pip-step-btn" type="button" aria-label="Decrease Propulsion Bar">−</button>
+          <div id="pips-propulsion" class="pip-track" role="group" aria-label="Propulsion Bar Pips"></div>
+          <button id="btn-propulsion-inc" class="pip-step-btn" type="button" aria-label="Increase Propulsion Bar">+</button>
+        </div>
+      </div>
+
+      <!-- Sponsons / Lift -->
+      <div id="row-alloc-sponsons" class="alloc-row" data-focused="false">
+        <div class="alloc-top">
+          <span class="alloc-name">SPONSONS / LIFT</span>
+          <span class="alloc-sub">STRATA CLIMB</span>
+          <span id="alloc-sponsons-val" class="alloc-val">5.0 BAR</span>
+        </div>
+        <div class="alloc-controls">
+          <button id="btn-sponsons-dec" class="pip-step-btn" type="button" aria-label="Decrease Sponsons Bar">−</button>
+          <div id="pips-sponsons" class="pip-track" role="group" aria-label="Sponsons Bar Pips"></div>
+          <button id="btn-sponsons-inc" class="pip-step-btn" type="button" aria-label="Increase Sponsons Bar">+</button>
+        </div>
+      </div>
+
+      <!-- Ordnance / Reload -->
+      <div id="row-alloc-ordnance" class="alloc-row" data-focused="false">
+        <div class="alloc-top">
+          <span class="alloc-name">ORDNANCE</span>
+          <span id="ordnance-reload-readout" class="alloc-sub">3.9s RELOAD</span>
+          <span id="alloc-ordnance-val" class="alloc-val">5.0 BAR</span>
+        </div>
+        <div class="alloc-controls">
+          <button id="btn-ordnance-dec" class="pip-step-btn" type="button" aria-label="Decrease Ordnance Bar">−</button>
+          <div id="pips-ordnance" class="pip-track" role="group" aria-label="Ordnance Bar Pips"></div>
+          <button id="btn-ordnance-inc" class="pip-step-btn" type="button" aria-label="Increase Ordnance Bar">+</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Altitude Stratum Selector -->
+    <div class="stratum-section">
+      <div class="stratum-head">
+        <span class="mono-tag">ALTITUDE STRATUM <span class="kbd-chip">R</span>/<span class="kbd-chip">F</span></span>
+        <span id="stratum-alt-readout" class="mono-tag">+2m · MID</span>
+      </div>
+      <div class="stratum-btns">
+        <button id="btn-stratum-low" class="adm-btn stratum-btn" type="button">LOW</button>
+        <button id="btn-stratum-mid" class="adm-btn stratum-btn" type="button" data-active="true">MID</button>
+        <button id="btn-stratum-high" class="adm-btn stratum-btn" type="button">HIGH</button>
+      </div>
+      <div id="stratum-evasion-note" class="evasion-hint">OFFSET STRATUM = −40% HOSTILE HIT ACC</div>
+    </div>
+
+    <!-- Emergency Steam Relief -->
+    <button id="btn-vent-steam" class="adm-btn" type="button" title="Emergency Boiler Relief — Extinguishes All Shipboard Fires & Seals Leaks (Key V)">
+      <span><span class="kbd-chip">V</span> VENT STEAM</span>
+      <span id="vent-steam-status" class="mono-tag">READY</span>
+    </button>
+  </aside>
+
+  <!-- RIGHT TACTICAL STACK: SQUADRON LEDGER + COMPACT 3D SUBSYSTEM DAMAGE CONTROL -->
+  <aside class="right-tactical-stack" aria-label="Hostile Squadron & Damage Control Status">
+    <div class="squadron-card plate-card">
+      <div class="panel-header">
+        <span class="panel-title">HOSTILE CONTACTS</span>
+        <span class="mono-tag">RANGE 215m</span>
+      </div>
+      <div id="enemy-ledger-list">
+        <div class="mono-tag">AWAITING COMMISSION...</div>
+      </div>
+    </div>
+
+    <div id="subsystem-strip-3d" class="compact-dc-card plate-card">
+      <div class="panel-header">
+        <span class="panel-title">DAMAGE CONTROL</span>
+        <span id="crew-available-badge" class="mono-tag">2 / 2 CREWS</span>
+      </div>
+      <div class="sub-pill-grid">
+        <button id="pill-sub-boiler" class="sub-pill-btn" type="button">
+          <span>01 · BOILER</span>
+          <span class="sub-pill-right">100%</span>
+        </button>
+        <button id="pill-sub-sponsons" class="sub-pill-btn" type="button">
+          <span>02 · SPONSONS</span>
+          <span class="sub-pill-right">100%</span>
+        </button>
+        <button id="pill-sub-gunDeck" class="sub-pill-btn" type="button">
+          <span>03 · GUN DECK</span>
+          <span class="sub-pill-right">100%</span>
+        </button>
+        <button id="pill-sub-rigging" class="sub-pill-btn" type="button">
+          <span>04 · RIGGING</span>
+          <span class="sub-pill-right">100%</span>
+        </button>
+        <button id="pill-sub-propulsor" class="sub-pill-btn" type="button">
+          <span>05 · PROPULSOR</span>
+          <span class="sub-pill-right">100%</span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 4. INTERACTIVE CAD X-RAY DAMAGE-CONTROL OVERLAY -->
+  <section id="cad-overlay" aria-label="FIG. 08-B Internal Damage Control Schematic">
+    <div class="cad-corner" data-pos="tl">FIG. 08-B // INTERNAL DAMAGE CONTROL</div>
+    <div id="cad-crew-readout" class="cad-corner" data-pos="tr">2 ENGINEER CREWS AVAILABLE</div>
+    <div class="cad-corner" data-pos="bl">CLICK CALLOUT PIN OR 3D SUBSYSTEM TO DISPATCH REPAIR CREW · SCROLL ZOOM</div>
+    <div id="cad-scale-readout" class="cad-corner" data-pos="br">ISOMETRIC 35.264° · ZOOM 1.00x</div>
+
+    <svg id="cad-leader-svg" aria-hidden="true">
+      <path id="cad-line-boiler" class="cad-leader-line" d="M0 0 L0 0" />
+      <path id="cad-line-sponsons" class="cad-leader-line" d="M0 0 L0 0" />
+      <path id="cad-line-gunDeck" class="cad-leader-line" d="M0 0 L0 0" />
+      <path id="cad-line-rigging" class="cad-leader-line" d="M0 0 L0 0" />
+      <path id="cad-line-propulsor" class="cad-leader-line" d="M0 0 L0 0" />
+
+      <circle id="cad-dot-boiler" class="cad-anchor-dot" cx="0" cy="0" r="4" />
+      <circle id="cad-dot-sponsons" class="cad-anchor-dot" cx="0" cy="0" r="4" />
+      <circle id="cad-dot-gunDeck" class="cad-anchor-dot" cx="0" cy="0" r="4" />
+      <circle id="cad-dot-rigging" class="cad-anchor-dot" cx="0" cy="0" r="4" />
+      <circle id="cad-dot-propulsor" class="cad-anchor-dot" cx="0" cy="0" r="4" />
+    </svg>
+
+    <div class="cad-pins-container">
+      <button id="cad-pin-boiler" class="cad-pin" type="button" data-sub="boiler">
+        <div class="cad-pin-head"><span>01 · BOILER</span><span class="pin-hp">100%</span></div>
+        <div class="cad-pin-hp-bar"><div class="cad-pin-hp-fill"></div></div>
+        <div class="cad-pin-foot"><span>15.5-BAR CORE</span><span class="cad-pin-tag">NOMINAL</span></div>
+      </button>
+
+      <button id="cad-pin-sponsons" class="cad-pin" type="button" data-sub="sponsons">
+        <div class="cad-pin-head"><span>02 · SPONSONS</span><span class="pin-hp">100%</span></div>
+        <div class="cad-pin-hp-bar"><div class="cad-pin-hp-fill"></div></div>
+        <div class="cad-pin-foot"><span>AETHER LIFT</span><span class="cad-pin-tag">NOMINAL</span></div>
+      </button>
+
+      <button id="cad-pin-gunDeck" class="cad-pin" type="button" data-sub="gunDeck">
+        <div class="cad-pin-head"><span>03 · GUN DECK</span><span class="pin-hp">100%</span></div>
+        <div class="cad-pin-hp-bar"><div class="cad-pin-hp-fill"></div></div>
+        <div class="cad-pin-foot"><span>12 BRASS GUNS</span><span class="cad-pin-tag">NOMINAL</span></div>
+      </button>
+
+      <button id="cad-pin-rigging" class="cad-pin" type="button" data-sub="rigging">
+        <div class="cad-pin-head"><span>04 · RIGGING</span><span class="pin-hp">100%</span></div>
+        <div class="cad-pin-hp-bar"><div class="cad-pin-hp-fill"></div></div>
+        <div class="cad-pin-foot"><span>3-MAST SAILS</span><span class="cad-pin-tag">NOMINAL</span></div>
+      </button>
+
+      <button id="cad-pin-propulsor" class="cad-pin" type="button" data-sub="propulsor">
+        <div class="cad-pin-head"><span>05 · PROPULSOR</span><span class="pin-hp">100%</span></div>
+        <div class="cad-pin-hp-bar"><div class="cad-pin-hp-fill"></div></div>
+        <div class="cad-pin-foot"><span>KORT NOZZLE</span><span class="cad-pin-tag">NOMINAL</span></div>
+      </button>
+    </div>
+  </section>
+
+  <!-- 3. BOTTOM GUNNERY & HELM DECK -->
+  <footer class="bottom-helm-deck" aria-label="Broadside Gunnery & Quarterdeck Helm">
+    <!-- Port 6-Gun Battery -->
+    <div class="battery-card plate-card">
+      <div class="battery-head">
+        <span class="mono-tag">PORT BATTERY</span>
+        <span id="port-arc-badge" class="arc-badge">CLEAR ARC</span>
+      </div>
+      <button id="btn-fire-port" class="adm-btn fire-broadside-btn" type="button" title="Fire Port 6-Gun Broadside (Key Q)">
+        <span class="kbd-chip">Q</span>
+        <span>FIRE PORT</span>
+      </button>
+      <div class="reload-track">
+        <div id="port-reload-fill" class="reload-fill" data-ready="true"></div>
+      </div>
+      <div id="port-reload-status" class="mono-tag">READY · 6 GUNS</div>
+    </div>
+
+    <!-- Center Quarterdeck Helm, Wind Rose, Hull & Ordnance -->
+    <div class="helm-center-card plate-card">
+      <div class="wind-rose-wrap" title="Live Wind Vector (Cyan Arrow) vs Vessel Heading (Brass Needle)">
+        <svg class="wind-rose-svg" viewBox="-42 -42 84 84" aria-label="Admiralty Wind Rose Compass">
+          <circle cx="0" cy="0" r="35" fill="none" stroke="currentColor" stroke-opacity="0.24" stroke-width="1.2" />
+          <circle cx="0" cy="0" r="26" fill="none" stroke="currentColor" stroke-opacity="0.14" stroke-dasharray="2 3" stroke-width="1" />
+          <line x1="0" y1="-35" x2="0" y2="-30" stroke="currentColor" stroke-opacity="0.45" stroke-width="1.2" />
+          <line x1="35" y1="0" x2="30" y2="0" stroke="currentColor" stroke-opacity="0.3" stroke-width="1" />
+          <line x1="0" y1="35" x2="0" y2="30" stroke="currentColor" stroke-opacity="0.3" stroke-width="1" />
+          <line x1="-35" y1="0" x2="-30" y2="0" stroke="currentColor" stroke-opacity="0.3" stroke-width="1" />
+          <text x="0" y="-37" text-anchor="middle" font-size="7" font-family="monospace" fill="currentColor" opacity="0.65">N</text>
+
+          <!-- World Wind Vector Arrow (Emerald/Cyan) -->
+          <g id="wind-arrow-group">
+            <line x1="0" y1="24" x2="0" y2="-25" stroke="#38d9a9" stroke-width="2" stroke-dasharray="3 2" />
+            <polygon points="0,-31 -4.5,-21 4.5,-21" fill="#38d9a9" />
+          </g>
+
+          <!-- Ship Heading Silhouette Needle (Brass) -->
+          <g id="ship-heading-group">
+            <path d="M 0,-20 L 6,8 L 0,14 L -6,8 Z" fill="rgba(219,163,60,0.32)" stroke="#f4c867" stroke-width="1.6" />
+          </g>
+          <circle cx="0" cy="0" r="2.5" fill="#f4c867" />
+        </svg>
+        <div class="wind-rose-readout">
+          <span id="wind-knots-value">18.5 KT</span>
+          <span id="sail-trim-value">1.28x REACH</span>
+        </div>
+      </div>
+
+      <div class="helm-bars-and-ammo">
+        <div class="hull-throttle-grid">
+          <!-- Hull Integrity -->
+          <div class="stat-block">
+            <div class="stat-line">
+              <span>HULL · <strong id="hull-status-tag">NOMINAL</strong></span>
+              <span id="hull-value">100 / 100</span>
+            </div>
+            <div class="hull-track">
+              <div id="hull-bar-fill"></div>
+            </div>
+            <div class="helm-mini-controls">
+              <button id="btn-rudder-port" class="adm-btn mini-helm-btn" type="button" title="Rudder Port (Hold A)">◀ A PORT</button>
+              <span id="rudder-readout" class="mono-tag">HELM</span>
+              <button id="btn-rudder-starboard" class="adm-btn mini-helm-btn" type="button" title="Rudder Starboard (Hold D)">STBD D ▶</button>
+            </div>
+          </div>
+
+          <!-- Speed & Throttle -->
+          <div class="stat-block">
+            <div class="stat-line">
+              <span id="speed-knots-value">16.5 KTS</span>
+              <span>THROTTLE <strong id="throttle-pct-value">65%</strong></span>
+            </div>
+            <div class="hull-track">
+              <div id="throttle-bar-fill" class="gauge-fill" style="width:65%"></div>
+            </div>
+            <div class="helm-mini-controls">
+              <button id="btn-throttle-down" class="adm-btn mini-helm-btn" type="button" title="Reduce Throttle (Key S)">− S SLOW</button>
+              <span class="mono-tag">SAIL+KORT</span>
+              <button id="btn-throttle-up" class="adm-btn mini-helm-btn" type="button" title="Increase Throttle (Key W)">+ W FULL</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ordnance Ammo Selector -->
+        <div class="ammo-selector-row" role="group" aria-label="Broadside Ordnance Type">
+          <button id="btn-ammo-roundshot" class="adm-btn ammo-btn" type="button" data-active="true" title="Roundshot: 1.0x Heavy Hull Damage, High Velocity (Key 1)">
+            <span class="kbd-chip">1</span>
+            <span>ROUNDSHOT</span>
+          </button>
+          <button id="btn-ammo-chainshot" class="adm-btn ammo-btn" type="button" title="Chainshot: Cripples Enemy Speed & Turn by 50% for 7s (Key 2)">
+            <span class="kbd-chip">2</span>
+            <span>CHAINSHOT</span>
+          </button>
+          <button id="btn-ammo-aethershell" class="adm-btn ammo-btn" type="button" title="Aether-Shell: Pierces Armor, High Crit & 45% Fire Ignition (Key 3)">
+            <span class="kbd-chip">3</span>
+            <span>AETHER-SHELL</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Starboard 6-Gun Battery -->
+    <div class="battery-card plate-card">
+      <div class="battery-head">
+        <span class="mono-tag">STARBOARD BATTERY</span>
+        <span id="starboard-arc-badge" class="arc-badge">CLEAR ARC</span>
+      </div>
+      <button id="btn-fire-starboard" class="adm-btn fire-broadside-btn" type="button" title="Fire Starboard 6-Gun Broadside (Key E)">
+        <span>FIRE STBD</span>
+        <span class="kbd-chip">E</span>
+      </button>
+      <div class="reload-track">
+        <div id="starboard-reload-fill" class="reload-fill" data-ready="true"></div>
+      </div>
+      <div id="starboard-reload-status" class="mono-tag">READY · 6 GUNS</div>
+    </div>
+  </footer>
+
+  <!-- 5A. TITLE COMMISSION OVERLAY -->
+  <div id="title-overlay" class="modal-backdrop" data-hidden="false">
+    <div class="admiralty-plate-modal">
+      <span class="modal-corner-stamp tl">FIG. 08 // AETHERIC BROADSIDE</span>
+      <span class="modal-corner-stamp tr">ADMIRALTY CHARTER · 1889</span>
+
+      <div class="commission-kicker">TAPE NO. 08 · ROYAL AETHER-STEAM COMMISSION</div>
+      <h1 class="commission-heading">Aether Broadside</h1>
+      <p class="commission-lead">
+        Take the quarterdeck of <em>H.M.A.S. Flying Dutchman</em> across a storm-wracked cloud archipelago.
+        Trim three square-rigged masts to the shifting gale, balance <strong>15.5 bar</strong> of Scotch marine aether-steam,
+        and shatter four hostile waves culminating in the armored flagship <em>HMS Leviathan</em>.
+      </p>
+
+      <div class="briefing-grid">
+        <div class="briefing-cell">
+          <h4>Helm, Tacking &amp; Strata</h4>
+          <p><strong>W / S</strong> Throttle · <strong>A / D</strong> Rudder · <strong>R / F</strong> Climb/Descend Strata (offsetting enemy altitude cuts incoming hit accuracy by 40%).</p>
+        </div>
+        <div class="briefing-cell">
+          <h4>6-Gun Brass Broadsides</h4>
+          <p>Drag mouse to look abeam · <strong>Q</strong> Port / <strong>E</strong> Starboard volley · <strong>1</strong> Roundshot · <strong>2</strong> Chainshot · <strong>3</strong> Aether-Shell.</p>
+        </div>
+        <div class="briefing-cell">
+          <h4>15.5-Bar Scotch Boiler</h4>
+          <p>Route steam pips between Propulsion, Sponsons &amp; Ordnance. Press <strong>O</strong> for <strong>19.5-Bar Overpressure</strong> or <strong>V</strong> to Vent Steam &amp; douse fires.</p>
+        </div>
+        <div class="briefing-cell">
+          <h4>Isometric CAD Damage Control</h4>
+          <p>Press <strong>TAB</strong> mid-battle for live <strong>0.5x X-Ray Blueprint Mode</strong> — click any internal subsystem or callout pin to dispatch your 2 Engineer Crews.</p>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <a id="link-title-archive" class="adm-btn" href="./vault.html">← Return to Archive</a>
+        <button id="btn-weigh-anchor" class="cta-primary-btn" type="button">WEIGH ANCHOR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5B. VICTORY / SHIP SCUTTLED ADMIRALTY DISPATCH MODAL -->
+  <div id="dispatch-modal" class="modal-backdrop" data-hidden="true">
+    <div class="admiralty-plate-modal">
+      <span id="modal-stamp" class="modal-corner-stamp tl">ADMIRALTY VICTORY DISPATCH</span>
+      <span class="modal-corner-stamp tr">FIG. 08 // LOGBOOK SEALED</span>
+
+      <div class="commission-kicker">OFFICIAL LORDS COMMISSIONERS TELEGRAPH</div>
+      <h2 id="modal-title" class="commission-heading">Skies Secured</h2>
+      <p id="modal-subtitle" class="commission-lead">
+        HMS Leviathan has struck her colors beneath the cloud-sea. H.M.A.S. Flying Dutchman holds command of the high strata.
+      </p>
+
+      <div class="dispatch-metrics">
+        <div class="metric-box">
+          <span class="m-lbl">COMMENDATION</span>
+          <span id="modal-rank" class="m-val gold">S</span>
+        </div>
+        <div class="metric-box">
+          <span class="m-lbl">PRIZE SCORE</span>
+          <span id="modal-score" class="m-val gold">0</span>
+        </div>
+        <div class="metric-box">
+          <span class="m-lbl">WAVES CLEARED</span>
+          <span id="modal-waves" class="m-val accent">4 / 4</span>
+        </div>
+        <div class="metric-box">
+          <span class="m-lbl">HULL INTEGRITY</span>
+          <span id="modal-hull" class="m-val">100%</span>
+        </div>
+        <div class="metric-box">
+          <span class="m-lbl">VESSELS SUNK</span>
+          <span id="modal-sunk" class="m-val">0</span>
+        </div>
+        <div class="metric-box">
+          <span class="m-lbl">BROADSIDES</span>
+          <span id="modal-broadsides" class="m-val">0</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <a id="link-modal-archive" class="adm-btn" href="./vault.html">← Return to Archive</a>
+        <button id="btn-sail-again" class="cta-primary-btn" type="button">SAIL AGAIN</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./aether-broadside.js"></script>
+</body>
+</html>

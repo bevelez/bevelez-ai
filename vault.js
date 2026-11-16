@@ -89,13 +89,82 @@ const TAPES = [
     hubColor: 0xe6c886,
     artStyle: 'dutchman',
     dualTheme3D: true
+  },
+  {
+    id: '07',
+    indexMeta: 'No. 07 — 107.7 FM Mountain View · 118 BPM',
+    title: 'Pirate Frequency',
+    desc: 'A cel-shaded hoverboard courier run across dusk Mountain View. Carve city blocks, grind neon highway overpasses and Castro Street rails, and land bootleg cassette drops on the 118 BPM beat to un-mute all four funk and breakbeat broadcast stems before sign-off.',
+    unlocked: true,
+    url: './pirate-frequency.html',
+    ctaLabel: 'Start Broadcast',
+    shellColor: 0xd9480f,
+    shellAttenuation: 0x6e1d04,
+    ribColor: 0xa63208,
+    hubColor: 0xffe042,
+    artStyle: 'pirate'
+  },
+  {
+    id: '08',
+    indexMeta: 'No. 08 — Cloud-Sea Gunnery & CAD, 1889 · 6/8',
+    title: 'Aether Broadside',
+    desc: 'Command the 1889 aether-steam galleon across four cloud-sea naval waves: balance the 15.5-bar Scotch boiler across propulsion, lift and ordnance, unleash six-gun port and starboard brass broadsides, and toggle live into isometric X-ray CAD view to dispatch repair crews and vent steam.',
+    unlocked: true,
+    url: './aether-broadside.html',
+    ctaLabel: 'Weigh Anchor',
+    shellColor: 0x16322c,
+    shellAttenuation: 0x071512,
+    ribColor: 0x0f241f,
+    hubColor: 0xe0bc75,
+    artStyle: 'broadside'
+  },
+  {
+    id: '09',
+    indexMeta: 'No. 09 — Synesthetic Rail-Shooter · 124 BPM',
+    title: 'Harmonic Lock',
+    desc: 'Fly a three-form evolving vector craft through four architectural and Fourier spline megastructures, sweeping an eight-slot paint-lock reticle so every homing salvo and detonation plays quantized 16th-note percussion and synth harmony against SERAPH-IX.',
+    unlocked: true,
+    url: './harmonic-lock.html',
+    ctaLabel: 'Initiate Sync',
+    shellColor: 0x0f3d63,
+    shellAttenuation: 0x04182b,
+    ribColor: 0x0a2b46,
+    hubColor: 0x00f0ff,
+    artStyle: 'harmonic'
   }
 ];
 
 // ============================================================================
-// 2. PER-STAGE BOUND THREE.JS SCENE & RENDERER FACTORY
+// 2. SINGLE SHARED OFFSCREEN WEBGL RENDERER & PMREM ENVIRONMENT
 // ============================================================================
-const isMobile = window.innerWidth < 900 || (navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+const isMobile = window.innerWidth < 900 || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && window.innerWidth < 1024);
+
+function getStagePixelRatio() {
+  const dpr = Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+    ? window.devicePixelRatio
+    : 1;
+  return Math.min(dpr, isMobile ? 1.5 : 2);
+}
+
+let sharedRenderW = 520;
+let sharedRenderH = 248;
+let sharedRenderDpr = getStagePixelRatio();
+
+const sharedRenderer = new THREE.WebGLRenderer({
+  antialias: true,
+  alpha: true,
+  powerPreference: 'high-performance'
+});
+sharedRenderer.setPixelRatio(sharedRenderDpr);
+sharedRenderer.setSize(sharedRenderW, sharedRenderH, false);
+sharedRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+sharedRenderer.toneMappingExposure = 1.12;
+
+const pmremGenerator = new THREE.PMREMGenerator(sharedRenderer);
+const roomEnv = new RoomEnvironment();
+const sharedEnvTexture = pmremGenerator.fromScene(roomEnv, 0.04).texture;
+roomEnv.dispose();
+pmremGenerator.dispose();
 
 function createShadowTexture() {
   const c = document.createElement('canvas');
@@ -1013,6 +1082,681 @@ function drawFlyingDutchmanArtwork(ctx) {
   ctx.stroke();
 }
 
+function drawPirateFrequencyArtwork(ctx) {
+  // 1. Deep nocturnal indigo-to-sunset broadcast sky backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#0b0719');
+  bg.addColorStop(0.52, '#220e38');
+  bg.addColorStop(0.84, '#681938');
+  bg.addColorStop(1, '#b83714');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Sunset FM transmitter radial wash on the upper-right flank
+  const sunsetGlow = ctx.createRadialGradient(904, 138, 8, 904, 138, 195);
+  sunsetGlow.addColorStop(0, 'rgba(255, 224, 66, 0.34)');
+  sunsetGlow.addColorStop(0.45, 'rgba(255, 107, 26, 0.22)');
+  sunsetGlow.addColorStop(0.75, 'rgba(0, 240, 255, 0.10)');
+  sunsetGlow.addColorStop(1, 'rgba(11, 7, 25, 0)');
+  ctx.fillStyle = sunsetGlow;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Zine diagonal speed-screen texture across upper-right sky
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 224, 66, 0.08)';
+  ctx.lineWidth = 1.2;
+  for (let sx = 540; sx < 1020; sx += 22) {
+    ctx.beginPath();
+    ctx.moveTo(sx, 28);
+    ctx.lineTo(sx - 64, 160);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  // 2. Right Flank (x = 825..985): Pirate Radio Mast, FM Wave Rings & Cassette Hoverboard Deck
+  ctx.save();
+  const mastX = 906;
+  const beaconY = 104;
+
+  // Concentric cyan & gold FM broadcast wave arcs radiating from tower beacon
+  [24, 40, 56, 72].forEach((rad, i) => {
+    ctx.strokeStyle = i % 2 === 0 ? '#00f0ff' : '#ffe042';
+    ctx.lineWidth = i < 2 ? 2.6 : 1.9;
+    ctx.beginPath();
+    ctx.arc(mastX, beaconY, rad, -0.58, 0.58);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(mastX, beaconY, rad, Math.PI - 0.58, Math.PI + 0.58);
+    ctx.stroke();
+  });
+
+  // Steel-ink & gold lattice broadcast tower
+  ctx.strokeStyle = '#ffe042';
+  ctx.lineWidth = 2.6;
+  ctx.beginPath();
+  ctx.moveTo(mastX - 28, 268);
+  ctx.lineTo(mastX - 4, beaconY + 8);
+  ctx.moveTo(mastX + 28, 268);
+  ctx.lineTo(mastX + 4, beaconY + 8);
+  ctx.moveTo(mastX, beaconY + 8);
+  ctx.lineTo(mastX, beaconY - 12);
+  ctx.stroke();
+
+  // Lattice cross-bracing struts
+  ctx.strokeStyle = 'rgba(248, 247, 255, 0.82)';
+  ctx.lineWidth = 1.6;
+  const tiers = [
+    [136, 8],
+    [168, 13],
+    [202, 18],
+    [236, 23]
+  ];
+  for (let t = 0; t < tiers.length; t++) {
+    const [ty, halfSpan] = tiers[t];
+    ctx.beginPath();
+    ctx.moveTo(mastX - halfSpan, ty);
+    ctx.lineTo(mastX + halfSpan, ty);
+    if (t < tiers.length - 1) {
+      const [ny, nextSpan] = tiers[t + 1];
+      ctx.moveTo(mastX - halfSpan, ty);
+      ctx.lineTo(mastX + nextSpan, ny);
+      ctx.moveTo(mastX + halfSpan, ty);
+      ctx.lineTo(mastX - nextSpan, ny);
+    }
+    ctx.stroke();
+  }
+
+  // Hot-magenta & cyan transmitter beacon bulb
+  ctx.fillStyle = '#ff2a85';
+  ctx.beginPath();
+  ctx.arc(mastX, beaconY, 6.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(mastX, beaconY, 2.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Neon overpass grind rail + spark burst beneath hoverboard
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(826, 356);
+  ctx.lineTo(984, 326);
+  ctx.stroke();
+
+  // Grind sparks at contact point
+  ctx.strokeStyle = '#ffe042';
+  ctx.lineWidth = 2.2;
+  [
+    [872, 344, 846, 334],
+    [876, 344, 854, 362],
+    [934, 334, 958, 348]
+  ].forEach(([x0, y0, x1, y1]) => {
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y1);
+    ctx.stroke();
+  });
+
+  // Angled cel-shaded Cassette Hoverboard Deck
+  ctx.save();
+  ctx.translate(906, 314);
+  ctx.rotate(-0.18);
+
+  // Anti-grav cyan thruster pads under nose & tail
+  [-50, 50].forEach((tx) => {
+    ctx.strokeStyle = '#1aff9c';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.ellipse(tx, 18, 15, 5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  });
+
+  // Hoverboard deck body with ink outline
+  ctx.fillStyle = '#ff6b1a';
+  ctx.strokeStyle = '#09080f';
+  ctx.lineWidth = 4;
+  roundedRectPath(ctx, -74, -18, 148, 34, 16);
+  ctx.fill();
+  ctx.stroke();
+
+  // Yellow zine racing stripe + embedded twin cassette reels
+  ctx.fillStyle = '#ffe042';
+  roundedRectPath(ctx, -54, -10, 108, 18, 7);
+  ctx.fill();
+
+  [-22, 22].forEach((rx) => {
+    ctx.fillStyle = '#09080f';
+    ctx.beginPath();
+    ctx.arc(rx, -1, 6.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#00f0ff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  });
+  ctx.restore();
+  ctx.restore();
+
+  // 3. Lower Frieze (y = 396..464): 4-Stem Spectrum Analyzer (DRUMS · BASS · RHODES · LEAD)
+  ctx.fillStyle = '#070510';
+  ctx.fillRect(16, 396, 992, 68);
+  ctx.strokeStyle = '#ffe042';
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  const stems = [
+    { name: 'DRUMS', color: '#ff6b1a', bars: [26, 18, 30, 14, 24] },
+    { name: 'BASS', color: '#00f0ff', bars: [22, 28, 20, 26, 16] },
+    { name: 'RHODES', color: '#ffe042', bars: [16, 24, 29, 21, 18] },
+    { name: 'LEAD', color: '#ff2a85', bars: [20, 31, 25, 28, 22] }
+  ];
+  ctx.save();
+  ctx.font = '700 10px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  stems.forEach((stem, sIdx) => {
+    const groupX = 258 + sIdx * 126;
+    stem.bars.forEach((bh, bIdx) => {
+      const bx = groupX + bIdx * 14;
+      ctx.fillStyle = stem.color;
+      ctx.fillRect(bx, 439 - bh, 9, bh);
+      ctx.fillStyle = '#fff8e7';
+      ctx.fillRect(bx, 436 - bh, 9, 2);
+    });
+    ctx.fillStyle = 'rgba(248, 247, 255, 0.84)';
+    ctx.fillText(stem.name, groupX + 32, 455);
+  });
+  ctx.restore();
+
+  // 4. Editorial / Pirate Zine Typography
+  ctx.fillStyle = '#00f0ff';
+  ctx.font = '700 16px "JetBrains Mono", monospace';
+  ctx.fillText('107.7 FM // MOUNTAIN VIEW  ·  BOOTLEG COURIER', 56, 62);
+
+  // Zine offset ink + hot-tangerine print shadow on bold italic title
+  ctx.save();
+  ctx.font = 'italic 600 62px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillStyle = '#09080f';
+  ctx.fillText('Pirate Frequency', 58, 134);
+  ctx.fillStyle = '#ff6b1a';
+  ctx.fillText('Pirate Frequency', 56, 132);
+  ctx.fillStyle = '#fff8e7';
+  ctx.fillText('Pirate Frequency', 54, 130);
+  ctx.restore();
+
+  // Left-flank metadata (strictly clear of winX = 216)
+  ctx.fillStyle = '#ffe042';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('107.7 FM LIVE', 56, 242);
+  ctx.fillStyle = 'rgba(248, 247, 255, 0.78)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('HOVERBOARD', 56, 268);
+  ctx.fillText('RAIL GRIND', 56, 292);
+  ctx.fillText('ON-BEAT DROP', 56, 316);
+
+  ctx.fillStyle = '#ffe042';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('NO. 07', 56, 436);
+  ctx.textAlign = 'right';
+  ctx.fillText('118 BPM · 4-STEM', 968, 436);
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = 'rgba(255, 224, 66, 0.68)';
+  ctx.lineWidth = 3;
+  roundedRectPath(ctx, 26, 24, 972, 432, 20);
+  ctx.stroke();
+}
+
+function drawAetherBroadsideArtwork(ctx) {
+  // 1. Dark Admiralty Slate-Emerald Technical Plate Backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#050b0a');
+  bg.addColorStop(0.55, '#0c1c19');
+  bg.addColorStop(1, '#16302a');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Subtle brass & aether glow over right gunnery plate
+  const plateGlow = ctx.createRadialGradient(904, 195, 10, 904, 195, 195);
+  plateGlow.addColorStop(0, 'rgba(56, 217, 169, 0.26)');
+  plateGlow.addColorStop(0.55, 'rgba(224, 188, 117, 0.14)');
+  plateGlow.addColorStop(1, 'rgba(5, 11, 10, 0)');
+  ctx.fillStyle = plateGlow;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Isometric X-Ray CAD drafting grid on right plate
+  ctx.save();
+  ctx.strokeStyle = 'rgba(224, 188, 117, 0.08)';
+  ctx.lineWidth = 1;
+  for (let gx = 520; gx < 1000; gx += 28) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 32);
+    ctx.lineTo(gx, 392);
+    ctx.stroke();
+  }
+  for (let gy = 44; gy < 390; gy += 28) {
+    ctx.beginPath();
+    ctx.moveTo(520, gy);
+    ctx.lineTo(1000, gy);
+    ctx.stroke();
+  }
+
+  // 2. Right Flank Upper (x = 825..985, y = 78..236): Drafted Compass Rose + 6-Gun Trajectory Fan
+  const roseX = 906;
+  const roseY = 156;
+
+  // Concentric brass compass rings
+  ctx.strokeStyle = 'rgba(224, 188, 117, 0.78)';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.arc(roseX, roseY, 54, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(56, 217, 169, 0.45)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(roseX, roseY, 42, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // 16 azimuth degree ticks around outer rose
+  ctx.strokeStyle = '#e0bc75';
+  for (let i = 0; i < 16; i++) {
+    const a = (i / 16) * Math.PI * 2;
+    const r0 = i % 4 === 0 ? 45 : 49;
+    ctx.lineWidth = i % 4 === 0 ? 2.2 : 1.1;
+    ctx.beginPath();
+    ctx.moveTo(roseX + Math.cos(a) * r0, roseY + Math.sin(a) * r0);
+    ctx.lineTo(roseX + Math.cos(a) * 54, roseY + Math.sin(a) * 54);
+    ctx.stroke();
+  }
+
+  // 8-point drafted compass star
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const tipR = i % 2 === 0 ? 36 : 22;
+    ctx.strokeStyle = i % 2 === 0 ? '#f4f0e6' : 'rgba(224, 188, 117, 0.75)';
+    ctx.lineWidth = i % 2 === 0 ? 2.0 : 1.3;
+    ctx.beginPath();
+    ctx.moveTo(roseX, roseY);
+    ctx.lineTo(roseX + Math.cos(a) * tipR, roseY + Math.sin(a) * tipR);
+    ctx.stroke();
+  }
+
+  // 6-Gun Starboard Broadside Parabolic Trajectory Fan arcing right-upward
+  for (let g = 0; g < 6; g++) {
+    const spread = (g - 2.5) * 0.14;
+    const startX = roseX - 10;
+    const startY = roseY + (g - 2.5) * 5.5;
+    const endX = roseX + Math.cos(-0.22 + spread) * 70;
+    const endY = roseY + Math.sin(-0.22 + spread) * 66;
+    const ctrlX = (startX + endX) * 0.5 + 8;
+    const ctrlY = (startY + endY) * 0.5 - 12;
+
+    ctx.strokeStyle = g % 2 === 0 ? 'rgba(255, 174, 82, 0.88)' : 'rgba(56, 217, 169, 0.82)';
+    ctx.lineWidth = 1.7;
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.quadraticCurveTo(ctrlX, ctrlY, endX, endY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.arc(endX, endY, 2.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Top-down galleon hull icon at center of compass rose
+  ctx.fillStyle = '#091513';
+  ctx.strokeStyle = '#e0bc75';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.moveTo(roseX, roseY - 18);
+  ctx.quadraticCurveTo(roseX + 9, roseY - 4, roseX + 7, roseY + 16);
+  ctx.lineTo(roseX - 7, roseY + 16);
+  ctx.quadraticCurveTo(roseX - 9, roseY - 4, roseX, roseY - 18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // 3. Right Flank Lower (x = 842..970, y = 250..366): 15.5-Bar Scotch Boiler Gauge Dial
+  const dialX = 906;
+  const dialY = 312;
+  const dialR = 46;
+
+  ctx.fillStyle = '#081210';
+  ctx.strokeStyle = '#e0bc75';
+  ctx.lineWidth = 3.0;
+  ctx.beginPath();
+  ctx.arc(dialX, dialY, dialR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+
+  // Green operating arc (0..15.5 bar) + crimson 19.5 bar overpressure arc
+  ctx.strokeStyle = '#38d9a9';
+  ctx.lineWidth = 4.5;
+  ctx.beginPath();
+  ctx.arc(dialX, dialY, dialR - 8, Math.PI * 0.78, Math.PI * 1.88);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ff6b6b';
+  ctx.lineWidth = 4.5;
+  ctx.beginPath();
+  ctx.arc(dialX, dialY, dialR - 8, Math.PI * 1.90, Math.PI * 2.22);
+  ctx.stroke();
+
+  // Gauge needle pointing to 15.5 BAR
+  const needleAngle = Math.PI * 1.84;
+  ctx.strokeStyle = '#f4f0e6';
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(dialX, dialY);
+  ctx.lineTo(dialX + Math.cos(needleAngle) * (dialR - 13), dialY + Math.sin(needleAngle) * (dialR - 13));
+  ctx.stroke();
+
+  ctx.fillStyle = '#e0bc75';
+  ctx.beginPath();
+  ctx.arc(dialX, dialY, 4.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#f4f0e6';
+  ctx.font = '600 11px "JetBrains Mono", monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('15.5 BAR', dialX, dialY + 26);
+  ctx.textAlign = 'left';
+  ctx.restore();
+
+  // 4. Lower Frieze (y = 396..464): 15.5-Bar Boiler Allocation Pips (PROP · LIFT · ORD)
+  ctx.fillStyle = '#040908';
+  ctx.fillRect(16, 396, 992, 68);
+  ctx.strokeStyle = '#e0bc75';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  const channels = [
+    { label: 'PROP', lit: 5, total: 6, color: '#38d9a9' },
+    { label: 'LIFT', lit: 4, total: 6, color: '#6b9bff' },
+    { label: 'ORD', lit: 6, total: 6, color: '#f4c867' }
+  ];
+  ctx.save();
+  ctx.font = '600 12px "JetBrains Mono", monospace';
+  channels.forEach((ch, cIdx) => {
+    const baseX = 252 + cIdx * 172;
+    ctx.fillStyle = '#e0bc75';
+    ctx.fillText(ch.label, baseX, 435);
+    for (let p = 0; p < ch.total; p++) {
+      const px = baseX + 46 + p * 16;
+      const py = 421;
+      if (p < ch.lit) {
+        ctx.fillStyle = ch.color;
+        ctx.fillRect(px, py, 11, 18);
+      } else {
+        ctx.strokeStyle = 'rgba(224, 188, 117, 0.42)';
+        ctx.lineWidth = 1.4;
+        ctx.strokeRect(px, py, 11, 18);
+      }
+    }
+  });
+  ctx.restore();
+
+  // 5. Editorial Typography & Admiralty Plate Metadata
+  ctx.fillStyle = '#38d9a9';
+  ctx.font = '500 16px "JetBrains Mono", monospace';
+  ctx.fillText('CLOUD-SEA TACTICAL DUEL, 1889  ·  3D & CAD X-RAY', 56, 62);
+
+  ctx.fillStyle = '#f4f0e6';
+  ctx.font = 'italic 600 60px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillText('Aether Broadside', 54, 128);
+
+  ctx.fillStyle = '#e0bc75';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('6-GUN VOLLEY', 56, 242);
+  ctx.fillStyle = 'rgba(244, 240, 230, 0.78)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('15.5 BAR BOILER', 56, 268);
+  ctx.fillText('4 NAVAL WAVES', 56, 292);
+  ctx.fillText('X-RAY REPAIR', 56, 316);
+
+  ctx.fillStyle = '#e0bc75';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('NO. 08', 56, 436);
+  ctx.textAlign = 'right';
+  ctx.fillText('3D HELM · X-RAY CAD', 968, 436);
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = 'rgba(224, 188, 117, 0.65)';
+  ctx.lineWidth = 3;
+  roundedRectPath(ctx, 26, 24, 972, 432, 20);
+  ctx.stroke();
+}
+
+function drawHarmonicLockArtwork(ctx) {
+  // 1. Deep Void-Cyan Phosphor Vector Backdrop
+  const bg = ctx.createLinearGradient(0, 0, 1024, 480);
+  bg.addColorStop(0, '#03050c');
+  bg.addColorStop(0.55, '#061329');
+  bg.addColorStop(1, '#0b2242');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Dual synesthetic bloom auras: crimson-magenta boss core + cyan reticle
+  const bossAura = ctx.createRadialGradient(906, 124, 6, 906, 124, 150);
+  bossAura.addColorStop(0, 'rgba(255, 42, 133, 0.36)');
+  bossAura.addColorStop(0.5, 'rgba(255, 209, 102, 0.14)');
+  bossAura.addColorStop(1, 'rgba(3, 5, 12, 0)');
+  ctx.fillStyle = bossAura;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  const reticleAura = ctx.createRadialGradient(906, 298, 6, 906, 298, 140);
+  reticleAura.addColorStop(0, 'rgba(0, 240, 255, 0.30)');
+  reticleAura.addColorStop(0.55, 'rgba(26, 255, 178, 0.10)');
+  reticleAura.addColorStop(1, 'rgba(3, 5, 12, 0)');
+  ctx.fillStyle = reticleAura;
+  ctx.fillRect(0, 0, 1024, 480);
+
+  // Perspective phosphor spline lattice across right void
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 240, 255, 0.11)';
+  ctx.lineWidth = 1;
+  for (let gx = 520; gx <= 996; gx += 34) {
+    ctx.beginPath();
+    ctx.moveTo(gx, 28);
+    ctx.lineTo(gx, 392);
+    ctx.stroke();
+  }
+  for (let gy = 40; gy <= 388; gy += 28) {
+    ctx.beginPath();
+    ctx.moveTo(520, gy);
+    ctx.lineTo(996, gy);
+    ctx.stroke();
+  }
+
+  // 2. Right Flank (x = 825..985): 8-Octagon Paint-Lock Reticle + Bézier Homing Salvo -> Boss Core
+  const bossX = 906;
+  const bossY = 122;
+  const retX = 906;
+  const retY = 298;
+  const retR = 44;
+
+  // Curving Magenta / Cyan / Gold Bézier Homing Ribbons from 8 octagon nodes to SERAPH-IX core
+  const ribbonColors = [
+    '#00f0ff', '#ff2a85', '#ffd166', '#1affb2',
+    '#00f0ff', '#ff2a85', '#ffd166', '#1affb2'
+  ];
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const sx = retX + Math.cos(a) * retR;
+    const sy = retY + Math.sin(a) * retR;
+    const side = sx >= retX ? 1 : -1;
+    const bow = (i % 2 === 0 ? 48 : 30) * side;
+    const midX = (sx + bossX) * 0.5 + bow;
+    const midY = (sy + bossY) * 0.5;
+
+    ctx.strokeStyle = ribbonColors[i];
+    ctx.lineWidth = 2.1;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.quadraticCurveTo(midX, midY, bossX, bossY);
+    ctx.stroke();
+  }
+
+  // Icosahedral Boss Core (SERAPH-IX) at (bossX, bossY)
+  const icoOuterR = 34;
+  const icoInnerR = 17;
+  const outerPts = [];
+  const innerPts = [];
+  for (let v = 0; v < 6; v++) {
+    const oa = (v / 6) * Math.PI * 2 - Math.PI / 2;
+    const ia = oa + Math.PI / 6;
+    outerPts.push([bossX + Math.cos(oa) * icoOuterR, bossY + Math.sin(oa) * icoOuterR]);
+    innerPts.push([bossX + Math.cos(ia) * icoInnerR, bossY + Math.sin(ia) * icoInnerR]);
+  }
+
+  // Faceted wireframe cage
+  ctx.fillStyle = 'rgba(12, 18, 38, 0.85)';
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  outerPts.forEach(([px, py], idx) => {
+    if (idx === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let v = 0; v < 6; v++) {
+    const [ox, oy] = outerPts[v];
+    const [ix, iy] = innerPts[v];
+    const [nx, ny] = innerPts[(v + 5) % 6];
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(ix, iy);
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(nx, ny);
+    ctx.moveTo(ix, iy);
+    ctx.lineTo(innerPts[(v + 1) % 6][0], innerPts[(v + 1) % 6][1]);
+  }
+  ctx.stroke();
+
+  // Singularity magenta core
+  ctx.fillStyle = '#ff2a85';
+  ctx.beginPath();
+  ctx.arc(bossX, bossY, 8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e8f9ff';
+  ctx.beginPath();
+  ctx.arc(bossX, bossY, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 8-Octagon Paint-Lock Reticle at (retX, retY)
+  [retR, retR * 0.58].forEach((radius, rIdx) => {
+    ctx.strokeStyle = rIdx === 0 ? '#00f0ff' : '#ffd166';
+    ctx.lineWidth = rIdx === 0 ? 2.4 : 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 - Math.PI / 2 + (rIdx * Math.PI) / 8;
+      const vx = retX + Math.cos(a) * radius;
+      const vy = retY + Math.sin(a) * radius;
+      if (i === 0) ctx.moveTo(vx, vy);
+      else ctx.lineTo(vx, vy);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  });
+
+  // 8 Paint-Lock Octet Nodes + center crosshair
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 - Math.PI / 2;
+    const vx = retX + Math.cos(a) * retR;
+    const vy = retY + Math.sin(a) * retR;
+    ctx.fillStyle = ribbonColors[i];
+    ctx.beginPath();
+    ctx.arc(vx, vy, 4.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.strokeStyle = '#e8f9ff';
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(retX - 9, retY);
+  ctx.lineTo(retX + 9, retY);
+  ctx.moveTo(retX, retY - 9);
+  ctx.lineTo(retX, retY + 9);
+  ctx.stroke();
+  ctx.restore();
+
+  // 3. Lower Frieze (y = 396..464): 16-Step Quantized Harmonic Pulse Sequencer Grid
+  ctx.fillStyle = '#02040a';
+  ctx.fillRect(16, 396, 992, 68);
+  ctx.strokeStyle = '#00f0ff';
+  ctx.lineWidth = 2.0;
+  ctx.beginPath();
+  ctx.moveTo(16, 396);
+  ctx.lineTo(1008, 396);
+  ctx.stroke();
+
+  // 16th-note step matrix (3 harmonic voices x 16 steps across x = 254..746)
+  const voiceRows = [
+    { y: 409, color: '#00f0ff', pattern: [1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 1, 0, 1] },
+    { y: 424, color: '#ffd166', pattern: [0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0] },
+    { y: 439, color: '#ff2a85', pattern: [1, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1] }
+  ];
+  for (let step = 0; step < 16; step++) {
+    const sx = 254 + step * 31;
+    const isBeat = step % 4 === 0;
+    voiceRows.forEach((row) => {
+      if (row.pattern[step]) {
+        ctx.fillStyle = row.color;
+        ctx.fillRect(sx, row.y, 22, 10);
+      } else {
+        ctx.strokeStyle = isBeat ? 'rgba(0, 240, 255, 0.42)' : 'rgba(232, 249, 255, 0.16)';
+        ctx.lineWidth = 1.1;
+        ctx.strokeRect(sx, row.y, 22, 10);
+      }
+    });
+  }
+
+  // 4. Editorial Typography & Synesthetic Telemetry Metadata
+  ctx.fillStyle = '#00f0ff';
+  ctx.font = '500 16px "JetBrains Mono", monospace';
+  ctx.fillText('SYNESTHETIC SPLINE SHOOTER  ·  QUANTIZED 124 BPM', 56, 62);
+
+  ctx.save();
+  ctx.fillStyle = '#e8f9ff';
+  ctx.shadowColor = 'rgba(0, 240, 255, 0.38)';
+  ctx.shadowBlur = 12;
+  ctx.font = 'italic 600 62px "Cormorant Garamond", "Georgia", serif';
+  ctx.fillText('Harmonic Lock', 54, 130);
+  ctx.restore();
+
+  ctx.fillStyle = '#ffd166';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('PAINT-LOCK', 56, 242);
+  ctx.fillStyle = 'rgba(232, 249, 255, 0.78)';
+  ctx.font = '400 14px "JetBrains Mono", monospace';
+  ctx.fillText('3 EVO FORMS', 56, 268);
+  ctx.fillText('4 SPLINE AREAS', 56, 292);
+  ctx.fillText('1/16 QUANTIZED', 56, 316);
+
+  ctx.fillStyle = '#00f0ff';
+  ctx.font = '500 15px "JetBrains Mono", monospace';
+  ctx.fillText('NO. 09', 56, 436);
+  ctx.textAlign = 'right';
+  ctx.fillText('8-LOCK · SERAPH-IX', 968, 436);
+  ctx.textAlign = 'left';
+
+  ctx.strokeStyle = 'rgba(0, 240, 255, 0.62)';
+  ctx.lineWidth = 3;
+  roundedRectPath(ctx, 26, 24, 972, 432, 20);
+  ctx.stroke();
+}
+
 function createCassetteStickerTexture(tape) {
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
@@ -1033,6 +1777,12 @@ function createCassetteStickerTexture(tape) {
     drawKronosArtwork(ctx);
   } else if (tape.artStyle === 'dutchman') {
     drawFlyingDutchmanArtwork(ctx);
+  } else if (tape.artStyle === 'pirate') {
+    drawPirateFrequencyArtwork(ctx);
+  } else if (tape.artStyle === 'broadside') {
+    drawAetherBroadsideArtwork(ctx);
+  } else if (tape.artStyle === 'harmonic') {
+    drawHarmonicLockArtwork(ctx);
   } else {
     drawMountainViewArtwork(ctx);
   }
@@ -1050,8 +1800,17 @@ function createCassetteStickerTexture(tape) {
   ctx.fill();
   ctx.restore();
 
+  const windowStrokeColors = {
+    pirate: '#ffe042',
+    broadside: '#e0bc75',
+    harmonic: '#00f0ff',
+    kronos: '#ffe042',
+    dutchman: '#e6c886',
+    drive: '#ffbe76'
+  };
+
   ctx.save();
-  ctx.strokeStyle = '#c8ad78';
+  ctx.strokeStyle = windowStrokeColors[tape.artStyle] || '#c8ad78';
   ctx.lineWidth = 6;
   roundedRectPath(ctx, winX, winY, winW, winH, winR);
   ctx.stroke();
@@ -1234,24 +1993,16 @@ function buildCassetteInstance(tape, stageEl) {
   const itemCamera = new THREE.PerspectiveCamera(32, 1.5, 0.5, 50);
   itemCamera.position.set(0, 0.08, 8.2);
 
-  const itemRenderer = new THREE.WebGLRenderer({
-    antialias: true,
-    alpha: true,
-    powerPreference: 'high-performance'
-  });
+  const stageCanvas = document.createElement('canvas');
   const initW = Math.max(1, stageEl.clientWidth || 520);
-  const initH = Math.max(1, stageEl.clientHeight || 320);
-  itemRenderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
-  itemRenderer.setSize(initW, initH, false);
-  itemRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-  itemRenderer.toneMappingExposure = 1.12;
-  stageEl.appendChild(itemRenderer.domElement);
+  const initH = Math.max(1, stageEl.clientHeight || 248);
+  const dpr = getStagePixelRatio();
+  stageCanvas.width = Math.max(1, Math.floor(initW * dpr));
+  stageCanvas.height = Math.max(1, Math.floor(initH * dpr));
+  const stageCtx = stageCanvas.getContext('2d');
+  stageEl.appendChild(stageCanvas);
 
-  const pmremGenerator = new THREE.PMREMGenerator(itemRenderer);
-  const roomEnv = new RoomEnvironment();
-  itemScene.environment = pmremGenerator.fromScene(roomEnv, 0.04).texture;
-  roomEnv.dispose();
-  pmremGenerator.dispose();
+  itemScene.environment = sharedEnvTexture;
 
   itemScene.add(new THREE.AmbientLight(0xffffff, 1.25));
 
@@ -1418,7 +2169,7 @@ function buildCassetteInstance(tape, stageEl) {
   stickerBackMesh.rotation.y = Math.PI;
   root.add(stickerBackMesh);
 
-  return { root, reels, guideRollers, itemScene, itemCamera, itemRenderer, floorShadow };
+  return { root, reels, guideRollers, itemScene, itemCamera, floorShadow, stageCanvas, stageCtx };
 }
 
 // ============================================================================
@@ -1472,6 +2223,8 @@ const tapeItems = TAPES.map((tape, idx) => {
   const stageEl = cardEl.querySelector('.tape-stage');
   const model = buildCassetteInstance(tape, stageEl);
 
+  const isCenterpieceOddLast = idx === TAPES.length - 1 && TAPES.length % 2 === 1;
+
   const item = {
     tape,
     idx,
@@ -1483,26 +2236,28 @@ const tapeItems = TAPES.map((tape, idx) => {
     dragDistance: 0,
     prevX: 0,
     prevY: 0,
-    rotY: (idx % 2 === 0 ? -0.22 : 0.22),
+    rotY: isCenterpieceOddLast ? 0 : (idx % 2 === 0 ? -0.22 : 0.22),
     rotX: 0.08,
     hoverOffsetX: 0,
-    hoverOffsetY: 0
+    hoverOffsetY: 0,
+    hasRenderedInitialFrame: false,
+    needsRedraw: true
   };
 
-  const ro = new ResizeObserver(() => {
-    const w = Math.max(1, stageEl.clientWidth);
-    const h = Math.max(1, stageEl.clientHeight);
-    model.itemRenderer.setSize(w, h, false);
-  });
-  ro.observe(stageEl);
+  if (typeof ResizeObserver !== 'undefined') {
+    const ro = new ResizeObserver(() => {
+      item.needsRedraw = true;
+    });
+    ro.observe(stageEl);
+  }
 
   function navigateToWork(opts = {}) {
     if (!tape.unlocked || !tape.url) return;
     if (tape.dualTheme3D) {
       const activeTheme = opts.theme || (document.body.classList.contains('theme-dark') ? 'dark' : 'light');
-      const query = new URLSearchParams({ theme: activeTheme });
-      if (opts.mode) query.set('mode', opts.mode);
-      window.location.href = `${tape.url}?${query.toString()}`;
+      const parts = [`theme=${encodeURIComponent(activeTheme)}`];
+      if (opts.mode) parts.push(`mode=${encodeURIComponent(opts.mode)}`);
+      window.location.href = `${tape.url}?${parts.join('&')}`;
       return;
     }
     window.location.href = tape.url;
@@ -1611,25 +2366,74 @@ if (btnOrbit) {
 if (btnBackdrop) {
   btnBackdrop.addEventListener('click', () => {
     const isDark = document.body.classList.toggle('theme-dark');
-    document.documentElement.classList.toggle('theme-dark', isDark);
+    if (document.documentElement && document.documentElement.classList) {
+      document.documentElement.classList.toggle('theme-dark', isDark);
+    }
     btnBackdrop.textContent = isDark ? 'Light room' : 'Dark room';
   });
 }
 
 // ============================================================================
-// 6. PER-STAGE ANIMATION LOOP (EACH CASSETTE BOUND TO ITS OWN STAGE CANVAS)
+// 6. SHARED-RENDERER ANIMATION LOOP (VIEWPORT-CULLED 2D STAGE COMPOSITING)
 // ============================================================================
 const clock = new THREE.Clock();
+
+function isStageNearViewport(stageEl) {
+  if (!stageEl || typeof stageEl.getBoundingClientRect !== 'function') return true;
+  const rect = stageEl.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.bottom === 0)) {
+    return true;
+  }
+  const vh = window.innerHeight || (document.documentElement && document.documentElement.clientHeight) || 900;
+  return rect.bottom >= -300 && rect.top <= vh + 300;
+}
+
+function renderStageToCanvas(item, width, height, cam) {
+  const dpr = getStagePixelRatio();
+  const cw = Math.max(1, Math.floor(width * dpr));
+  const ch = Math.max(1, Math.floor(height * dpr));
+
+  const stageCanvas = item.model.stageCanvas;
+  if (stageCanvas.width !== cw || stageCanvas.height !== ch) {
+    stageCanvas.width = cw;
+    stageCanvas.height = ch;
+  }
+
+  if (sharedRenderW !== width || sharedRenderH !== height || sharedRenderDpr !== dpr) {
+    sharedRenderer.setPixelRatio(dpr);
+    sharedRenderer.setSize(width, height, false);
+    sharedRenderW = width;
+    sharedRenderH = height;
+    sharedRenderDpr = dpr;
+  }
+
+  sharedRenderer.render(item.model.itemScene, cam);
+
+  const ctx2d = item.model.stageCtx;
+  if (ctx2d) {
+    ctx2d.clearRect(0, 0, cw, ch);
+    if (sharedRenderer.domElement) {
+      ctx2d.drawImage(sharedRenderer.domElement, 0, 0, cw, ch);
+    }
+  }
+
+  item.hasRenderedInitialFrame = true;
+  item.needsRedraw = false;
+}
 
 function animate() {
   requestAnimationFrame(animate);
 
-  const dt = Math.min(clock.getDelta(), 0.1);
-  const elapsed = clock.getElapsedTime();
+  const rawDt = clock.getDelta();
+  const dt = Number.isFinite(rawDt) ? Math.min(Math.max(rawDt, 0), 0.1) : 0.016;
+  const rawElapsed = clock.getElapsedTime();
+  const elapsed = Number.isFinite(rawElapsed) ? rawElapsed : 0;
+  const poseLerp = Math.min(1, dt * 8);
+  const orbitLerp = Math.min(1, dt * 3);
 
   tapeItems.forEach((item, idx) => {
-    const width = Math.max(1, item.stageEl.clientWidth);
-    const height = Math.max(1, item.stageEl.clientHeight);
+    const width = Math.max(1, item.stageEl.clientWidth || 520);
+    const height = Math.max(1, item.stageEl.clientHeight || 248);
 
     if (isPlayingAnim) {
       const speedBoost = item.hovered ? 1.65 : 1.0;
@@ -1645,17 +2449,17 @@ function animate() {
 
     if (isAutoOrbit && !item.isDragging) {
       item.rotY += dt * 0.36;
-      item.rotX = THREE.MathUtils.lerp(item.rotX, 0.08 + Math.sin(elapsed * 0.8 + idx) * 0.04, dt * 3);
+      item.rotX = THREE.MathUtils.lerp(item.rotX, 0.08 + Math.sin(elapsed * 0.8 + idx) * 0.04, orbitLerp);
     }
 
     const targetY = item.rotY + item.hoverOffsetX;
     const targetX = item.rotX + item.hoverOffsetY;
-    item.model.root.rotation.y = THREE.MathUtils.lerp(item.model.root.rotation.y, targetY, dt * 8);
-    item.model.root.rotation.x = THREE.MathUtils.lerp(item.model.root.rotation.x, targetX, dt * 8);
+    item.model.root.rotation.y = THREE.MathUtils.lerp(item.model.root.rotation.y, targetY, poseLerp);
+    item.model.root.rotation.x = THREE.MathUtils.lerp(item.model.root.rotation.x, targetX, poseLerp);
 
     const floatBob = Math.sin(elapsed * 1.7 + idx * 0.9) * 0.05;
     const hoverLift = item.hovered ? 0.08 : 0.0;
-    item.model.root.position.y = THREE.MathUtils.lerp(item.model.root.position.y, 0.06 + floatBob + hoverLift, dt * 8);
+    item.model.root.position.y = THREE.MathUtils.lerp(item.model.root.position.y, 0.06 + floatBob + hoverLift, poseLerp);
     item.model.root.rotation.z = Math.sin(elapsed * 1.1 + idx) * 0.015;
 
     const profileScale = 0.55 + 0.45 * Math.abs(Math.cos(item.model.root.rotation.y));
@@ -1668,7 +2472,9 @@ function animate() {
     cam.position.z = (item.hovered ? 7.85 : 8.2) + aspectAdjust;
     cam.updateProjectionMatrix();
 
-    item.model.itemRenderer.render(item.model.itemScene, cam);
+    if (!item.hasRenderedInitialFrame || item.needsRedraw || isStageNearViewport(item.stageEl)) {
+      renderStageToCanvas(item, width, height, cam);
+    }
   });
 }
 

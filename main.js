@@ -6,7 +6,10 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-import { CyberAudioEngine } from './audio.js?v=10';
+import { CyberAudioEngine } from './audio.js?v=11';
+import { createRoadWorld as createDriveWorld } from './roads/the-drive.js?v=1';
+import { createRoadWorld as createWindmillWorld } from './roads/windmill.js?v=1';
+import { createRoadWorld as createTunnelWorld } from './roads/tunnel.js?v=1';
 
 // ============================================================================
 // 1. INITIALIZE SCENE, CAMERA, RENDERER & BLOOM POST-PROCESSING
@@ -518,7 +521,29 @@ export const ROAD_MODES = [
   }
 ];
 
-// Precompute vertical sky gradient CanvasTextures for all 5 road modes
+// Instantiate bespoke Road World modules (Modes 3, 4, 5) and merge metadata BEFORE skyTextures precompute
+const roadWorlds = {
+  3: createDriveWorld({ THREE, scene, neonColor }),
+  4: createWindmillWorld({ THREE, scene, neonColor }),
+  5: createTunnelWorld({ THREE, scene, neonColor })
+};
+
+for (const [idxStr, world] of Object.entries(roadWorlds)) {
+  const idx = Number(idxStr);
+  if (world?.modeOverrides && ROAD_MODES[idx]) {
+    Object.assign(ROAD_MODES[idx], world.modeOverrides);
+  }
+  if (world?.sunConfig?.stops && ROAD_MODES[idx]) {
+    const sunTex = createSynthwaveSunTexture(
+      world.sunConfig.stops,
+      Boolean(world.sunConfig.isSegmented)
+    );
+    sunTextures.push(sunTex);
+    ROAD_MODES[idx].sunTexIndex = sunTextures.length - 1;
+  }
+}
+
+// Precompute vertical sky gradient CanvasTextures for all 6 road modes
 const skyTextures = ROAD_MODES.map((m) =>
   createSkyGradientTexture(m.skyTopHex, m.skyMidHex, m.skyHorizonHex)
 );
@@ -569,6 +594,7 @@ function spawnEnvPropsForMode(modeIdx) {
   }
   activeEnvPropGroups.length = 0;
   activeWindmillRotors = [];
+  Object.values(roadWorlds).forEach((w) => w?.onResetSegments?.());
 
   const template = loadedModelTemplates[mode.modelPath];
   const spacing = mode.segmentLength || 16;
@@ -606,6 +632,8 @@ function spawnEnvPropsForMode(modeIdx) {
     clone.position.set(0, 0, zPos);
     scene.add(clone);
     activeEnvPropGroups.push(clone);
+
+    roadWorlds[modeIdx]?.onCloneSegment?.(clone, i);
 
     if (mode.id === 'windmill') {
       clone.traverse((child) => {
@@ -686,7 +714,7 @@ function createTerrainChunk(zOffset) {
 
   chunkGroup.position.z = zOffset;
   scene.add(chunkGroup);
-  return { group: chunkGroup, wireMat, length };
+  return { group: chunkGroup, solidMat, wireMat, length };
 }
 
 const terrainChunks = [
@@ -1471,7 +1499,7 @@ function setRoadMode(newIndex) {
   if (roadMat) {
     roadMat.color.set(mode.roadColorHex);
     roadMat.roughness = mode.roadRoughness;
-    roadMat.metalness = (mode.showMidgarCity || mode.showMakoReactor) ? 0.35 : 0.68;
+    roadMat.metalness = mode.roadMetalness ?? ((mode.showMidgarCity || mode.showMakoReactor) ? 0.35 : 0.68);
   }
 
   // 6. Update Lane Divider Colors & Shoulder Rails
@@ -1498,6 +1526,9 @@ function setRoadMode(newIndex) {
   if (terrainChunks) {
     terrainChunks.forEach((chunk) => {
       chunk.group.visible = Boolean(mode.showTerrain);
+      if (chunk.solidMat) {
+        chunk.solidMat.color.set(mode.terrainSolidHex || '#060212');
+      }
       if (mode.terrainWireHex) {
         chunk.wireMat.color.set(mode.terrainWireHex);
       }
@@ -1507,6 +1538,9 @@ function setRoadMode(newIndex) {
   if (cityGroup) cityGroup.visible = Boolean(mode.showCity);
   if (midgarCityGroup) midgarCityGroup.visible = Boolean(mode.showMidgarCity);
   if (makoReactorGroup) makoReactorGroup.visible = Boolean(mode.showMakoReactor);
+  if (roadWorlds[3]?.group) roadWorlds[3].group.visible = (currentRoadMode === 3);
+  if (roadWorlds[4]?.group) roadWorlds[4].group.visible = (currentRoadMode === 4);
+  if (roadWorlds[5]?.group) roadWorlds[5].group.visible = (currentRoadMode === 5);
 
   // 9. Swap 3D Roadside Environment Props Pool
   spawnEnvPropsForMode(currentRoadMode);
@@ -1531,6 +1565,7 @@ window.NightDrive = {
   THREE: THREE,
   roadMode: 0,
   ROAD_MODES: ROAD_MODES,
+  roadWorlds: roadWorlds,
   setRoadMode: setRoadMode,
   audioEngine: audioEngine,
   activeWindmillRotors: activeWindmillRotors,
@@ -1952,9 +1987,10 @@ function animate() {
   }
 
   // Scroll Highway Environment Props
+  const envWrapZ = Math.max(24, envPropsSegmentSpacing * 1.5);
   for (const prop of activeEnvPropGroups) {
     prop.position.z += baseSpeed * dt;
-    if (prop.position.z > 24) {
+    if (prop.position.z > envWrapZ) {
       prop.position.z -= envPropsTotalSpan;
     }
   }
@@ -2024,6 +2060,17 @@ function animate() {
   camera.position.y = THREE.MathUtils.lerp(camera.position.y, desiredCamY, dt * 5);
   camera.position.z = THREE.MathUtils.lerp(camera.position.z, desiredCamZ, dt * 5);
   camera.lookAt(carGroup.position.x * 0.25, 1.8, camPreset.lookZ);
+
+  roadWorlds[currentRoadMode]?.update?.({
+    dt,
+    elapsed,
+    baseSpeed,
+    isBoosting,
+    boostBlend,
+    metrics,
+    carGroup,
+    camera
+  });
 
   composer.render();
 }

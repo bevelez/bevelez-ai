@@ -4,7 +4,7 @@
 //    timbres, lead phrase and a 16-bar arrangement (groove / breakdown / rise) so the music moves.
 // 2. Google Gemini API Lyria 3.5 (lyria-3.5 / lyria-3-clip-preview) MP3 playback & live generation.
 
-import { STATIONS, DEFAULT_STATION } from './radio.js?v=3';
+import { STATIONS, DEFAULT_STATION } from './radio.js?v=4';
 
 const STEPS_PER_BAR = 16;
 const SCHEDULER_INTERVAL_MS = 25;

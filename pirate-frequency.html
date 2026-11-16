@@ -1,0 +1,1606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Pirate Frequency (107.7 FM) — Tape No. 07 · bevelez.ai</title>
+  <meta name="description" content="Tape No. 07: Pirate Frequency — 3D cel-shaded hoverboard courier arcade game across nocturnal Mountain View. Grind neon rails, hit tricks on the 118 BPM funk beat to un-mute all 4 broadcast stems, and race bootleg cassettes before sign-off." />
+  <meta name="theme-color" content="#09080f" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2309080f'/%3E%3Crect x='7' y='15' width='50' height='34' rx='5' fill='%23ff6b1a' stroke='%23ffe042' stroke-width='3'/%3E%3Crect x='13' y='21' width='38' height='11' fill='%23ffe042'/%3E%3Ccircle cx='23' cy='39' r='5' fill='%2309080f' stroke='%2300f0ff' stroke-width='2.5'/%3E%3Ccircle cx='41' cy='39' r='5' fill='%2309080f' stroke='%2300f0ff' stroke-width='2.5'/%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bangers&family=Chakra+Petch:ital,wght@0,600;0,700;0,800;1,700;1,800&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet" />
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --ink: #09080f;
+      --bg-deep: #110922;
+      --panel: rgba(12, 10, 25, 0.90);
+      --panel-solid: #120f24;
+      --paper: #f8f7ff;
+      --muted: #a6a2c8;
+      --orange: #ff6b1a;
+      --yellow: #ffe042;
+      --cyan: #00f0ff;
+      --magenta: #ff2a85;
+      --mint: #1aff9c;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--ink);
+      color: var(--paper);
+      font-family: 'Chakra Petch', sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-font-smoothing: antialiased;
+      touch-action: none;
+    }
+
+    /* Fullscreen 3D Viewport */
+    #three-stage {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    #three-stage canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Subtle Pirate-Zine Halftone & Scanline Vignette */
+    .zine-vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          0deg,
+          rgba(9, 8, 15, 0.0) 0px,
+          rgba(9, 8, 15, 0.0) 2px,
+          rgba(9, 8, 15, 0.14) 3px,
+          rgba(9, 8, 15, 0.14) 4px
+        ),
+        radial-gradient(circle at 50% 50%, transparent 62%, rgba(9, 8, 15, 0.64) 100%);
+    }
+
+    .zine-vignette::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      opacity: 0.16;
+      background-image: radial-gradient(rgba(255, 224, 66, 0.55) 1px, transparent 1.2px);
+      background-size: 10px 10px;
+      mask-image: radial-gradient(circle at 50% 50%, transparent 72%, black 100%);
+      -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 72%, black 100%);
+    }
+
+    /* Celebratory / Urgent Edge Flash */
+    .screen-flash {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      opacity: 0;
+      background: radial-gradient(circle at 50% 50%, transparent 48%, rgba(0, 240, 255, 0.42) 100%);
+      transition: opacity 0.18s ease-out;
+    }
+
+    .screen-flash.flash-orange {
+      background: radial-gradient(circle at 50% 50%, transparent 45%, rgba(255, 107, 26, 0.52) 100%);
+    }
+
+    .screen-flash.flash-yellow {
+      background: radial-gradient(circle at 50% 50%, transparent 48%, rgba(255, 224, 66, 0.46) 100%);
+    }
+
+    /* =========================================================================
+       1. TOP-LEFT HUD: ARCHIVE PILL + 107.7 FM BADGE + 4 BROADCAST STEMS
+       ========================================================================= */
+    .hud-top-left {
+      position: fixed;
+      top: 18px;
+      left: 22px;
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 9px;
+      pointer-events: none;
+    }
+
+    .top-left-nav-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      pointer-events: auto;
+    }
+
+    .archive-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 12px;
+      background: var(--panel);
+      color: var(--paper);
+      text-decoration: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      border: 2.5px solid var(--ink);
+      outline: 2px solid rgba(255, 255, 255, 0.22);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+      transition: transform 0.1s ease, background 0.12s ease, color 0.12s ease, outline-color 0.12s ease;
+    }
+
+    .archive-pill:hover,
+    .archive-pill:focus-visible {
+      background: var(--yellow);
+      color: var(--ink);
+      outline-color: var(--yellow);
+      transform: skewX(-8deg) translate(-1px, -1px);
+    }
+
+    .station-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      background: linear-gradient(135deg, #1a1133 0%, #0d0a1c 100%);
+      border: 2.5px solid var(--ink);
+      outline: 2px solid var(--orange);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+    }
+
+    .onair-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #585272;
+      border: 1.5px solid var(--ink);
+      transition: background 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .onair-dot.live {
+      background: var(--orange);
+      box-shadow: 0 0 10px var(--orange), 0 0 4px var(--yellow);
+    }
+
+    .station-freq {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.18rem;
+      letter-spacing: 0.06em;
+      color: var(--yellow);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    .station-sep {
+      color: var(--orange);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      font-weight: 800;
+    }
+
+    .station-name {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.82rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--paper);
+      text-transform: uppercase;
+    }
+
+    .station-bar-readout {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--cyan);
+      padding-left: 4px;
+      border-left: 1.5px solid rgba(255, 255, 255, 0.18);
+    }
+
+    /* 4-Stem Dynamic Broadcast Pills */
+    .stem-rack {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 7px;
+      background: var(--panel);
+      border: 2.5px solid var(--ink);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+    }
+
+    .stem-pill {
+      position: relative;
+      width: 72px;
+      padding: 4px 6px 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 2px solid #2a2542;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      opacity: 0.48;
+      transition: opacity 0.16s ease, border-color 0.16s ease, background 0.16s ease, transform 0.14s ease, box-shadow 0.16s ease;
+    }
+
+    .stem-pill-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 3px;
+    }
+
+    .stem-name {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.68rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: #9f9bc0;
+    }
+
+    .stem-tier-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.54rem;
+      font-weight: 800;
+      color: #6f6a92;
+    }
+
+    .stem-vu-track {
+      width: 100%;
+      height: 5px;
+      background: #07060d;
+      border: 1px solid #000;
+      overflow: hidden;
+    }
+
+    .stem-vu-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--cyan);
+      transition: width 0.07s linear;
+    }
+
+    .stem-pill.active {
+      opacity: 1;
+      background: rgba(0, 240, 255, 0.13);
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.25);
+      transform: translateY(-1px);
+    }
+
+    .stem-pill.active .stem-name {
+      color: var(--paper);
+      text-shadow: 1px 1px 0 var(--ink);
+    }
+
+    .stem-pill.active .stem-tier-tag {
+      color: var(--cyan);
+    }
+
+    .stem-pill.stem-bass.active {
+      background: rgba(26, 255, 156, 0.14);
+      border-color: var(--mint);
+      box-shadow: 0 0 10px rgba(26, 255, 156, 0.25);
+    }
+    .stem-pill.stem-bass.active .stem-tier-tag { color: var(--mint); }
+    .stem-pill.stem-bass .stem-vu-fill { background: var(--mint); }
+
+    .stem-pill.stem-rhodes.active {
+      background: rgba(255, 224, 66, 0.16);
+      border-color: var(--yellow);
+      box-shadow: 0 0 12px rgba(255, 224, 66, 0.28);
+    }
+    .stem-pill.stem-rhodes.active .stem-tier-tag { color: var(--yellow); }
+    .stem-pill.stem-rhodes .stem-vu-fill { background: var(--yellow); }
+
+    .stem-pill.stem-lead.active {
+      background: rgba(255, 107, 26, 0.22);
+      border-color: var(--orange);
+      box-shadow: 0 0 14px rgba(255, 107, 26, 0.42);
+    }
+    .stem-pill.stem-lead.active .stem-tier-tag { color: var(--yellow); }
+    .stem-pill.stem-lead .stem-vu-fill {
+      background: linear-gradient(90deg, var(--orange) 0%, var(--yellow) 100%);
+    }
+
+    /* =========================================================================
+       2. TOP-CENTER HUD: GIANT ARCADE BROADCAST COUNTDOWN TIMER + POPUPS
+       ========================================================================= */
+    .hud-top-center {
+      position: fixed;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 6;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .timer-card {
+      position: relative;
+      padding: 4px 22px 6px;
+      background: var(--panel);
+      border: 3px solid var(--ink);
+      outline: 2.5px solid var(--yellow);
+      box-shadow: 5px 6px 0 var(--ink);
+      transform: skewX(-8deg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 158px;
+      transition: outline-color 0.15s ease, transform 0.12s ease;
+    }
+
+    .timer-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.60rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      color: var(--cyan);
+      text-transform: uppercase;
+    }
+
+    .timer-digits {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 3.15rem;
+      line-height: 0.94;
+      letter-spacing: 0.05em;
+      color: var(--yellow);
+      -webkit-text-stroke: 2.5px var(--ink);
+      text-shadow: 4px 4px 0 var(--ink);
+    }
+
+    .timer-card.urgent {
+      outline-color: var(--magenta);
+      animation: urgentPulse 0.48s infinite alternate ease-in-out;
+    }
+
+    .timer-card.urgent .timer-label {
+      color: var(--magenta);
+    }
+
+    .timer-card.urgent .timer-digits {
+      color: #ff4d6d;
+    }
+
+    @keyframes urgentPulse {
+      from { transform: skewX(-8deg) scale(1.0); }
+      to { transform: skewX(-8deg) scale(1.07); }
+    }
+
+    .hud-popups {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      min-height: 28px;
+    }
+
+    .hud-popup-chip {
+      padding: 4px 13px;
+      background: var(--yellow);
+      color: var(--ink);
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.32rem;
+      letter-spacing: 0.05em;
+      border: 2.5px solid var(--ink);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg) rotate(-1.5deg);
+      white-space: nowrap;
+      animation: popupFloat 1.75s cubic-bezier(0.18, 0.89, 0.32, 1.2) forwards;
+    }
+
+    .hud-popup-chip.time-bonus {
+      background: var(--mint);
+      color: var(--ink);
+      font-size: 1.44rem;
+    }
+
+    .hud-popup-chip.score-bonus {
+      background: var(--orange);
+      color: var(--paper);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    @keyframes popupFloat {
+      0% { opacity: 0; transform: skewX(-8deg) scale(0.55) translateY(8px); }
+      14% { opacity: 1; transform: skewX(-8deg) scale(1.08) translateY(0); }
+      80% { opacity: 1; transform: skewX(-8deg) scale(1.0) translateY(-6px); }
+      100% { opacity: 0; transform: skewX(-8deg) scale(0.92) translateY(-18px); }
+    }
+
+    /* =========================================================================
+       3. TOP-RIGHT HUD: SCORE, COMBO MULTIPLIER, SPEED/BOOST & AUDIO TOGGLE
+       ========================================================================= */
+    .hud-top-right {
+      position: fixed;
+      top: 18px;
+      right: 22px;
+      z-index: 6;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .score-combo-row {
+      display: flex;
+      align-items: stretch;
+      gap: 8px;
+    }
+
+    .score-box {
+      padding: 6px 14px;
+      background: var(--panel);
+      border: 2.5px solid var(--ink);
+      outline: 2px solid rgba(0, 240, 255, 0.45);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      min-width: 144px;
+    }
+
+    .score-meta-row {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.60rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+
+    .deliveries-tag {
+      color: var(--yellow);
+    }
+
+    .score-digits {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 2.15rem;
+      line-height: 0.98;
+      letter-spacing: 0.04em;
+      color: var(--paper);
+      text-shadow: 3px 3px 0 var(--ink);
+    }
+
+    .combo-badge {
+      padding: 5px 12px 6px;
+      background: linear-gradient(155deg, #21163d 0%, #100b21 100%);
+      border: 2.5px solid var(--ink);
+      outline: 2px solid var(--cyan);
+      box-shadow: 4px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      min-width: 104px;
+      transition: outline-color 0.16s ease, transform 0.12s ease, background 0.16s ease;
+    }
+
+    .combo-badge[data-tier="1"] {
+      outline-color: var(--mint);
+    }
+
+    .combo-badge[data-tier="2"] {
+      outline-color: var(--yellow);
+      background: linear-gradient(155deg, #382a10 0%, #161124 100%);
+    }
+
+    .combo-badge[data-tier="3"] {
+      outline-color: var(--orange);
+      background: linear-gradient(155deg, #4f1c14 0%, #200d2a 100%);
+      box-shadow: 4px 4px 0 var(--ink), 0 0 18px rgba(255, 107, 26, 0.48);
+    }
+
+    .combo-mult-text {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 2.05rem;
+      line-height: 0.94;
+      letter-spacing: 0.04em;
+      color: var(--yellow);
+      -webkit-text-stroke: 1.8px var(--ink);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    .combo-tier-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.55rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--cyan);
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+
+    .combo-badge[data-tier="3"] .combo-tier-label {
+      color: var(--yellow);
+    }
+
+    .combo-fuse-track {
+      width: 100%;
+      height: 5px;
+      margin-top: 3px;
+      background: #07060c;
+      border: 1px solid #000;
+      overflow: hidden;
+    }
+
+    .combo-fuse-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--cyan) 0%, var(--yellow) 65%, var(--orange) 100%);
+      transition: width 0.06s linear;
+    }
+
+    .combo-fuse-fill.grind-locked {
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    /* Speedometer, Boost Bar & Audio Toggle Row */
+    .telemetry-audio-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      pointer-events: auto;
+    }
+
+    .speed-boost-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      background: var(--panel);
+      border: 2px solid var(--ink);
+      box-shadow: 3px 3px 0 var(--ink);
+      transform: skewX(-8deg);
+      pointer-events: none;
+    }
+
+    .speed-readout {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 800;
+      color: var(--cyan);
+      min-width: 56px;
+      text-align: right;
+    }
+
+    .boost-mini-wrap {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .boost-mini-label {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.64rem;
+      font-weight: 800;
+      color: var(--orange);
+      letter-spacing: 0.06em;
+    }
+
+    .boost-mini-track {
+      width: 64px;
+      height: 7px;
+      background: #08070f;
+      border: 1.5px solid #000;
+      overflow: hidden;
+    }
+
+    .boost-mini-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--orange) 0%, var(--yellow) 100%);
+      transition: width 0.08s linear;
+    }
+
+    .hud-btn {
+      appearance: none;
+      padding: 5px 11px;
+      min-height: 30px;
+      background: var(--panel);
+      color: var(--yellow);
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 2px solid var(--ink);
+      outline: 1.5px solid var(--yellow);
+      box-shadow: 3px 3px 0 var(--ink);
+      transform: skewX(-8deg);
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background 0.1s ease, color 0.1s ease, transform 0.08s ease;
+    }
+
+    .hud-btn:hover,
+    .hud-btn:focus-visible {
+      background: var(--yellow);
+      color: var(--ink);
+    }
+
+    .hud-btn:active {
+      transform: skewX(-8deg) translate(1px, 1px);
+    }
+
+    .hud-btn.muted {
+      color: var(--muted);
+      outline-color: #554f73;
+    }
+
+    /* =========================================================================
+       4. BOTTOM-CENTER HUD: BEAT SYNC RING + TRICK TOAST + DISPATCH CARD
+       ========================================================================= */
+    .hud-bottom-center {
+      position: fixed;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 6;
+      width: min(640px, calc(100vw - 32px));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      pointer-events: none;
+    }
+
+    /* Trick / Rating Toast */
+    .trick-toast {
+      padding: 5px 16px;
+      background: var(--ink);
+      color: var(--yellow);
+      border: 2.5px solid var(--yellow);
+      box-shadow: 4px 4px 0 var(--ink);
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.45rem;
+      letter-spacing: 0.06em;
+      transform: skewX(-8deg) scale(0.88);
+      opacity: 0;
+      transition: opacity 0.12s ease, transform 0.14s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+      text-align: center;
+      white-space: nowrap;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .trick-toast.visible {
+      opacity: 1;
+      transform: skewX(-8deg) scale(1.0);
+    }
+
+    .trick-toast[data-rating="PERFECT"] {
+      background: linear-gradient(90deg, #1b1036 0%, #3a1428 100%);
+      border-color: var(--cyan);
+      color: var(--yellow);
+      box-shadow: 4px 4px 0 var(--ink), 0 0 16px rgba(0, 240, 255, 0.45);
+    }
+
+    .trick-toast[data-rating="GOOD"] {
+      border-color: var(--mint);
+      color: var(--mint);
+    }
+
+    /* Beat Sync Ring + Metronome Bar */
+    .beat-sync-widget {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 4px 14px;
+      background: rgba(9, 8, 15, 0.84);
+      border: 2px solid var(--ink);
+      outline: 1.5px solid rgba(0, 240, 255, 0.38);
+      box-shadow: 3px 3px 0 var(--ink);
+      transform: skewX(-8deg);
+    }
+
+    .beat-metro-wing {
+      width: 78px;
+      height: 8px;
+      background: #141126;
+      border: 1.5px solid #000;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .beat-metro-pip {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 18px;
+      background: linear-gradient(90deg, var(--cyan), var(--yellow));
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    .beat-ring-shell {
+      position: relative;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 224, 66, 0.65);
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.22) 0%, rgba(9, 8, 15, 0.95) 72%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .beat-ring-pulse {
+      position: absolute;
+      inset: 2px;
+      border-radius: 50%;
+      border: 2.5px solid var(--cyan);
+      transform: scale(0.5);
+      opacity: 0.85;
+    }
+
+    .beat-ring-core {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 0.86rem;
+      color: var(--yellow);
+      z-index: 1;
+    }
+
+    .beat-hit-tag {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.66rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+      min-width: 78px;
+      text-align: center;
+    }
+
+    .beat-sync-widget.downbeat .beat-ring-shell {
+      border-color: var(--yellow);
+      box-shadow: 0 0 14px rgba(255, 224, 66, 0.72);
+    }
+
+    /* Active Courier Dispatch Card */
+    .dispatch-card {
+      width: 100%;
+      padding: 8px 16px;
+      background: var(--panel);
+      border: 3px solid var(--ink);
+      outline: 2.5px solid var(--cyan);
+      box-shadow: 5px 5px 0 var(--ink);
+      transform: skewX(-6deg);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      transition: outline-color 0.18s ease, background 0.18s ease;
+    }
+
+    .dispatch-card[data-kind="dropoff"] {
+      outline-color: var(--orange);
+      background: linear-gradient(90deg, rgba(38, 15, 24, 0.94) 0%, rgba(16, 11, 30, 0.94) 100%);
+    }
+
+    .dispatch-left {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .dispatch-badge {
+      flex-shrink: 0;
+      padding: 4px 9px;
+      background: var(--cyan);
+      color: var(--ink);
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.08rem;
+      letter-spacing: 0.06em;
+      border: 2px solid var(--ink);
+      box-shadow: 2px 2px 0 var(--ink);
+    }
+
+    .dispatch-card[data-kind="dropoff"] .dispatch-badge {
+      background: var(--orange);
+      color: var(--paper);
+      text-shadow: 1px 1px 0 var(--ink);
+    }
+
+    .dispatch-copy {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .dispatch-text {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.95rem;
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      color: var(--paper);
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    .dispatch-sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.63rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--yellow);
+      text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .dispatch-distance {
+      flex-shrink: 0;
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.72rem;
+      letter-spacing: 0.04em;
+      color: var(--yellow);
+      -webkit-text-stroke: 1.5px var(--ink);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    /* Keyboard Controls Legend */
+    .controls-legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 4px 12px;
+      background: rgba(9, 8, 15, 0.78);
+      border: 1.5px solid rgba(255, 255, 255, 0.16);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.63rem;
+      font-weight: 700;
+      color: #cbc7e6;
+    }
+
+    .controls-legend kbd {
+      display: inline-block;
+      padding: 1px 5px;
+      margin-right: 3px;
+      background: var(--yellow);
+      color: var(--ink);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.60rem;
+      font-weight: 800;
+      border: 1.5px solid var(--ink);
+    }
+
+    /* =========================================================================
+       5. MOBILE / COARSE-POINTER TOUCH CONTROLS OVERLAY
+       ========================================================================= */
+    .touch-controls {
+      position: fixed;
+      inset: auto 0 12px 0;
+      z-index: 7;
+      display: none;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 0 14px;
+      pointer-events: none;
+    }
+
+    @media (pointer: coarse) {
+      .touch-controls {
+        display: flex;
+      }
+      .controls-legend {
+        display: none;
+      }
+      .hud-bottom-center {
+        bottom: 136px;
+      }
+    }
+
+    .touch-steer-pad {
+      position: relative;
+      width: 124px;
+      height: 124px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 240, 255, 0.18) 0%, rgba(12, 10, 25, 0.86) 74%);
+      border: 3px solid var(--cyan);
+      box-shadow: 4px 4px 0 var(--ink);
+      pointer-events: auto;
+      touch-action: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .touch-steer-hint {
+      position: absolute;
+      bottom: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.54rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      color: rgba(255, 255, 255, 0.7);
+      pointer-events: none;
+    }
+
+    .touch-steer-knob {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: var(--yellow);
+      border: 3px solid var(--ink);
+      box-shadow: 2px 3px 0 var(--ink);
+      pointer-events: none;
+      transition: transform 0.04s linear;
+    }
+
+    .touch-action-cluster {
+      display: grid;
+      grid-template-columns: repeat(2, 74px);
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .touch-btn {
+      appearance: none;
+      height: 56px;
+      background: var(--panel);
+      color: var(--paper);
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.25rem;
+      letter-spacing: 0.06em;
+      border: 3px solid var(--ink);
+      box-shadow: 3px 4px 0 var(--ink);
+      transform: skewX(-8deg);
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    .touch-btn-jump {
+      outline: 2px solid var(--cyan);
+      color: var(--cyan);
+    }
+
+    .touch-btn-trick {
+      grid-column: span 2;
+      height: 58px;
+      background: var(--yellow);
+      color: var(--ink);
+      outline: 2px solid var(--ink);
+      font-size: 1.42rem;
+    }
+
+    .touch-btn-boost {
+      outline: 2px solid var(--orange);
+      color: var(--orange);
+    }
+
+    .touch-btn:active {
+      transform: skewX(-8deg) scale(0.95);
+    }
+
+    /* =========================================================================
+       6. TITLE OVERLAY & SIGN-OFF RESULTS MODAL
+       ========================================================================= */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 12;
+      background: radial-gradient(circle at 50% 45%, rgba(24, 12, 48, 0.62) 0%, rgba(9, 8, 15, 0.88) 100%);
+      backdrop-filter: blur(5px);
+      -webkit-backdrop-filter: blur(5px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      pointer-events: auto;
+      transition: opacity 0.22s ease;
+    }
+
+    .modal-overlay.hidden {
+      display: none !important;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .zine-card {
+      position: relative;
+      width: min(610px, 100%);
+      padding: 28px 30px 26px;
+      background: linear-gradient(155deg, #191133 0%, #0e0a1d 100%);
+      border: 4px solid var(--ink);
+      outline: 3px solid var(--orange);
+      box-shadow: 10px 12px 0 var(--ink), 0 0 42px rgba(255, 107, 26, 0.26);
+      transform: rotate(-0.8deg);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .zine-kicker-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .zine-kicker {
+      display: inline-block;
+      padding: 4px 10px;
+      background: var(--yellow);
+      color: var(--ink);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.70rem;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      border: 2px solid var(--ink);
+      box-shadow: 3px 3px 0 var(--ink);
+      transform: skewX(-8deg);
+    }
+
+    .zine-freq-stamp {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.35rem;
+      letter-spacing: 0.06em;
+      color: var(--cyan);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    .zine-title {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: clamp(2.8rem, 6vw, 4.35rem);
+      line-height: 0.92;
+      letter-spacing: 0.04em;
+      color: var(--orange);
+      -webkit-text-stroke: 2.5px var(--ink);
+      text-shadow: 5px 5px 0 var(--ink), -1px -1px 0 var(--yellow);
+    }
+
+    .zine-subtitle {
+      font-family: 'Chakra Petch', sans-serif;
+      font-size: 0.98rem;
+      font-weight: 600;
+      line-height: 1.45;
+      color: #e4e1fa;
+    }
+
+    .zine-subtitle strong {
+      color: var(--yellow);
+      font-weight: 800;
+    }
+
+    .zine-feature-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .zine-feature-pill {
+      padding: 4px 9px;
+      background: rgba(0, 240, 255, 0.10);
+      border: 1.5px solid rgba(0, 240, 255, 0.45);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: var(--cyan);
+    }
+
+    .boot-progress-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 2px;
+    }
+
+    .boot-bar-outer {
+      width: 100%;
+      height: 12px;
+      background: #07060d;
+      border: 2px solid var(--ink);
+      outline: 1.5px solid rgba(255, 224, 66, 0.45);
+      overflow: hidden;
+      transform: skewX(-10deg);
+    }
+
+    .boot-bar-fill {
+      height: 100%;
+      width: 12%;
+      background: linear-gradient(90deg, var(--cyan) 0%, var(--yellow) 55%, var(--orange) 100%);
+      transition: width 0.18s ease-out;
+    }
+
+    .boot-status-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.70rem;
+      font-weight: 700;
+      color: var(--muted);
+    }
+
+    .zine-cta-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 4px;
+    }
+
+    .primary-arcade-btn {
+      appearance: none;
+      padding: 12px 26px;
+      background: linear-gradient(180deg, var(--yellow) 0%, var(--orange) 100%);
+      color: var(--ink);
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 1.78rem;
+      letter-spacing: 0.06em;
+      border: 3px solid var(--ink);
+      box-shadow: 5px 6px 0 var(--ink);
+      transform: skewX(-8deg);
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: transform 0.1s ease, filter 0.12s ease;
+    }
+
+    .primary-arcade-btn:hover:not(:disabled),
+    .primary-arcade-btn:focus-visible:not(:disabled) {
+      filter: brightness(1.08);
+      transform: skewX(-8deg) translate(-2px, -2px);
+      box-shadow: 7px 8px 0 var(--ink);
+    }
+
+    .primary-arcade-btn:active:not(:disabled) {
+      transform: skewX(-8deg) translate(2px, 2px);
+      box-shadow: 3px 3px 0 var(--ink);
+    }
+
+    .primary-arcade-btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
+      filter: grayscale(0.35);
+    }
+
+    /* Results Modal Specifics */
+    .results-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .rank-stamp-box {
+      flex-shrink: 0;
+      width: 96px;
+      height: 96px;
+      background: var(--yellow);
+      border: 4px solid var(--ink);
+      box-shadow: 6px 6px 0 var(--ink);
+      transform: rotate(5deg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .rank-stamp-caption {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      font-weight: 800;
+      color: var(--ink);
+      letter-spacing: 0.1em;
+    }
+
+    .rank-stamp-letter {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 4.1rem;
+      line-height: 0.86;
+      color: var(--orange);
+      -webkit-text-stroke: 2.5px var(--ink);
+      text-shadow: 3px 3px 0 var(--ink);
+    }
+
+    .results-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .result-stat-card {
+      padding: 10px 13px;
+      background: rgba(8, 7, 16, 0.85);
+      border: 2.5px solid var(--ink);
+      outline: 1.5px solid rgba(0, 240, 255, 0.3);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .result-stat-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .result-stat-val {
+      font-family: 'Bangers', Impact, sans-serif;
+      font-size: 2.0rem;
+      letter-spacing: 0.04em;
+      color: var(--yellow);
+      text-shadow: 2px 2px 0 var(--ink);
+    }
+
+    /* =========================================================================
+       7. RESPONSIVE COMPACT LAYOUT (< 860px)
+       ========================================================================= */
+    @media (max-width: 860px) {
+      .hud-top-left {
+        top: 10px;
+        left: 10px;
+        gap: 5px;
+      }
+      .archive-pill {
+        padding: 4px 8px;
+        font-size: 0.66rem;
+        transform: none;
+      }
+      .station-badge {
+        padding: 3px 8px;
+        transform: none;
+      }
+      .station-name,
+      .station-sep,
+      .station-bar-readout {
+        display: none;
+      }
+      .stem-rack {
+        gap: 3px;
+        padding: 3px 4px;
+        transform: none;
+      }
+      .stem-pill {
+        width: 48px;
+        padding: 3px 4px 4px;
+      }
+      .stem-name {
+        font-size: 0.54rem;
+      }
+      .stem-tier-tag {
+        display: none;
+      }
+      .hud-top-center {
+        top: 8px;
+      }
+      .timer-card {
+        padding: 2px 12px 4px;
+        min-width: 104px;
+        transform: none;
+      }
+      .timer-digits {
+        font-size: 2.05rem;
+      }
+      .hud-top-right {
+        top: 10px;
+        right: 10px;
+        gap: 5px;
+      }
+      .score-box {
+        min-width: 98px;
+        padding: 4px 8px;
+        transform: none;
+      }
+      .score-digits {
+        font-size: 1.45rem;
+      }
+      .combo-badge {
+        min-width: 74px;
+        padding: 3px 7px 4px;
+        transform: none;
+      }
+      .combo-mult-text {
+        font-size: 1.45rem;
+      }
+      .combo-tier-label {
+        font-size: 0.48rem;
+      }
+      .speed-boost-pill {
+        display: none;
+      }
+      .hud-btn {
+        padding: 3px 7px;
+        font-size: 0.64rem;
+        min-height: 25px;
+        transform: none;
+      }
+      .dispatch-card {
+        padding: 6px 10px;
+        transform: none;
+      }
+      .dispatch-text {
+        font-size: 0.76rem;
+      }
+      .dispatch-distance {
+        font-size: 1.3rem;
+      }
+      .beat-metro-wing {
+        width: 46px;
+      }
+      .zine-card {
+        padding: 20px 18px;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="three-stage"></div>
+  <div class="zine-vignette"></div>
+  <div class="screen-flash" id="screen-flash"></div>
+
+  <!-- 1. TOP-LEFT HUD: ARCHIVE BACK-LINK + 107.7 FM STATION + 4 BROADCAST STEMS -->
+  <header class="hud-top-left">
+    <div class="top-left-nav-row">
+      <a class="archive-pill" id="link-archive" href="./vault.html" aria-label="Back to Archive">← Archive</a>
+      <div class="station-badge">
+        <span class="onair-dot" id="station-onair-dot" aria-hidden="true"></span>
+        <span class="station-freq">107.7 FM</span>
+        <span class="station-sep">//</span>
+        <span class="station-name">PIRATE FREQUENCY</span>
+        <span class="station-bar-readout" id="station-bar-readout">118 BPM · STANDBY</span>
+      </div>
+    </div>
+
+    <div class="stem-rack" role="status" aria-label="4-Stem Pirate Broadcast Indicator">
+      <div class="stem-pill stem-drums active" id="stem-pill-drums">
+        <div class="stem-pill-top">
+          <span class="stem-name">DRUMS</span>
+          <span class="stem-tier-tag">T0</span>
+        </div>
+        <div class="stem-vu-track"><div class="stem-vu-fill" id="stem-fill-drums"></div></div>
+      </div>
+
+      <div class="stem-pill stem-bass" id="stem-pill-bass">
+        <div class="stem-pill-top">
+          <span class="stem-name">BASS</span>
+          <span class="stem-tier-tag">T1</span>
+        </div>
+        <div class="stem-vu-track"><div class="stem-vu-fill" id="stem-fill-bass"></div></div>
+      </div>
+
+      <div class="stem-pill stem-rhodes" id="stem-pill-rhodes">
+        <div class="stem-pill-top">
+          <span class="stem-name">RHODES</span>
+          <span class="stem-tier-tag">T2</span>
+        </div>
+        <div class="stem-vu-track"><div class="stem-vu-fill" id="stem-fill-rhodes"></div></div>
+      </div>
+
+      <div class="stem-pill stem-lead" id="stem-pill-lead">
+        <div class="stem-pill-top">
+          <span class="stem-name">LEAD</span>
+          <span class="stem-tier-tag">T3</span>
+        </div>
+        <div class="stem-vu-track"><div class="stem-vu-fill" id="stem-fill-lead"></div></div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 2. TOP-CENTER HUD: BROADCAST COUNTDOWN TIMER + FLOATING BONUS POPUPS -->
+  <div class="hud-top-center">
+    <div class="timer-card" id="timer-card">
+      <span class="timer-label">BROADCAST AIRTIME</span>
+      <span class="timer-digits" id="broadcast-timer">3:00</span>
+    </div>
+    <div class="hud-popups" id="hud-popups" aria-live="polite"></div>
+  </div>
+
+  <!-- 3. TOP-RIGHT HUD: SCORE, COMBO MULTIPLIER, TELEMETRY & AUDIO TOGGLE -->
+  <aside class="hud-top-right">
+    <div class="score-combo-row">
+      <div class="score-box">
+        <div class="score-meta-row">
+          <span>SCORE</span>
+          <span class="deliveries-tag" id="deliveries-value">0 TAPES</span>
+        </div>
+        <div class="score-digits" id="score-value">0</div>
+      </div>
+
+      <div class="combo-badge" id="combo-badge" data-tier="0">
+        <span class="combo-mult-text" id="combo-multiplier">x1</span>
+        <span class="combo-tier-label" id="combo-tier-label">DRUMS LIVE</span>
+        <div class="combo-fuse-track">
+          <div class="combo-fuse-fill" id="combo-timer-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="telemetry-audio-row">
+      <div class="speed-boost-pill">
+        <span class="speed-readout" id="speed-value">0 MPH</span>
+        <div class="boost-mini-wrap">
+          <span class="boost-mini-label">BOOST</span>
+          <div class="boost-mini-track">
+            <div class="boost-mini-fill" id="boost-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+      <button class="hud-btn" id="btn-respawn" type="button" title="Respawn on Street (Key: R)">[R] DROP</button>
+      <button class="hud-btn" id="btn-audio-toggle" type="button" title="Mute / Unmute 107.7 FM Audio (Key: M)">🔊 ON AIR</button>
+    </div>
+  </aside>
+
+  <!-- 4. BOTTOM-CENTER HUD: TRICK TOAST + BEAT SYNC RING + COURIER DISPATCH CARD -->
+  <section class="hud-bottom-center">
+    <div class="trick-toast" id="trick-toast" data-rating="FLOW">⚡ PERFECT BEAT! CASSETTE FLIP +600</div>
+
+    <div class="beat-sync-widget" id="beat-sync-widget">
+      <div class="beat-metro-wing">
+        <div class="beat-metro-pip" id="beat-bar-left" style="left: 0%;"></div>
+      </div>
+      <div class="beat-ring-shell" id="beat-ring">
+        <div class="beat-ring-pulse" id="beat-ring-pulse"></div>
+        <span class="beat-ring-core">⚡</span>
+      </div>
+      <div class="beat-metro-wing">
+        <div class="beat-metro-pip" id="beat-bar-right" style="right: 0%;"></div>
+      </div>
+      <span class="beat-hit-tag" id="beat-hit-tag">118 BPM SYNC</span>
+    </div>
+
+    <div class="dispatch-card" id="dispatch-card" data-kind="pickup">
+      <div class="dispatch-left">
+        <span class="dispatch-badge" id="dispatch-badge">PICKUP</span>
+        <div class="dispatch-copy">
+          <div class="dispatch-text" id="dispatch-text">PICK UP BOOTLEG TAPE AT: CASTRO VINYL VAULT · 224m</div>
+          <div class="dispatch-sub" id="dispatch-sub">DOWNTOWN CASTRO · FOLLOW THE OVERHEAD NEON ARROW</div>
+        </div>
+      </div>
+      <div class="dispatch-distance" id="dispatch-distance">224m</div>
+    </div>
+
+    <div class="controls-legend">
+      <span><kbd>WASD</kbd>/<kbd>Arrows</kbd> Carve</span>
+      <span>·</span>
+      <span><kbd>Space</kbd> Ollie / Grind</span>
+      <span>·</span>
+      <span><kbd>E</kbd>/<kbd>J</kbd> Beat Trick</span>
+      <span>·</span>
+      <span><kbd>Shift</kbd> Drift Boost</span>
+      <span>·</span>
+      <span><kbd>R</kbd> Respawn</span>
+    </div>
+  </section>
+
+  <!-- 5. MOBILE / TOUCH CONTROLS OVERLAY (COARSE POINTERS) -->
+  <div class="touch-controls" id="touch-controls">
+    <div class="touch-steer-pad" id="touch-steer-pad" aria-label="Virtual Steer Pad">
+      <div class="touch-steer-knob" id="touch-steer-knob"></div>
+      <span class="touch-steer-hint">CARVE</span>
+    </div>
+
+    <div class="touch-action-cluster">
+      <button class="touch-btn touch-btn-trick" id="btn-touch-trick" type="button">⚡ BEAT TRICK</button>
+      <button class="touch-btn touch-btn-jump" id="btn-touch-jump" type="button">OLLIE</button>
+      <button class="touch-btn touch-btn-boost" id="btn-touch-boost" type="button">BOOST</button>
+    </div>
+  </div>
+
+  <!-- 6. TITLE / START BROADCAST OVERLAY -->
+  <div class="modal-overlay" id="start-overlay" role="dialog" aria-modal="true" aria-labelledby="start-title">
+    <div class="zine-card">
+      <div class="zine-kicker-row">
+        <span class="zine-kicker">TAPE NO. 07 · BAY AREA HOVERBOARD COURIER</span>
+        <span class="zine-freq-stamp">107.7 FM // STEREO</span>
+      </div>
+      <h1 class="zine-title" id="start-title">PIRATE FREQUENCY</h1>
+      <p class="zine-subtitle">
+        Carve nocturnal Mountain View from <strong>Castro Street</strong> to <strong>Shoreline Amphitheatre</strong> on a mag-lev cassette hoverboard. Snap onto neon rails, hit tricks on the <strong>118 BPM</strong> funk beat to unlock all <strong>4 broadcast stems</strong>, and race bootleg tapes to pirate transmitters before sign-off!
+      </p>
+      <div class="zine-feature-pills">
+        <span class="zine-feature-pill">24 NEON GRIND RAILS</span>
+        <span class="zine-feature-pill">118 BPM BEAT-QUANTIZED TRICKS</span>
+        <span class="zine-feature-pill">4-TIER LIVE FUNK STEMS</span>
+        <span class="zine-feature-pill">REAL OSM MOUNTAIN VIEW</span>
+      </div>
+
+      <div class="boot-progress-wrap" id="boot-progress-wrap">
+        <div class="boot-bar-outer">
+          <div class="boot-bar-fill" id="boot-bar-fill"></div>
+        </div>
+        <div class="boot-status-text" id="boot-status-text">Tuning 107.7 FM — Building Mountain View…</div>
+      </div>
+
+      <div class="zine-cta-row">
+        <button class="primary-arcade-btn" id="btn-start-broadcast" type="button" disabled>START BROADCAST</button>
+        <a class="archive-pill" href="./vault.html">← Archive</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. SIGN-OFF RESULTS MODAL (SHOWN AT 0:00) -->
+  <div class="modal-overlay hidden" id="results-overlay" role="dialog" aria-modal="true" aria-labelledby="results-title">
+    <div class="zine-card">
+      <div class="results-header-row">
+        <div>
+          <span class="zine-kicker">107.7 FM SIGN-OFF REPORT</span>
+          <h2 class="zine-title" id="results-title" style="margin-top: 8px;">TRANSMISSION COMPLETE</h2>
+          <p class="zine-subtitle" id="results-rank-title">Pirate signal echoed from Downtown Castro to the Bay!</p>
+        </div>
+        <div class="rank-stamp-box">
+          <span class="rank-stamp-caption">RANK</span>
+          <span class="rank-stamp-letter" id="results-rank">A</span>
+        </div>
+      </div>
+
+      <div class="results-grid">
+        <div class="result-stat-card">
+          <span class="result-stat-label">FINAL SCORE</span>
+          <span class="result-stat-val" id="results-score">0</span>
+        </div>
+        <div class="result-stat-card">
+          <span class="result-stat-label">DELIVERIES COMPLETED</span>
+          <span class="result-stat-val" id="results-deliveries">0</span>
+        </div>
+        <div class="result-stat-card">
+          <span class="result-stat-label">BEST COMBO</span>
+          <span class="result-stat-val" id="results-best-combo">x1 (0)</span>
+        </div>
+        <div class="result-stat-card">
+          <span class="result-stat-label">ON-BEAT TRICK %</span>
+          <span class="result-stat-val" id="results-onbeat-pct">0%</span>
+        </div>
+      </div>
+
+      <div class="zine-cta-row">
+        <button class="primary-arcade-btn" id="btn-ride-again" type="button">RIDE AGAIN</button>
+        <a class="archive-pill" href="./vault.html">← Archive</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./pirate-frequency.js?v=1"></script>
+</body>
+</html>

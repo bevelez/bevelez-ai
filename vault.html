@@ -4,21 +4,21 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Archive — Brandon Edward Velez</title>
-  <meta name="description" content="Six interactive works by Brandon Edward Velez: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
+  <meta name="description" content="Nine interactive works by Brandon Edward Velez: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos, The Flying Dutchman, Pirate Frequency, Aether Broadside and Harmonic Lock." />
   <link rel="canonical" href="https://bevelez.ai/vault.html" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="bevelez.ai" />
   <meta property="og:title" content="Archive — Brandon Edward Velez" />
-  <meta property="og:description" content="Six interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
+  <meta property="og:description" content="Nine interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos, The Flying Dutchman, Pirate Frequency, Aether Broadside and Harmonic Lock." />
   <meta property="og:url" content="https://bevelez.ai/vault.html" />
   <meta property="og:image" content="https://bevelez.ai/assets/og-cover.jpg" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="Night Drive neon highway with the five bevelez.ai works listed" />
+  <meta property="og:image:alt" content="Night Drive neon highway with the nine bevelez.ai works listed" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@bevelez" />
   <meta name="twitter:title" content="Archive — Brandon Edward Velez" />
-  <meta name="twitter:description" content="Six interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos and The Flying Dutchman." />
+  <meta name="twitter:description" content="Nine interactive works on cassette: Clair de Lune, Passacaglia, Night Drive, the Mountain View Digital Twin, DJ Kronos, The Flying Dutchman, Pirate Frequency, Aether Broadside and Harmonic Lock." />
   <meta name="twitter:image" content="https://bevelez.ai/assets/og-cover.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -325,6 +325,15 @@
       transform: translateY(-1px);
     }
 
+    @media (min-width: 861px) {
+      .tape-card:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+        width: calc((100% - 56px) / 2);
+        max-width: 632px;
+        justify-self: center;
+      }
+    }
+
     @media (max-width: 860px) {
       .page-shell {
         padding: 18px 20px 64px;
@@ -383,6 +392,6 @@
     <main class="tape-grid" id="tape-grid" aria-label="Cassette Archive"></main>
   </div>
 
-  <script type="module" src="./vault.js?v=16"></script>
+  <script type="module" src="./vault.js?v=17"></script>
 </body>
 </html>

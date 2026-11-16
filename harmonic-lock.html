@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Tape No. 09: Harmonic Lock — 124 BPM Synesthetic Rail-Shooter | bevelez.ai</title>
+  <meta name="description" content="Tape No. 09: Harmonic Lock — A 124 BPM synesthetic 3D rail-shooter homage to Rez and Star Fox 64 built with Three.js and Web Audio." />
+  <meta name="theme-color" content="#03050c" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2303050c'/%3E%3Cpolygon points='32,8 50,18 56,36 44,54 20,54 8,36 14,18' fill='none' stroke='%2300f0ff' stroke-width='3'/%3E%3Cpolygon points='32,18 46,32 32,46 18,32' fill='none' stroke='%23ffd166' stroke-width='2.6'/%3E%3Ccircle cx='32' cy='32' r='4' fill='%23ff2a85'/%3E%3C/svg%3E" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --void: #03050c;
+      --void-panel: rgba(5, 9, 22, 0.74);
+      --void-panel-strong: rgba(4, 8, 20, 0.90);
+      --cyan: #00f0ff;
+      --gold: #ffd166;
+      --magenta: #ff2a85;
+      --emerald: #1affb2;
+      --crimson: #ff2a6d;
+      --ivory: #e8f9ff;
+      --muted: rgba(214, 240, 255, 0.62);
+      --faint: rgba(0, 240, 255, 0.18);
+
+      --area-primary: #00f0ff;
+      --area-secondary: #ffd166;
+      --beat-pulse: 0;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background-color: var(--void);
+      color: var(--ivory);
+      font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    /* 3D WebGL HDR Stage */
+    #canvas-container {
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      cursor: crosshair;
+    }
+
+    #canvas-container canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Dynamic 2D SVG Paint-Lock Cursor & Projected 3D Target Brackets */
+    #hud-reticle-layer {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+      overflow: visible;
+    }
+
+    /* Subtle CRT Phosphor Scanline & Radial Cockpit Vignette */
+    .crt-vignette {
+      position: fixed;
+      inset: 0;
+      z-index: 3;
+      pointer-events: none;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(0, 240, 255, 0.022) 0px,
+          rgba(0, 240, 255, 0.022) 1px,
+          rgba(3, 5, 12, 0.0) 2px,
+          rgba(3, 5, 12, 0.0) 4px
+        ),
+        radial-gradient(ellipse at 50% 48%, transparent 46%, rgba(2, 4, 11, 0.78) 100%);
+    }
+
+    /* Reactive Screen Flash (Damage / Overdrive / Boss Phase / Area Surge) */
+    #screen-flash {
+      position: fixed;
+      inset: 0;
+      z-index: 4;
+      pointer-events: none;
+      opacity: 0;
+      background: radial-gradient(circle at 50% 50%, rgba(0, 240, 255, 0.36), transparent 72%);
+      transition: opacity 0.08s linear;
+    }
+
+    /* Vector Cockpit Frame Accents */
+    .cockpit-guides {
+      position: fixed;
+      inset: 14px;
+      z-index: 5;
+      pointer-events: none;
+      border: 1px solid rgba(0, 240, 255, 0.07);
+      clip-path: polygon(
+        0 18px, 18px 0, calc(100% - 18px) 0, 100% 18px,
+        100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px)
+      );
+    }
+
+    /* Main Vector Cockpit HUD Root */
+    #hud-root {
+      position: fixed;
+      inset: 0;
+      z-index: 6;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 16px 22px 16px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* TOP VECTOR TELEMETRY BAR                                           */
+    /* ------------------------------------------------------------------ */
+    .top-telemetry {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .top-left-cluster,
+    .top-right-cluster {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .vector-chip {
+      pointer-events: auto;
+      background: var(--void-panel);
+      border: 1px solid rgba(0, 240, 255, 0.24);
+      box-shadow: 0 0 22px rgba(0, 240, 255, 0.08), inset 0 0 12px rgba(0, 240, 255, 0.05);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      padding: 7px 13px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      position: relative;
+    }
+
+    .archive-pill {
+      pointer-events: auto;
+      text-decoration: none;
+      color: var(--ivory);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.74rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 7px 14px;
+      border-radius: 999px;
+      background: rgba(3, 8, 20, 0.82);
+      border: 1px solid rgba(0, 240, 255, 0.34);
+      box-shadow: 0 0 16px rgba(0, 240, 255, 0.12);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, color 0.18s ease;
+    }
+
+    .archive-pill:hover {
+      background: rgba(0, 240, 255, 0.16);
+      border-color: var(--cyan);
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .tape-badge {
+      pointer-events: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      letter-spacing: 0.1em;
+      color: var(--ivory);
+    }
+
+    .beat-led {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan);
+      transition: transform 0.06s linear, opacity 0.06s linear;
+    }
+
+    .tape-sep {
+      color: var(--magenta);
+      font-weight: 700;
+    }
+
+    #hud-spectrum {
+      display: block;
+      width: 68px;
+      height: 18px;
+      opacity: 0.92;
+    }
+
+    /* Area Indicator */
+    .area-indicator {
+      pointer-events: none;
+      border-color: rgba(0, 240, 255, 0.34);
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 6px 13px;
+      min-width: 248px;
+    }
+
+    .area-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      gap: 10px;
+    }
+
+    .area-code {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--area-primary);
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.45);
+    }
+
+    .area-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.09em;
+      color: var(--ivory);
+    }
+
+    .area-pips-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      width: 100%;
+    }
+
+    .area-pip {
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(232, 249, 255, 0.15);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .area-pip.completed {
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan);
+    }
+
+    .area-pip.active {
+      background: rgba(255, 209, 102, 0.28);
+    }
+
+    .area-pip.active::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      width: var(--area-progress, 0%);
+      background: linear-gradient(90deg, var(--area-primary), var(--gold));
+      box-shadow: 0 0 8px var(--area-primary);
+    }
+
+    /* Telemetry Readouts (Score, Chain, Sync %) */
+    .metric-box {
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 1px;
+      padding: 5px 12px;
+    }
+
+    .metric-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .metric-val-row {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+    }
+
+    .metric-value {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.96rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--ivory);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric-value.gold {
+      color: var(--gold);
+      text-shadow: 0 0 12px rgba(255, 209, 102, 0.42);
+    }
+
+    .metric-value.cyan {
+      color: var(--cyan);
+      text-shadow: 0 0 12px rgba(0, 240, 255, 0.42);
+    }
+
+    .mult-pill {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.66rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 3px;
+      background: rgba(255, 209, 102, 0.16);
+      border: 1px solid rgba(255, 209, 102, 0.48);
+      color: var(--gold);
+      letter-spacing: 0.05em;
+    }
+
+    .mult-pill[data-octet="true"] {
+      background: rgba(255, 42, 133, 0.24);
+      border-color: var(--magenta);
+      color: #ffffff;
+      box-shadow: 0 0 12px rgba(255, 42, 133, 0.55);
+    }
+
+    .rank-mini {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 1px 6px;
+      border-radius: 3px;
+      color: var(--void);
+      background: var(--cyan);
+    }
+
+    /* Audio Toggle Button */
+    .audio-btn {
+      pointer-events: auto;
+      appearance: none;
+      cursor: pointer;
+      background: var(--void-panel);
+      border: 1px solid rgba(0, 240, 255, 0.34);
+      color: var(--ivory);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      padding: 8px 13px;
+      border-radius: 4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.18s ease, border-color 0.18s ease;
+    }
+
+    .audio-btn:hover {
+      background: rgba(0, 240, 255, 0.14);
+      border-color: var(--cyan);
+    }
+
+    .audio-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+    }
+
+    .audio-dot[data-muted="true"] {
+      background: var(--magenta);
+      box-shadow: 0 0 8px var(--magenta);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* UPPER-CENTER BOSS SERAPH-IX TELEMETRY & SYNESTHETIC BANNER         */
+    /* ------------------------------------------------------------------ */
+    .upper-center-stack {
+      position: fixed;
+      top: 74px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 7;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: min(560px, calc(100vw - 36px));
+    }
+
+    #boss-hud {
+      width: 100%;
+      background: rgba(14, 4, 18, 0.84);
+      border: 1px solid rgba(255, 42, 109, 0.56);
+      box-shadow: 0 0 28px rgba(255, 42, 109, 0.24), inset 0 0 16px rgba(255, 42, 109, 0.10);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 5px;
+      padding: 9px 14px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      transition: opacity 0.28s ease, transform 0.28s ease;
+    }
+
+    #boss-hud[data-active="false"] {
+      opacity: 0;
+      transform: translateY(-10px);
+      visibility: hidden;
+      height: 0;
+      padding: 0;
+      border-width: 0;
+      overflow: hidden;
+    }
+
+    .boss-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .boss-title-group {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .boss-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.14em;
+      color: var(--crimson);
+      font-weight: 700;
+    }
+
+    .boss-name {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.92rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      color: #ffffff;
+      text-shadow: 0 0 12px rgba(255, 42, 109, 0.65);
+    }
+
+    .boss-phase-cluster {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .boss-phase-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+      font-weight: 600;
+    }
+
+    .boss-phase-pips {
+      display: inline-flex;
+      gap: 4px;
+    }
+
+    .boss-phase-pip {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.58rem;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 2px;
+      border: 1px solid rgba(232, 249, 255, 0.22);
+      color: var(--muted);
+    }
+
+    .boss-phase-pip.active {
+      background: rgba(255, 42, 109, 0.32);
+      border-color: var(--crimson);
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(255, 42, 109, 0.48);
+    }
+
+    .boss-phase-pip.cleared {
+      background: rgba(0, 240, 255, 0.18);
+      border-color: var(--cyan);
+      color: var(--cyan);
+    }
+
+    .boss-bars-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .boss-hp-track {
+      width: 100%;
+      height: 7px;
+      background: rgba(255, 255, 255, 0.09);
+      border-radius: 2px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #boss-hp-fill {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--crimson), var(--magenta), var(--gold));
+      box-shadow: 0 0 12px rgba(255, 42, 109, 0.7);
+      transition: width 0.08s linear;
+    }
+
+    .boss-sub-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .boss-phase-track {
+      flex: 1;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    #boss-phase-hp-fill {
+      width: 100%;
+      height: 100%;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      transition: width 0.08s linear;
+    }
+
+    #boss-hp-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.6rem;
+      letter-spacing: 0.08em;
+      color: var(--ivory);
+      min-width: 84px;
+      text-align: right;
+    }
+
+    /* Transient Synesthetic Banner */
+    #hud-banner {
+      padding: 6px 18px;
+      border-radius: 4px;
+      background: rgba(4, 10, 24, 0.84);
+      border: 1px solid rgba(0, 240, 255, 0.48);
+      box-shadow: 0 0 22px rgba(0, 240, 255, 0.22);
+      text-align: center;
+      opacity: 0;
+      transform: translateY(-6px) scale(0.98);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    #hud-banner[data-visible="true"] {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    #hud-banner[data-tone="gold"] {
+      border-color: rgba(255, 209, 102, 0.68);
+      box-shadow: 0 0 24px rgba(255, 209, 102, 0.28);
+    }
+
+    #hud-banner[data-tone="magenta"] {
+      border-color: rgba(255, 42, 133, 0.68);
+      box-shadow: 0 0 24px rgba(255, 42, 133, 0.28);
+    }
+
+    #hud-banner-kicker {
+      display: block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gold);
+    }
+
+    #hud-banner-title {
+      display: block;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: #ffffff;
+      margin-top: 1px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* BOTTOM FLIGHT & SYNESTHESIA DECK                                   */
+    /* ------------------------------------------------------------------ */
+    .bottom-deck {
+      display: grid;
+      grid-template-columns: minmax(250px, 1fr) auto minmax(270px, 1fr);
+      align-items: end;
+      gap: 14px;
+    }
+
+    .deck-panel {
+      background: var(--void-panel);
+      border: 1px solid rgba(0, 240, 255, 0.24);
+      box-shadow: 0 0 24px rgba(0, 240, 255, 0.08), inset 0 0 14px rgba(0, 240, 255, 0.04);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-radius: 5px;
+      padding: 10px 14px;
+    }
+
+    /* Left: Evolution Form + 3 Shield Pips + Evolution Progress */
+    .form-panel {
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      justify-self: start;
+      width: 100%;
+      max-width: 330px;
+    }
+
+    .form-header-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .panel-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #form-readout {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.38);
+    }
+
+    #form-readout[data-stage="2"] {
+      color: var(--gold);
+      text-shadow: 0 0 10px rgba(255, 209, 102, 0.42);
+    }
+
+    #form-readout[data-stage="3"] {
+      color: #ffffff;
+      text-shadow: 0 0 14px rgba(255, 42, 133, 0.68);
+    }
+
+    .shields-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .shield-pips {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .shield-pip {
+      flex: 1;
+      height: 8px;
+      border-radius: 2px;
+      border: 1px solid rgba(0, 240, 255, 0.32);
+      background: rgba(0, 240, 255, 0.07);
+      transform: skewX(-18deg);
+      transition: background 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+
+    .shield-pip.active {
+      background: linear-gradient(90deg, var(--cyan), #7af8ff);
+      border-color: #ffffff;
+      box-shadow: 0 0 10px rgba(0, 240, 255, 0.65);
+    }
+
+    #shield-count-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      color: var(--ivory);
+    }
+
+    .evo-progress-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .evo-bar-track {
+      flex: 1;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(232, 249, 255, 0.12);
+      overflow: hidden;
+    }
+
+    #evolution-bar-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--gold), var(--magenta));
+      box-shadow: 0 0 8px var(--cyan);
+      transition: width 0.15s ease;
+    }
+
+    #evolution-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.58rem;
+      letter-spacing: 0.08em;
+      color: var(--gold);
+      min-width: 68px;
+      text-align: right;
+    }
+
+    /* Center: 8-Octagon Paint-Lock Slot Strip + Controls Legend */
+    .center-controls-panel {
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 16px;
+    }
+
+    .octet-strip-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .lock-slot-cell {
+      width: 22px;
+      height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.62rem;
+      font-weight: 700;
+      color: rgba(232, 249, 255, 0.36);
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.22);
+      clip-path: polygon(28% 0%, 72% 0%, 100% 28%, 100% 72%, 72% 100%, 28% 100%, 0% 72%, 0% 28%);
+      transition: transform 0.1s ease, background 0.1s ease, color 0.1s ease;
+    }
+
+    .lock-slot-cell.locked {
+      color: var(--void);
+      background: var(--cyan);
+      border-color: #ffffff;
+      transform: scale(1.1);
+    }
+
+    .lock-slot-cell.locked.gold-tier {
+      background: var(--gold);
+    }
+
+    .lock-slot-cell.locked.octet-max {
+      color: #ffffff;
+      background: var(--magenta);
+    }
+
+    #lock-octet-readout {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--cyan);
+      margin-left: 6px;
+      min-width: 96px;
+    }
+
+    .controls-legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.61rem;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+    }
+
+    .controls-legend kbd {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.59rem;
+      font-weight: 600;
+      color: var(--ivory);
+      background: rgba(0, 240, 255, 0.11);
+      border: 1px solid rgba(0, 240, 255, 0.28);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+
+    .legend-dot {
+      color: rgba(0, 240, 255, 0.42);
+    }
+
+    /* Right: Overdrive Resonance Gauge + Clickable [BARREL ROLL] & [OVERDRIVE] */
+    .overdrive-panel {
+      pointer-events: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+      justify-self: end;
+      width: 100%;
+      max-width: 344px;
+    }
+
+    .overdrive-header-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    #overdrive-status {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+    }
+
+    #overdrive-status[data-ready="true"] {
+      color: var(--cyan);
+      text-shadow: 0 0 10px rgba(0, 240, 255, 0.55);
+    }
+
+    .overdrive-track {
+      width: 100%;
+      height: 7px;
+      border-radius: 2px;
+      background: rgba(232, 249, 255, 0.12);
+      overflow: hidden;
+    }
+
+    #overdrive-fill {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--gold), var(--magenta));
+      box-shadow: 0 0 12px rgba(0, 240, 255, 0.55);
+      transition: width 0.1s linear;
+    }
+
+    .tactical-btn-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .tactical-btn {
+      appearance: none;
+      cursor: pointer;
+      background: rgba(0, 240, 255, 0.09);
+      border: 1px solid rgba(0, 240, 255, 0.36);
+      border-radius: 4px;
+      padding: 7px 10px;
+      color: var(--ivory);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease, opacity 0.15s ease;
+    }
+
+    .tactical-btn:hover:not(:disabled) {
+      background: rgba(0, 240, 255, 0.22);
+      border-color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .tactical-btn:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .tactical-btn:disabled {
+      opacity: 0.46;
+      cursor: default;
+    }
+
+    .tactical-btn.overdrive-cta[data-ready="true"] {
+      background: linear-gradient(135deg, rgba(255, 209, 102, 0.22), rgba(255, 42, 133, 0.24));
+      border-color: var(--gold);
+      color: #ffffff;
+      box-shadow: 0 0 16px rgba(255, 209, 102, 0.28);
+    }
+
+    .btn-sub {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      font-weight: 600;
+      color: var(--gold);
+      letter-spacing: 0.04em;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* TITLE OVERLAY & SYNCHRONIZATION REPORT MODAL                       */
+    /* ------------------------------------------------------------------ */
+    .overlay-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 12;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: radial-gradient(circle at 50% 45%, rgba(3, 8, 22, 0.52), rgba(2, 4, 10, 0.86));
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      transition: opacity 0.32s ease, visibility 0.32s ease;
+    }
+
+    .overlay-backdrop[data-hidden="true"] {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .vector-modal-card {
+      width: min(620px, 100%);
+      background: var(--void-panel-strong);
+      border: 1px solid rgba(0, 240, 255, 0.44);
+      box-shadow:
+        0 0 48px rgba(0, 240, 255, 0.16),
+        inset 0 0 28px rgba(0, 240, 255, 0.06);
+      border-radius: 8px;
+      padding: 28px 30px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .modal-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--cyan);
+    }
+
+    .modal-hero-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: clamp(1.85rem, 4vw, 2.65rem);
+      font-weight: 900;
+      letter-spacing: 0.12em;
+      line-height: 1.05;
+      color: #ffffff;
+      text-shadow: 0 0 24px rgba(0, 240, 255, 0.45);
+    }
+
+    .modal-lead {
+      font-size: 0.94rem;
+      line-height: 1.52;
+      color: rgba(232, 249, 255, 0.82);
+    }
+
+    .briefing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .briefing-cell {
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.18);
+      border-radius: 5px;
+      padding: 10px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .briefing-num {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.64rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+    }
+
+    .briefing-head {
+      font-family: 'Space Grotesk', sans-serif;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #ffffff;
+    }
+
+    .briefing-desc {
+      font-size: 0.72rem;
+      line-height: 1.38;
+      color: var(--muted);
+    }
+
+    .modal-actions-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      padding-top: 4px;
+    }
+
+    .primary-syn-btn {
+      appearance: none;
+      cursor: pointer;
+      padding: 13px 26px;
+      border-radius: 5px;
+      border: 1px solid #ffffff;
+      background: linear-gradient(135deg, rgba(0, 240, 255, 0.92), rgba(0, 180, 255, 0.88));
+      color: #020612;
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.84rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      box-shadow: 0 0 28px rgba(0, 240, 255, 0.45);
+      transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+    }
+
+    .primary-syn-btn:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 0 36px rgba(0, 240, 255, 0.72);
+      filter: brightness(1.06);
+    }
+
+    /* Synchronization Report Modal Specifics */
+    #report-modal {
+      z-index: 14;
+    }
+
+    #report-modal[data-outcome="defeat"] .vector-modal-card {
+      border-color: rgba(255, 42, 109, 0.58);
+      box-shadow: 0 0 48px rgba(255, 42, 109, 0.22), inset 0 0 28px rgba(255, 42, 109, 0.08);
+    }
+
+    .report-top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .rank-emblem-wrap {
+      width: 78px;
+      height: 78px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle, rgba(255, 209, 102, 0.24), rgba(0, 240, 255, 0.08));
+      border: 2px solid var(--gold);
+      border-radius: 10px;
+      box-shadow: 0 0 26px rgba(255, 209, 102, 0.34);
+    }
+
+    .rank-caption {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.54rem;
+      letter-spacing: 0.14em;
+      color: var(--muted);
+    }
+
+    #report-rank {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 2.1rem;
+      font-weight: 900;
+      line-height: 1;
+      color: var(--gold);
+      text-shadow: 0 0 18px rgba(255, 209, 102, 0.65);
+    }
+
+    .report-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+    }
+
+    .report-stat-box {
+      background: rgba(0, 240, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 5px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .report-stat-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.56rem;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .report-stat-val {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 1.08rem;
+      font-weight: 800;
+      color: #ffffff;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #report-summary {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      color: var(--gold);
+      padding: 8px 12px;
+      background: rgba(255, 209, 102, 0.07);
+      border-left: 2px solid var(--gold);
+      border-radius: 3px;
+    }
+
+    /* Responsive Cockpit Reflow */
+    @media (max-width: 1080px) {
+      .bottom-deck {
+        grid-template-columns: 1fr 1fr;
+      }
+      .center-controls-panel {
+        grid-column: 1 / -1;
+        order: -1;
+      }
+      .form-panel,
+      .overdrive-panel {
+        max-width: none;
+      }
+    }
+
+    @media (max-width: 720px) {
+      #hud-root {
+        padding: 10px 12px 12px;
+      }
+      .tape-badge {
+        display: none;
+      }
+      .area-indicator {
+        min-width: 190px;
+      }
+      .bottom-deck {
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .controls-legend {
+        display: none;
+      }
+      .briefing-grid {
+        grid-template-columns: 1fr;
+      }
+      .report-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .vector-modal-card {
+        padding: 20px 18px;
+      }
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 3D WebGL HDR Flight Viewport -->
+  <div id="canvas-container" aria-label="Harmonic Lock 3D Synesthetic Flight Corridor"></div>
+
+  <!-- Dynamic 2D SVG Paint-Lock Cursor & Projected 3D Target Brackets -->
+  <svg id="hud-reticle-layer" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+    <g id="hud-lock-filaments"></g>
+    <g id="hud-target-brackets"></g>
+    <g id="hud-reticle-cursor" transform="translate(720, 450)">
+      <circle id="reticle-beat-ring" cx="0" cy="0" r="34" fill="none" stroke="#00f0ff" stroke-width="1" stroke-opacity="0.35" />
+      <polygon
+        id="reticle-outer-octagon"
+        points="0,-30 21.2,-21.2 30,0 21.2,21.2 0,30 -21.2,21.2 -30,0 -21.2,-21.2"
+        fill="rgba(0, 240, 255, 0.04)"
+        stroke="#00f0ff"
+        stroke-width="1.75"
+      />
+      <polygon
+        id="reticle-inner-octagon"
+        points="0,-16 11.3,-11.3 16,0 11.3,11.3 0,16 -11.3,11.3 -16,0 -11.3,-11.3"
+        fill="none"
+        stroke="#ffd166"
+        stroke-width="1.15"
+        stroke-opacity="0.78"
+      />
+      <line x1="-38" y1="0" x2="-25" y2="0" stroke="#00f0ff" stroke-width="1.3" stroke-opacity="0.75" />
+      <line x1="25" y1="0" x2="38" y2="0" stroke="#00f0ff" stroke-width="1.3" stroke-opacity="0.75" />
+      <line x1="0" y1="-38" x2="0" y2="-25" stroke="#00f0ff" stroke-width="1.3" stroke-opacity="0.75" />
+      <line x1="0" y1="25" x2="0" y2="38" stroke="#00f0ff" stroke-width="1.3" stroke-opacity="0.75" />
+      <circle cx="0" cy="0" r="2.2" fill="#e8f9ff" />
+      <g id="reticle-octet-nodes"></g>
+      <text
+        id="reticle-readout-text"
+        x="0"
+        y="48"
+        text-anchor="middle"
+        fill="#00f0ff"
+        font-family="JetBrains Mono, monospace"
+        font-size="9.5"
+        font-weight="700"
+        letter-spacing="1.4"
+      >READY</text>
+    </g>
+  </svg>
+
+  <!-- Subtle CRT Phosphor Scanline & Vignette -->
+  <div class="crt-vignette" aria-hidden="true"></div>
+  <div id="screen-flash" aria-hidden="true"></div>
+  <div class="cockpit-guides" aria-hidden="true"></div>
+
+  <!-- Upper-Center SERAPH-IX Boss Telemetry & Synesthetic Callout Banner -->
+  <div class="upper-center-stack">
+    <section id="boss-hud" data-active="false" aria-label="Boss SERAPH-IX Telemetry">
+      <div class="boss-header-row">
+        <div class="boss-title-group">
+          <span class="boss-kicker">SINGULARITY BOSS //</span>
+          <span class="boss-name" id="boss-name">SERAPH-IX</span>
+        </div>
+        <div class="boss-phase-cluster">
+          <span class="boss-phase-label" id="boss-phase-label">PHASE I · ICOSAHEDRAL CAGE</span>
+          <div class="boss-phase-pips">
+            <span class="boss-phase-pip active" id="boss-phase-1">I</span>
+            <span class="boss-phase-pip" id="boss-phase-2">II</span>
+            <span class="boss-phase-pip" id="boss-phase-3">III</span>
+          </div>
+        </div>
+      </div>
+      <div class="boss-bars-wrap">
+        <div class="boss-hp-track">
+          <div id="boss-hp-fill"></div>
+        </div>
+        <div class="boss-sub-row">
+          <div class="boss-phase-track">
+            <div id="boss-phase-hp-fill"></div>
+          </div>
+          <span id="boss-hp-text">CORE 100%</span>
+        </div>
+      </div>
+    </section>
+
+    <div id="hud-banner" data-visible="false" data-tone="cyan" role="status" aria-live="polite">
+      <span id="hud-banner-kicker">SYNESTHETIC LINK</span>
+      <span id="hud-banner-title">AREA 01 // PHOSPHOR LATTICE</span>
+    </div>
+  </div>
+
+  <!-- Main Phosphor-Vector Cockpit HUD -->
+  <div id="hud-root">
+    <!-- Top Vector Telemetry Bar -->
+    <header class="top-telemetry">
+      <div class="top-left-cluster">
+        <a id="link-archive" class="archive-pill" href="./vault.html" title="Return to the Cassette Archive">
+          <span>← Archive</span>
+        </a>
+
+        <div class="vector-chip tape-badge">
+          <span class="beat-led" id="beat-led"></span>
+          <span>TAPE 09</span>
+          <span class="tape-sep">//</span>
+          <span>HARMONIC LOCK · 124 BPM</span>
+          <canvas id="hud-spectrum" width="68" height="18" aria-hidden="true"></canvas>
+        </div>
+
+        <div class="vector-chip area-indicator" id="area-indicator">
+          <div class="area-top-row">
+            <span class="area-code" id="area-code">AREA 01</span>
+            <span class="area-name" id="area-name">PHOSPHOR LATTICE</span>
+          </div>
+          <div class="area-pips-row">
+            <div class="area-pip active" id="area-pip-0"></div>
+            <div class="area-pip" id="area-pip-1"></div>
+            <div class="area-pip" id="area-pip-2"></div>
+            <div class="area-pip" id="area-pip-3"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="top-right-cluster">
+        <div class="vector-chip metric-box">
+          <span class="metric-label">SCORE</span>
+          <div class="metric-val-row">
+            <span class="metric-value" id="score-value">000,000</span>
+          </div>
+        </div>
+
+        <div class="vector-chip metric-box">
+          <span class="metric-label">CHAIN &amp; OCTET</span>
+          <div class="metric-val-row">
+            <span class="metric-value gold" id="chain-value">0</span>
+            <span class="mult-pill" id="multiplier-badge" data-octet="false">1.0x</span>
+          </div>
+        </div>
+
+        <div class="vector-chip metric-box">
+          <span class="metric-label">HARMONIC SYNC</span>
+          <div class="metric-val-row">
+            <span class="metric-value cyan" id="sync-value">100.0%</span>
+            <span class="rank-mini" id="rank-badge">S</span>
+          </div>
+        </div>
+
+        <button id="btn-audio-toggle" class="audio-btn" type="button" aria-pressed="true" title="Toggle 124 BPM Synesthetic Web Audio (Key M)">
+          <span class="audio-dot" id="audio-status-dot" data-muted="false"></span>
+          <span id="audio-toggle-label">AUDIO ON</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Bottom Flight & Synesthesia Deck -->
+    <footer class="bottom-deck">
+      <!-- Left: Evolution Form + 3 Shield Pips + Evolution Cube Progress -->
+      <section class="deck-panel form-panel" aria-label="Craft Evolution and Shields">
+        <div class="form-header-row">
+          <span class="panel-kicker">EVOLUTION FORM</span>
+          <span id="form-readout" data-stage="1">FORM I · VECTOR DART</span>
+        </div>
+        <div class="shields-row">
+          <div class="shield-pips" id="shield-pips">
+            <span class="shield-pip active" id="shield-pip-1"></span>
+            <span class="shield-pip active" id="shield-pip-2"></span>
+            <span class="shield-pip active" id="shield-pip-3"></span>
+          </div>
+          <span id="shield-count-label">3/3 SHIELDS</span>
+        </div>
+        <div class="evo-progress-row">
+          <div class="evo-bar-track">
+            <div id="evolution-bar-fill"></div>
+          </div>
+          <span id="evolution-label">CUBE 0%</span>
+        </div>
+      </section>
+
+      <!-- Center: 8-Slot Paint-Lock Indicator & Controls Legend -->
+      <section class="deck-panel center-controls-panel" aria-label="Paint-Lock Octet and Flight Controls">
+        <div class="octet-strip-row" id="hud-lock-slots">
+          <span class="lock-slot-cell" id="lock-slot-0">1</span>
+          <span class="lock-slot-cell" id="lock-slot-1">2</span>
+          <span class="lock-slot-cell" id="lock-slot-2">3</span>
+          <span class="lock-slot-cell" id="lock-slot-3">4</span>
+          <span class="lock-slot-cell" id="lock-slot-4">5</span>
+          <span class="lock-slot-cell" id="lock-slot-5">6</span>
+          <span class="lock-slot-cell" id="lock-slot-6">7</span>
+          <span class="lock-slot-cell" id="lock-slot-7">8</span>
+          <span id="lock-octet-readout">STANDBY · 1.0x</span>
+        </div>
+        <div class="controls-legend">
+          <span><kbd>MOUSE / TOUCH</kbd> Paint-Lock &amp; Release</span>
+          <span class="legend-dot">·</span>
+          <span><kbd>WASD / ARROWS</kbd> Dodge</span>
+          <span class="legend-dot">·</span>
+          <span><kbd>SPACE</kbd> Barrel Roll Deflect</span>
+          <span class="legend-dot">·</span>
+          <span><kbd>Q / E</kbd> Overdrive Resonance</span>
+        </div>
+      </section>
+
+      <!-- Right: Overdrive Resonance Gauge + Clickable Action Buttons -->
+      <section class="deck-panel overdrive-panel" aria-label="Overdrive Resonance and Tactical Actions">
+        <div class="overdrive-header-row">
+          <span class="panel-kicker">OVERDRIVE RESONANCE</span>
+          <span id="overdrive-status" data-ready="true">100% READY</span>
+        </div>
+        <div class="overdrive-track">
+          <div id="overdrive-fill"></div>
+        </div>
+        <div class="tactical-btn-row">
+          <button id="btn-barrel-roll" class="tactical-btn" type="button" title="Spin-deflect enemy plasma bolts (SPACE)">
+            <span>[BARREL ROLL]</span>
+            <span class="btn-sub" id="barrel-roll-status">READY</span>
+          </button>
+          <button id="btn-overdrive" class="tactical-btn overdrive-cta" data-ready="true" type="button" title="Unleash Synesthetic Resonance Wave (Q / E)">
+            <span>[OVERDRIVE]</span>
+            <span class="btn-sub" id="overdrive-btn-tag">READY</span>
+          </button>
+        </div>
+      </section>
+    </footer>
+  </div>
+
+  <!-- Title Overlay (INITIATE SYNESTHESIA) -->
+  <div class="overlay-backdrop" id="title-overlay" data-hidden="false" role="dialog" aria-modal="true" aria-labelledby="title-heading">
+    <div class="vector-modal-card">
+      <div>
+        <span class="modal-kicker">TAPE NO. 09 // 124 BPM SYNESTHETIC RAIL-SHOOTER</span>
+        <h1 class="modal-hero-title" id="title-heading">HARMONIC LOCK</h1>
+      </div>
+
+      <p class="modal-lead">
+        Fly a 3-stage evolving vector interceptor along a closed 1,200m architectural Fourier spline. Sweep your 8-octagon reticle across enemy formations and release on the pulse—every lock, homing ribbon, and detonation harmonizes in C minor at 124 BPM.
+      </p>
+
+      <div class="briefing-grid">
+        <div class="briefing-cell">
+          <span class="briefing-num">01 // PAINT-LOCK</span>
+          <span class="briefing-head">8-Octagon Salvo</span>
+          <span class="briefing-desc">Hold pointer or J/Enter to paint up to 8 locks (4.0x Full Harmonic Octet), then release to quantize onto the next 16th-note.</span>
+        </div>
+        <div class="briefing-cell">
+          <span class="briefing-num">02 // DEFLECTION</span>
+          <span class="briefing-head">Star Fox Barrel Roll</span>
+          <span class="briefing-desc">Tap SPACE or [BARREL ROLL] to spin-deflect incoming plasma bolts for +250 pts and +8% Overdrive charge.</span>
+        </div>
+        <div class="briefing-cell">
+          <span class="briefing-num">03 // METAMORPHOSIS</span>
+          <span class="briefing-head">Forms I–III &amp; SERAPH-IX</span>
+          <span class="briefing-desc">Absorb blue Evolution Cubes from Vector Dart to Seraph across 4 Areas into the 3-phase Singularity Boss.</span>
+        </div>
+      </div>
+
+      <div class="modal-actions-row">
+        <button id="btn-initiate" class="primary-syn-btn" type="button">INITIATE SYNESTHESIA</button>
+        <a id="link-title-archive" class="archive-pill" href="./vault.html">← Archive</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Victory / Signal Lost Synchronization Report Modal -->
+  <div class="overlay-backdrop" id="report-modal" data-hidden="true" data-outcome="victory" role="dialog" aria-modal="true" aria-labelledby="report-title">
+    <div class="vector-modal-card">
+      <div class="report-top-row">
+        <div>
+          <span class="modal-kicker" id="report-kicker">TAPE 09 // SYNCHRONIZATION COMPLETE</span>
+          <h2 class="modal-hero-title" id="report-title">SERAPH-IX HARMONIZED</h2>
+        </div>
+        <div class="rank-emblem-wrap">
+          <span class="rank-caption">RANK</span>
+          <span id="report-rank">S</span>
+        </div>
+      </div>
+
+      <p class="modal-lead" id="report-subtitle">
+        All four architectural Fourier corridors and the Singularity Core achieved full harmonic phase lock at 124 BPM.
+      </p>
+
+      <div class="report-stats-grid">
+        <div class="report-stat-box">
+          <span class="report-stat-label">FINAL SYNC %</span>
+          <span class="report-stat-val" id="report-sync">100.0%</span>
+        </div>
+        <div class="report-stat-box">
+          <span class="report-stat-label">FULL 8-LOCKS</span>
+          <span class="report-stat-val" id="report-full-locks">0</span>
+        </div>
+        <div class="report-stat-box">
+          <span class="report-stat-label">MAX CHAIN</span>
+          <span class="report-stat-val" id="report-max-chain">0</span>
+        </div>
+        <div class="report-stat-box">
+          <span class="report-stat-label">FINAL SCORE</span>
+          <span class="report-stat-val" id="report-score">0</span>
+        </div>
+      </div>
+
+      <div id="report-summary">AREA 04 // SINGULARITY CORE · FORM III · SERAPH</div>
+
+      <div class="modal-actions-row">
+        <button id="btn-resync" class="primary-syn-btn" type="button">RESYNC</button>
+        <a id="link-modal-archive" class="archive-pill" href="./vault.html">← Archive</a>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./harmonic-lock.js"></script>
+</body>
+</html>
